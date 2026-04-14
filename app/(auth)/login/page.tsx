@@ -73,7 +73,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="mb-8 flex justify-center">
           <Image
-            src="/logo-buildswift.png"
+            src="/logo.png"
             alt="BuildSwift"
             width={280}
             height={68}
