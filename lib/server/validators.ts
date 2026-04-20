@@ -72,5 +72,8 @@ export const aiGenerateSchema = z.object({
 export const missingScopeAiSchema = z.object({
   type: z.enum(['RFI', 'Submittal', 'Change Order']),
   content: z.string().trim().min(1).max(150_000),
-  initialDescription: z.string().trim().min(1).max(6000).optional(),
+  initialDescription: z.preprocess(
+    (value) => (typeof value === 'string' ? value : undefined),
+    z.string().trim().min(1).max(6000).optional()
+  ),
 })
