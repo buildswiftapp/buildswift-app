@@ -642,7 +642,13 @@ function NewChangeOrderContent() {
 
           <aside className="w-full min-w-0 space-y-6 lg:sticky lg:top-6 lg:self-start">
             <div className={formCardClassName()}>
-              <ReviewerManagementSection embedded layout="create" hideSendButton />
+              <ReviewerManagementSection
+                embedded
+                layout="create"
+                onSend={async () => {
+                  // Creation flow has no document id yet; keep UX consistent with other sections.
+                }}
+              />
             </div>
 
             <div className={formCardClassName()}>

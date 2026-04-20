@@ -17,11 +17,13 @@ import {
   Send,
   Clock3,
   CircleAlert,
+  Search,
 } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { Spinner } from '@/components/ui/spinner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -319,8 +321,17 @@ function DocumentsContent() {
           </div>
 
           <div className="rounded-2xl border border-slate-200/90 bg-slate-50 px-4 py-4 shadow-sm">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-              <div className="flex flex-1 flex-wrap items-center gap-3">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+              <div className="relative w-full flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search projects..."
+                  className="pl-9"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-3 xl:ml-auto">
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger size="sm" className="w-[190px]">
                     <SelectValue placeholder="Status" />
@@ -363,7 +374,6 @@ function DocumentsContent() {
                   Clear Filters
                 </Button>
               </div>
-
             </div>
           </div>
         </div>

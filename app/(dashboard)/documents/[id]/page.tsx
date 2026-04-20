@@ -5,9 +5,6 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft,
-  CalendarDays,
-  Eye,
-  Lightbulb,
   Save,
   Trash2,
   Upload,
@@ -29,7 +26,6 @@ import {
   parseMoneyInput,
 } from '@/lib/document-html'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Spinner } from '@/components/ui/spinner'
@@ -46,8 +42,17 @@ import { docTypeToMissingScopeType, setMissingScopeSeedIfMissing } from '@/lib/m
 import { ReviewerManagementSection } from '@/app/components/reviewer-management-section'
 import type { Attachment as DocAttachment } from '@/lib/types'
 
-const PREVIEW_BLUE = '#2563eb'
+const PAGE_BG = '#f1f5f9'
 const NAVY = '#0f172a'
+const capLabel = 'mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-[#64748b]'
+const capLabelRow = 'text-[11px] font-semibold uppercase tracking-[0.14em] text-[#64748b]'
+
+function formCardClassName(extra?: string) {
+  return cn(
+    'rounded-xl border border-[#e2e8f0] bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.06)] sm:p-6 lg:p-7 xl:p-8',
+    extra
+  )
+}
 
 type ApiProject = { id: string; name: string; address?: string | null }
 
@@ -217,20 +222,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     CO_SCHEDULE_OPTIONS.find((s) => s.value === co.scheduleImpact)?.label ?? '—'
   const costNumeric = parseMoneyInput(co.costImpact)
 
-  const sectionTitle = (n: number, title: string, required?: boolean) => (
-    <div className="mb-4 flex items-center gap-3">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground shadow-sm">
-        {n}
-      </div>
-      <h2 className="text-lg font-semibold leading-tight" style={{ color: NAVY }}>
-        {title}
-        {required ? <span className="text-destructive"> *</span> : null}
-      </h2>
-    </div>
-  )
-
-  const labelClass = 'mb-1.5 block text-sm font-medium'
-  const hintClass = 'mt-1.5 text-xs text-muted-foreground'
+  const hintClass = 'mt-1.5 text-xs text-[#64748b]'
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -289,16 +281,12 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       toast.error('Title and description are required')
       return
     }
-    if (!rfi.question.trim()) {
-      toast.error('Question is required')
-      return
-    }
     const html = buildRfiHtml({
       number: rfi.number,
       title: rfi.title,
       date: rfi.date,
       projectName: selectedProject?.name ?? '',
-      question: rfi.question,
+      question: rfi.question.trim() || rfi.description,
       description: rfi.description,
       notes: rfi.notes,
     })
@@ -444,22 +432,22 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
   }
 
   return (
-    <div className="min-h-full bg-[#f8f9fb] px-4 py-8 sm:px-6 lg:px-10">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight" style={{ color: NAVY }}>
-              {pageTitle}
-            </h1>
-            <p className="mt-2 max-w-2xl text-base leading-relaxed text-muted-foreground">
-              Update fields below. Saved content regenerates the professional document HTML for this record.
+    <div
+      className="min-h-full w-full px-3 py-6 sm:px-4 sm:py-7 lg:px-6 lg:py-8 xl:px-8 2xl:px-10"
+      style={{ backgroundColor: PAGE_BG }}
+    >
+      <div className="mx-auto w-full max-w-[min(100%,1920px)]">
+        <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between lg:mb-10">
+          <div className="min-w-0 max-w-3xl">
+            <h1 className="text-3xl font-bold tracking-tight text-[#0f172a]">{pageTitle}</h1>
+            <p className="mt-2 text-base leading-relaxed text-[#64748b]">
+              Update your document using the same structured workflow as document creation.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
-              className="shrink-0 gap-2 rounded-lg border-slate-200 bg-white px-4 shadow-sm"
-              style={{ color: NAVY }}
+              className="shrink-0 gap-2 rounded-lg border-[#e2e8f0] bg-white px-4 text-[#0f172a] shadow-sm hover:bg-[#f8fafc]"
               asChild
             >
               <Link href={`/documents?type=${doc.doc_type}`}>
@@ -467,602 +455,364 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                 Back
               </Link>
             </Button>
-            <Button variant="outline" onClick={handleDelete} className="gap-2">
-              <Trash2 className="h-4 w-4" />
-              Delete
-            </Button>
-            <Button onClick={handleSave} disabled={isSaving} className="gap-2">
-              <Save className="h-4 w-4" />
-              {isSaving ? 'Saving...' : 'Save'}
-            </Button>
           </div>
         </div>
 
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-          <div className="min-w-0 flex-1 lg:max-w-[calc(100%-22rem)]">
-            <Card className="border border-slate-200/80 bg-white shadow-sm">
-              <CardContent className="space-y-10 p-6 sm:p-8">
-                {docType === 'rfi' && (
-                  <>
-                    <section>
-                      {sectionTitle(1, 'Project & RFI Info')}
-                      <div className="grid gap-5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-                        <div className="min-w-0">
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Project
-                          </label>
-                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
-                            {selectedProject?.name ?? '—'}
-                          </div>
-                          {selectedProject?.address ? (
-                            <p className="mt-1.5 text-xs text-muted-foreground">{selectedProject.address}</p>
-                          ) : null}
-                        </div>
-                        <div>
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            RFI Number <span className="text-destructive">*</span>
-                          </label>
-                          <Input
-                            value={rfi.number}
-                            onChange={(e) => setRfi((p) => ({ ...p, number: e.target.value }))}
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Title <span className="text-destructive">*</span>
-                          </label>
-                          <Input
-                            value={rfi.title}
-                            onChange={(e) => setRfi((p) => ({ ...p, title: e.target.value }))}
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Date <span className="text-destructive">*</span>
-                          </label>
-                          <div className="relative max-w-xs">
-                            <Input
-                              type="date"
-                              value={rfi.date}
-                              onChange={(e) => setRfi((p) => ({ ...p, date: e.target.value }))}
-                              className="pr-10"
-                            />
-                            <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                          </div>
-                        </div>
-                      </div>
-                    </section>
-                    <section>
-                      {sectionTitle(2, 'Question & Description', true)}
-                      <label className={labelClass} style={{ color: NAVY }}>
-                        Question <span className="text-destructive">*</span>
-                      </label>
-                      <Textarea
-                        value={rfi.question}
-                        onChange={(e) => setRfi((p) => ({ ...p, question: e.target.value }))}
-                        rows={3}
-                        className="mb-4 resize-none"
-                      />
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <label className={labelClass} style={{ color: NAVY }}>
-                          Description <span className="text-destructive">*</span>
-                        </label>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void handleGenerateDescription()}
-                          disabled={isGeneratingDescription}
-                        >
-                          <span className="mr-1.5" aria-hidden>
-                            ✨
-                          </span>
-                          Generate with AI
-                        </Button>
-                      </div>
-                      <MissingScopeEditorSection
-                        documentApiType={docTypeToMissingScopeType('rfi')}
-                        value={rfi.description}
-                        onChange={(v) => setRfi((p) => ({ ...p, description: v }))}
-                        isGeneratingDescription={isGeneratingDescription}
-                        rows={5}
-                      />
-                      <p className={hintClass}>{rfi.description.length} characters</p>
-                    </section>
-                    <section>
-                      {sectionTitle(3, 'Attachments (Optional)')}
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => fileInputRef.current?.click()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            fileInputRef.current?.click()
-                          }
-                        }}
-                        onDragOver={(e) => {
-                          e.preventDefault()
-                          e.dataTransfer.dropEffect = 'copy'
-                        }}
-                        onDrop={onDrop}
-                        className={cn(
-                          'mb-4 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 transition-colors',
-                          'border-primary/35 bg-primary/5 hover:border-primary/55 hover:bg-primary/10'
-                        )}
-                      >
-                        <Upload className="mb-2 h-8 w-8 text-primary" />
-                        <p className="text-center text-sm font-medium" style={{ color: NAVY }}>
-                          Drag & drop files here, or{' '}
-                          <span className="text-primary underline underline-offset-2">click to browse</span>
-                        </p>
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          multiple
-                          className="hidden"
-                          onChange={handleFileUpload}
-                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                        />
-                      </div>
-                      {attachments.length > 0 && (
-                        <div className="space-y-2">
-                          {attachments.map((file) => (
-                            <div
-                              key={file.id}
-                              className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5"
-                            >
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-medium" style={{ color: NAVY }}>
-                                  {file.name}
-                                </p>
-                                <p className="text-xs text-muted-foreground">{file.size}</p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => removeAttachment(file.id)}
-                                className="rounded p-1 text-muted-foreground hover:bg-slate-200"
-                              >
-                                <X className="h-4 w-4" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </section>
-                    <section>
-                      {sectionTitle(4, 'Notes (Optional)')}
-                      <Textarea
-                        value={rfi.notes}
-                        onChange={(e) => setRfi((p) => ({ ...p, notes: e.target.value }))}
-                        rows={3}
-                        className="resize-none"
-                      />
-                    </section>
-                  </>
-                )}
-
-                {docType === 'submittal' && (
-                  <>
-                    <section>
-                      {sectionTitle(1, 'Project & Submittal Info')}
-                      <div className="grid gap-5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-                        <div className="min-w-0">
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Project
-                          </label>
-                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                            {selectedProject?.name ?? '—'}
-                          </div>
-                          {selectedProject?.address ? (
-                            <p className="mt-1.5 text-xs text-muted-foreground">{selectedProject.address}</p>
-                          ) : null}
-                        </div>
-                        <div>
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Submittal Number <span className="text-destructive">*</span>
-                          </label>
-                          <Input
-                            value={sub.number}
-                            onChange={(e) => setSub((p) => ({ ...p, number: e.target.value }))}
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Title <span className="text-destructive">*</span>
-                          </label>
-                          <Input
-                            value={sub.title}
-                            onChange={(e) => setSub((p) => ({ ...p, title: e.target.value }))}
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Date <span className="text-destructive">*</span>
-                          </label>
-                          <div className="relative max-w-xs">
-                            <Input
-                              type="date"
-                              value={sub.date}
-                              onChange={(e) => setSub((p) => ({ ...p, date: e.target.value }))}
-                              className="pr-10"
-                            />
-                            <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                          </div>
-                        </div>
-                      </div>
-                    </section>
-                    <section>
-                      {sectionTitle(2, 'Product details')}
-                      <div className="grid gap-4 sm:grid-cols-3">
-                        <div>
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Spec section
-                          </label>
-                          <Input
-                            value={sub.specSection}
-                            onChange={(e) => setSub((p) => ({ ...p, specSection: e.target.value }))}
-                          />
-                        </div>
-                        <div>
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Manufacturer
-                          </label>
-                          <Input
-                            value={sub.manufacturer}
-                            onChange={(e) => setSub((p) => ({ ...p, manufacturer: e.target.value }))}
-                          />
-                        </div>
-                        <div>
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Product name
-                          </label>
-                          <Input
-                            value={sub.productName}
-                            onChange={(e) => setSub((p) => ({ ...p, productName: e.target.value }))}
-                          />
-                        </div>
-                      </div>
-                    </section>
-                    <section>
-                      {sectionTitle(3, 'Description', true)}
-                      <div className="mb-2 flex justify-end">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void handleGenerateDescription()}
-                          disabled={isGeneratingDescription}
-                        >
-                          <span className="mr-1.5" aria-hidden>
-                            ✨
-                          </span>
-                          Generate with AI
-                        </Button>
-                      </div>
-                      <MissingScopeEditorSection
-                        documentApiType={docTypeToMissingScopeType('submittal')}
-                        value={sub.description}
-                        onChange={(v) => setSub((p) => ({ ...p, description: v }))}
-                        isGeneratingDescription={isGeneratingDescription}
-                        rows={5}
-                      />
-                    </section>
-                    <section>
-                      {sectionTitle(4, 'Attachments (Optional)')}
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => fileInputRef.current?.click()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            fileInputRef.current?.click()
-                          }
-                        }}
-                        onDragOver={(e) => {
-                          e.preventDefault()
-                          e.dataTransfer.dropEffect = 'copy'
-                        }}
-                        onDrop={onDrop}
-                        className={cn(
-                          'mb-4 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 transition-colors',
-                          'border-primary/35 bg-primary/5 hover:border-primary/55 hover:bg-primary/10'
-                        )}
-                      >
-                        <Upload className="mb-2 h-8 w-8 text-primary" />
-                        <p className="text-center text-sm font-medium" style={{ color: NAVY }}>
-                          Drag & drop files here, or{' '}
-                          <span className="text-primary underline underline-offset-2">click to browse</span>
-                        </p>
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          multiple
-                          className="hidden"
-                          onChange={handleFileUpload}
-                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                        />
-                      </div>
-                      {attachments.length > 0 && (
-                        <div className="space-y-2">
-                          {attachments.map((file) => (
-                            <div
-                              key={file.id}
-                              className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5"
-                            >
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-medium" style={{ color: NAVY }}>
-                                  {file.name}
-                                </p>
-                                <p className="text-xs text-muted-foreground">{file.size}</p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => removeAttachment(file.id)}
-                                className="rounded p-1 text-muted-foreground hover:bg-slate-200"
-                              >
-                                <X className="h-4 w-4" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </section>
-                    <section>
-                      {sectionTitle(5, 'Notes (Optional)')}
-                      <Textarea
-                        value={sub.notes}
-                        onChange={(e) => setSub((p) => ({ ...p, notes: e.target.value }))}
-                        rows={3}
-                        className="resize-none"
-                      />
-                    </section>
-                  </>
-                )}
-
-                {docType === 'change_order' && (
-                  <>
-                    <section>
-                      {sectionTitle(1, 'Project & Change Order Info')}
-                      <div className="grid gap-5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-                        <div className="min-w-0">
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Project
-                          </label>
-                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                            {selectedProject?.name ?? '—'}
-                          </div>
-                          {selectedProject?.address ? (
-                            <p className="mt-1.5 text-xs text-muted-foreground">{selectedProject.address}</p>
-                          ) : null}
-                        </div>
-                        <div>
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Change Order Number <span className="text-destructive">*</span>
-                          </label>
-                          <Input
-                            value={co.changeOrderNumber}
-                            onChange={(e) => setCo((p) => ({ ...p, changeOrderNumber: e.target.value }))}
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Title <span className="text-destructive">*</span>
-                          </label>
-                          <Input
-                            value={co.title}
-                            onChange={(e) => setCo((p) => ({ ...p, title: e.target.value }))}
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Date <span className="text-destructive">*</span>
-                          </label>
-                          <div className="relative max-w-xs">
-                            <Input
-                              type="date"
-                              value={co.date}
-                              onChange={(e) => setCo((p) => ({ ...p, date: e.target.value }))}
-                              className="pr-10"
-                            />
-                            <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                          </div>
-                        </div>
-                      </div>
-                    </section>
-                    <section>
-                      {sectionTitle(2, 'Description of Change', true)}
-                      <div className="mb-2 flex justify-end">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void handleGenerateDescription()}
-                          disabled={isGeneratingDescription}
-                        >
-                          <span className="mr-1.5" aria-hidden>
-                            ✨
-                          </span>
-                          Generate with AI
-                        </Button>
-                      </div>
-                      <MissingScopeEditorSection
-                        documentApiType={docTypeToMissingScopeType('change_order')}
-                        value={co.description}
-                        onChange={(v) => setCo((p) => ({ ...p, description: v }))}
-                        isGeneratingDescription={isGeneratingDescription}
-                        rows={5}
-                      />
-                      <p className={hintClass}>{co.description.length} characters</p>
-                    </section>
-                    <section>
-                      {sectionTitle(3, 'Reason for Change')}
-                      <Select value={co.reason} onValueChange={(v) => setCo((p) => ({ ...p, reason: v }))}>
-                        <SelectTrigger className="max-w-md">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {CO_REASON_OPTIONS.map((o) => (
-                            <SelectItem key={o.value} value={o.value}>
-                              {o.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </section>
-                    <section>
-                      {sectionTitle(4, 'Cost & Schedule Impact')}
-                      <div className="grid gap-5 sm:grid-cols-2">
-                        <div>
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Cost Impact
-                          </label>
-                          <div className="relative max-w-md">
-                            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                              $
-                            </span>
-                            <Input
-                              value={co.costImpact}
-                              onChange={(e) => setCo((p) => ({ ...p, costImpact: e.target.value }))}
-                              className="pl-7 pr-14"
-                            />
-                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                              USD
-                            </span>
-                          </div>
-                        </div>
-                        <div>
-                          <label className={labelClass} style={{ color: NAVY }}>
-                            Schedule Impact
-                          </label>
-                          <Select
-                            value={co.scheduleImpact}
-                            onValueChange={(v) => setCo((p) => ({ ...p, scheduleImpact: v }))}
-                          >
-                            <SelectTrigger className="max-w-md">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {CO_SCHEDULE_OPTIONS.map((o) => (
-                                <SelectItem key={o.value} value={o.value}>
-                                  {o.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </section>
-                    <section>
-                      {sectionTitle(5, 'Attachments (Optional)')}
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => fileInputRef.current?.click()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            fileInputRef.current?.click()
-                          }
-                        }}
-                        onDragOver={(e) => {
-                          e.preventDefault()
-                          e.dataTransfer.dropEffect = 'copy'
-                        }}
-                        onDrop={onDrop}
-                        className={cn(
-                          'mb-4 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 transition-colors',
-                          'border-primary/35 bg-primary/5 hover:border-primary/55 hover:bg-primary/10'
-                        )}
-                      >
-                        <Upload className="mb-2 h-8 w-8 text-primary" />
-                        <p className="text-center text-sm font-medium" style={{ color: NAVY }}>
-                          Drag & drop files here, or{' '}
-                          <span className="text-primary underline underline-offset-2">click to browse</span>
-                        </p>
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          multiple
-                          className="hidden"
-                          onChange={handleFileUpload}
-                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                        />
-                      </div>
-                      {attachments.length > 0 && (
-                        <div className="space-y-2">
-                          {attachments.map((file) => (
-                            <div
-                              key={file.id}
-                              className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5"
-                            >
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-medium" style={{ color: NAVY }}>
-                                  {file.name}
-                                </p>
-                                <p className="text-xs text-muted-foreground">{file.size}</p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => removeAttachment(file.id)}
-                                className="rounded p-1 text-muted-foreground hover:bg-slate-200"
-                              >
-                                <X className="h-4 w-4" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </section>
-                    <section>
-                      {sectionTitle(6, 'Notes (Optional)')}
-                      <Textarea
-                        value={co.notes}
-                        onChange={(e) => setCo((p) => ({ ...p, notes: e.target.value }))}
-                        rows={3}
-                        className="resize-none"
-                      />
-                    </section>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          <aside className="w-full shrink-0 space-y-4 lg:sticky lg:top-8 lg:w-88">
-            <Card className="border border-slate-200/80 bg-white shadow-sm">
-              <CardContent className="space-y-3 p-5">
-                <h3 className="text-base font-semibold" style={{ color: NAVY }}>
-                  Summary
-                </h3>
-                <div>
-                  <p className="text-xs text-muted-foreground">Project</p>
-                  <p className="font-medium" style={{ color: NAVY }}>
-                    {selectedProject?.name || '—'}
-                  </p>
+        <div className="grid grid-cols-1 gap-6 md:gap-7 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
+          <div className="min-w-0 space-y-6">
+            <div className={formCardClassName()}>
+              <div className="grid gap-5 sm:grid-cols-3">
+                <div className="min-w-0 sm:col-span-1">
+                  <label className={capLabel}>Project</label>
+                  <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] px-3 py-2 text-sm text-[#0f172a]">
+                    {selectedProject?.name ?? '—'}
+                  </div>
                   {selectedProject?.address ? (
-                    <p className="text-xs text-muted-foreground">{selectedProject.address}</p>
+                    <p className="mt-1.5 text-xs text-[#94a3b8]">{selectedProject.address}</p>
                   ) : null}
                 </div>
-                <div className="h-px bg-slate-200" />
+                <div>
+                  <label className={capLabel}>
+                    {docType === 'rfi'
+                      ? 'RFI number'
+                      : docType === 'submittal'
+                        ? 'Submittal number'
+                        : 'Change order number'}{' '}
+                    <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    value={
+                      docType === 'rfi'
+                        ? rfi.number
+                        : docType === 'submittal'
+                          ? sub.number
+                          : co.changeOrderNumber
+                    }
+                    onChange={(e) => {
+                      if (docType === 'rfi') setRfi((p) => ({ ...p, number: e.target.value }))
+                      else if (docType === 'submittal') setSub((p) => ({ ...p, number: e.target.value }))
+                      else setCo((p) => ({ ...p, changeOrderNumber: e.target.value }))
+                    }}
+                  />
+                </div>
+                <div>
+                  <label className={capLabel}>
+                    Document date <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    type="date"
+                    value={docType === 'rfi' ? rfi.date : docType === 'submittal' ? sub.date : co.date}
+                    onChange={(e) => {
+                      if (docType === 'rfi') setRfi((p) => ({ ...p, date: e.target.value }))
+                      else if (docType === 'submittal') setSub((p) => ({ ...p, date: e.target.value }))
+                      else setCo((p) => ({ ...p, date: e.target.value }))
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className={formCardClassName()}>
+              <div className="mb-6">
+                <label className={capLabel}>
+                  {docType === 'change_order' ? 'Change order title' : docType === 'rfi' ? 'RFI title' : 'Submittal title'}{' '}
+                  <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  value={docType === 'rfi' ? rfi.title : docType === 'submittal' ? sub.title : co.title}
+                  onChange={(e) => {
+                    if (docType === 'rfi') setRfi((p) => ({ ...p, title: e.target.value }))
+                    else if (docType === 'submittal') setSub((p) => ({ ...p, title: e.target.value }))
+                    else setCo((p) => ({ ...p, title: e.target.value }))
+                  }}
+                />
+              </div>
+
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <span className={capLabelRow}>
+                  {docType === 'rfi'
+                    ? 'Description / Question'
+                    : docType === 'change_order'
+                      ? 'Description of Change'
+                      : 'Description'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleGenerateDescription()}
+                  disabled={isGeneratingDescription}
+                  className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-[#0f172a] transition-colors hover:text-[#334155] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb]/25 focus-visible:ring-offset-2"
+                >
+                  <span className="text-[#ca8a04]" aria-hidden>
+                    ✨
+                  </span>
+                  AI Generate Description
+                </button>
+              </div>
+              <MissingScopeEditorSection
+                variant="document-description"
+                documentApiType={docTypeToMissingScopeType(docType)}
+                value={docType === 'rfi' ? rfi.description : docType === 'submittal' ? sub.description : co.description}
+                onChange={(v) => {
+                  if (docType === 'rfi') setRfi((p) => ({ ...p, description: v }))
+                  else if (docType === 'submittal') setSub((p) => ({ ...p, description: v }))
+                  else setCo((p) => ({ ...p, description: v }))
+                }}
+                isGeneratingDescription={isGeneratingDescription}
+                rows={8}
+              />
+              <p className={hintClass}>
+                {(docType === 'rfi' ? rfi.description : docType === 'submittal' ? sub.description : co.description).length}{' '}
+                characters
+              </p>
+            </div>
+
+            {docType === 'submittal' ? (
+              <div className={formCardClassName()}>
+                <h2 className="mb-5 text-lg font-semibold text-[#0f172a]">Submittal details</h2>
+                <div className="grid gap-5 sm:grid-cols-3">
+                  <div>
+                    <label className={capLabel}>Spec section</label>
+                    <Input
+                      value={sub.specSection}
+                      onChange={(e) => setSub((p) => ({ ...p, specSection: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className={capLabel}>Manufacturer</label>
+                    <Input
+                      value={sub.manufacturer}
+                      onChange={(e) => setSub((p) => ({ ...p, manufacturer: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className={capLabel}>Product name</label>
+                    <Input
+                      value={sub.productName}
+                      onChange={(e) => setSub((p) => ({ ...p, productName: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {docType === 'change_order' ? (
+              <div className={formCardClassName()}>
+                <h2 className="mb-5 text-lg font-semibold text-[#0f172a]">Change details</h2>
+                <div className="grid gap-5 sm:grid-cols-3">
+                  <div>
+                    <label className={capLabel}>Reason for change</label>
+                    <Select value={co.reason} onValueChange={(v) => setCo((p) => ({ ...p, reason: v }))}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CO_REASON_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className={capLabel}>Cost impact</label>
+                    <div className="relative">
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                        $
+                      </span>
+                      <Input
+                        value={co.costImpact}
+                        onChange={(e) => setCo((p) => ({ ...p, costImpact: e.target.value }))}
+                        className="pl-7 pr-14"
+                        placeholder="8,750.00"
+                      />
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                        USD
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className={capLabel}>Schedule impact</label>
+                    <Select value={co.scheduleImpact} onValueChange={(v) => setCo((p) => ({ ...p, scheduleImpact: v }))}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CO_SCHEDULE_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            <div className={formCardClassName()}>
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-[#0f172a]">Supporting documents</h2>
+              </div>
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    fileInputRef.current?.click()
+                  }
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'copy'
+                }}
+                onDrop={onDrop}
+                className={cn(
+                  'mb-4 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#cbd5e1] bg-[#f8fafc] p-10 transition-colors hover:border-[#94a3b8] hover:bg-[#f1f5f9]'
+                )}
+              >
+                <Upload className="mb-3 h-10 w-10 text-[#94a3b8]" strokeWidth={1.25} />
+                <p className="text-center text-sm font-medium text-[#334155]">
+                  Drag and drop files or{' '}
+                  <span className="font-semibold text-[#0f172a] underline decoration-[#cbd5e1] underline-offset-2">
+                    browse files
+                  </span>{' '}
+                  from your computer
+                </p>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleFileUpload}
+                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+              />
+              <div className="space-y-2">
+                {attachments.map((file) => (
+                  <div
+                    key={file.id}
+                    className="flex items-center justify-between rounded-lg border border-[#e2e8f0] bg-[#f1f5f9] px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[#0f172a]">{file.name}</p>
+                      <p className="text-xs text-[#64748b]">{file.size}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(file.id)}
+                      className="rounded-md p-1.5 text-[#ef4444] transition-colors hover:bg-red-50"
+                      aria-label={`Remove ${file.name}`}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className={formCardClassName()}>
+              <label className={capLabel}>Additional notes (optional)</label>
+              <Textarea
+                value={docType === 'rfi' ? rfi.notes : docType === 'submittal' ? sub.notes : co.notes}
+                onChange={(e) => {
+                  if (docType === 'rfi') setRfi((p) => ({ ...p, notes: e.target.value }))
+                  else if (docType === 'submittal') setSub((p) => ({ ...p, notes: e.target.value }))
+                  else setCo((p) => ({ ...p, notes: e.target.value }))
+                }}
+                rows={3}
+                className="resize-none"
+              />
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-[#e2e8f0] pt-6 sm:flex-row sm:items-center sm:justify-end">
+              <Button variant="outline" onClick={handleDelete} className="gap-2 text-red-700 hover:bg-red-50">
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </Button>
+              <Button onClick={handleSave} disabled={isSaving} className="gap-2">
+                <Save className="h-4 w-4" />
+                {isSaving ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
+          </div>
+
+          <aside className="w-full min-w-0 space-y-6 lg:sticky lg:top-6 lg:self-start">
+            {docType === 'change_order' ? (
+              <>
+                <div className={formCardClassName()}>
+                  <ReviewerManagementSection
+                    embedded
+                    layout="create"
+                    onSend={async (emails) => {
+                      await apiFetch('/api/documents/' + id + '/send-for-review', {
+                        method: 'POST',
+                        json: { reviewers: emails },
+                      })
+                    }}
+                  />
+                </div>
+
+                <div className={formCardClassName()}>
+                  <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">Categorization</h3>
+                  <div className="space-y-4">
+                    <div>
+                      <label className={capLabel}>Reason</label>
+                      <p className="text-sm font-medium text-[#0f172a]">{reasonLabel}</p>
+                    </div>
+                    <div className="border-t border-[#e2e8f0] pt-4">
+                      <label className={capLabel}>Schedule impact</label>
+                      <p className="text-sm font-medium text-[#0f172a]">{scheduleLabel}</p>
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className={formCardClassName()}>
+                <ReviewerManagementSection
+                  onSend={async (emails) => {
+                    await apiFetch('/api/documents/' + id + '/send-for-review', {
+                      method: 'POST',
+                      json: { reviewers: emails },
+                    })
+                  }}
+                />
+              </div>
+            )}
+
+            <div className={formCardClassName()}>
+              <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">Summary</h3>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Project</p>
+                  <p className="text-sm font-semibold text-[#0f172a]">{selectedProject?.name ?? '—'}</p>
+                  <p className="text-xs text-muted-foreground">{selectedProject?.address ?? ''}</p>
+                </div>
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">
+                    {docType === 'change_order' ? 'Change Order #' : docType === 'rfi' ? 'RFI #' : 'Submittal #'}
+                  </p>
+                  <p className="text-sm font-semibold text-[#0f172a]">
+                    {docType === 'change_order' ? co.changeOrderNumber : docType === 'rfi' ? rfi.number : sub.number}
+                  </p>
+                </div>
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">Title</p>
+                  <p className="text-sm font-semibold text-[#0f172a]">
+                    {docType === 'change_order'
+                      ? co.title || '—'
+                      : docType === 'rfi'
+                        ? rfi.title || '—'
+                        : sub.title || '—'}
+                  </p>
+                </div>
                 {docType === 'change_order' ? (
                   <>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Change Order #</p>
-                      <p className="font-semibold" style={{ color: NAVY }}>
-                        {co.changeOrderNumber || '—'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Title</p>
-                      <p className="font-semibold leading-snug" style={{ color: NAVY }}>
-                        {co.title || '—'}
-                      </p>
-                    </div>
-                    <div>
+                    <div className="border-t border-slate-100 pt-4">
                       <p className="text-xs text-muted-foreground">Date</p>
-                      <p className="text-sm font-semibold" style={{ color: NAVY }}>
+                      <p className="text-sm font-semibold text-[#0f172a]">
                         {co.date
                           ? new Date(co.date + 'T12:00:00').toLocaleDateString('en-US', {
                               month: 'long',
@@ -1072,83 +822,42 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                           : '—'}
                       </p>
                     </div>
-                    <div>
+                    <div className="border-t border-slate-100 pt-4">
                       <p className="text-xs text-muted-foreground">Cost Impact</p>
-                      <p className="text-2xl font-bold" style={{ color: NAVY }}>
+                      <p className="text-sm font-semibold text-[#0f172a]">
                         {co.costImpact.trim() ? `$${formatUsd(parseMoneyInput(co.costImpact))}` : '—'}
                       </p>
                     </div>
-                    <div>
+                    <div className="border-t border-slate-100 pt-4">
                       <p className="text-xs text-muted-foreground">Schedule Impact</p>
-                      <p className="text-xl font-bold" style={{ color: NAVY }}>
-                        {scheduleLabel}
-                      </p>
+                      <p className="text-sm font-semibold text-[#0f172a]">{scheduleLabel}</p>
                     </div>
                   </>
-                ) : (
-                  <>
-                    <div>
-                      <p className="text-xs text-muted-foreground">
-                        {docType === 'rfi' ? 'RFI #' : 'Submittal #'}
-                      </p>
-                      <p className="font-semibold" style={{ color: NAVY }}>
-                        {docType === 'rfi' ? rfi.number : sub.number}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Title</p>
-                      <p className="font-semibold" style={{ color: NAVY }}>
-                        {docType === 'rfi' ? rfi.title || 'Untitled' : sub.title || 'Untitled'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Date</p>
-                      <p className="text-sm font-semibold" style={{ color: NAVY }}>
-                        {(docType === 'rfi' ? rfi.date : sub.date)
-                          ? new Date((docType === 'rfi' ? rfi.date : sub.date) + 'T12:00:00').toLocaleDateString(
-                              'en-US',
-                              { month: 'long', day: 'numeric', year: 'numeric' }
-                            )
-                          : '—'}
-                      </p>
-                    </div>
-                  </>
-                )}
-                <Button
-                  type="button"
-                  className="w-full gap-2"
-                  style={{ backgroundColor: PREVIEW_BLUE }}
-                  onClick={() =>
-                    toast.message('Preview', { description: 'Open print preview from the browser after save.' })
-                  }
-                >
-                  <Eye className="h-4 w-4" />
-                  Preview Document
-                </Button>
-              </CardContent>
-            </Card>
+                ) : null}
+              </div>
+            </div>
 
-            <Card className="border border-sky-200/80 bg-sky-50/70 shadow-sm">
-              <CardContent className="p-5">
-                <p className="mb-1 flex items-center gap-2 text-sm font-semibold" style={{ color: NAVY }}>
-                  <Lightbulb className="h-4 w-4 text-sky-500" />
-                  Need Help?
-                </p>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Fields are filled from your saved document and latest version metadata. Edit and save to create a new
-                  version.
-                </p>
-              </CardContent>
-            </Card>
-
-            <ReviewerManagementSection
-              onSend={async (emails) => {
-                await apiFetch('/api/documents/' + id + '/send-for-review', {
-                  method: 'POST',
-                  json: { reviewers: emails },
-                })
-              }}
-            />
+            {docType === 'change_order' ? (
+              <div className="relative overflow-hidden rounded-xl border border-[#e2e8f0] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+                <div
+                  className="aspect-[4/3] bg-cover bg-center bg-no-repeat"
+                  style={{
+                    backgroundImage:
+                      "url('https://lh3.googleusercontent.com/aida-public/AB6AXuD7_4vd9OR1EKDJrX4T4pU1yOiptI0UoYbbOj4vqoVlL2cp6BJs173PepMwegslSa7ee1TNhCyjvXkiUUuL_PuNaxYgDwpRZ0TxEEn4NB7oKeW8ql6vx0K1FXp1eLA9iAI3P4R2b_HoBBmqCRTbBkmL2XsW7HHZWjryVmWG9mrQfD1c4WuCt-r2kwYqSfqc77yaaGEQSiKQhbm5-5c1i_P2TL-OpAedYi3Bw-VvmEauxJOLSm2bPWzsD5_bDiT-1yojYmMWyNu58d4')",
+                  }}
+                />
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
+                <div className="absolute bottom-4 left-4 right-4 text-white">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/80">
+                    Reference context
+                  </p>
+                  <p className="mt-1 text-xl font-bold tracking-tight">Coordination Zone</p>
+                  <p className="mt-1 text-xs text-white/70">
+                    Attach sketches and photos to speed up reviewer approval.
+                  </p>
+                </div>
+              </div>
+            ) : null}
           </aside>
         </div>
       </div>
