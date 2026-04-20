@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   LayoutDashboard,
   FolderKanban,
@@ -13,9 +13,7 @@ import {
   CreditCard,
   HelpCircle,
   ChevronLeft,
-  ChevronDown,
 } from 'lucide-react'
-import { useApp } from '@/lib/app-context'
 import { cn } from '@/lib/utils'
 
 const SIDEBAR_BG = '#0b1d42'
@@ -44,8 +42,12 @@ export function AppSidebarWithProjects() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [collapsed, setCollapsed] = useState(false)
-  const [projectsExpanded, setProjectsExpanded] = useState(true)
-  const { projects } = useApp()
+
+  useEffect(() => {
+    if (pathname === '/documents/new' || pathname?.startsWith('/documents/new')) {
+      setCollapsed(true)
+    }
+  }, [pathname])
 
   const isActive = (item: (typeof navigation)[0]) => {
     if (item.query) {
@@ -88,8 +90,6 @@ export function AppSidebarWithProjects() {
           const active = isActive(item)
           const href = item.query ? `${item.href}?${item.query}` : item.href
           const Icon = item.icon
-          const isProjectsItem = item.name === 'Projects'
-          const showProjects = projectsExpanded
 
           return (
             <div key={item.name}>
@@ -103,71 +103,15 @@ export function AppSidebarWithProjects() {
                 <Link
                   href={href}
                   title={collapsed ? item.name : undefined}
-                  className={cn('flex min-w-0 flex-1 items-center gap-3')}
+                  className={cn(
+                    'flex min-w-0 items-center',
+                    collapsed ? 'justify-center' : 'flex-1 gap-3'
+                  )}
                 >
                   <Icon {...iconProps} />
                   {!collapsed && <span className="truncate">{item.name}</span>}
                 </Link>
-
-                {!collapsed && isProjectsItem && projects.length > 0 && (
-                  <button
-                    type="button"
-                    className="rounded p-1 text-white/80 hover:bg-white/[0.08] hover:text-white"
-                    onClick={() => setProjectsExpanded((prev) => !prev)}
-                    aria-label={projectsExpanded ? 'Collapse projects' : 'Expand projects'}
-                    title={projectsExpanded ? 'Collapse projects' : 'Expand projects'}
-                  >
-                    <ChevronDown
-                      className={cn(
-                        'h-4 w-4 transition-transform duration-200',
-                        !projectsExpanded && '-rotate-90'
-                      )}
-                      strokeWidth={1.8}
-                    />
-                  </button>
-                )}
               </div>
-
-              {!collapsed && isProjectsItem && projects.length > 0 && showProjects && (
-                <div className="relative mt-1 pl-8 pr-2 pb-1">
-                  <div
-                    className="absolute bottom-1 top-1 w-px bg-white/35"
-                    style={{ left: '21px' }}
-                  />
-                  <div className="space-y-1.5">
-                    {projects.slice(0, 6).map((project) => {
-                      const projectHref = `/projects/${project.id}`
-                      const projectActive =
-                        pathname === projectHref || pathname.startsWith(`${projectHref}/`)
-
-                      return (
-                        <Link
-                          key={project.id}
-                          href={projectHref}
-                          title={project.name}
-                          className={cn(
-                            'block truncate rounded-md px-3 py-2 text-sm leading-5 transition-colors',
-                            projectActive
-                              ? 'bg-white/20 text-white'
-                              : 'text-white/80 hover:bg-white/[0.08] hover:text-white'
-                          )}
-                        >
-                          {project.name}
-                        </Link>
-                      )
-                    })}
-
-                    {projects.length > 6 && (
-                      <Link
-                        href="/projects"
-                        className="block px-3 py-2 text-xs text-white/65 hover:text-white"
-                      >
-                        View all projects
-                      </Link>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
           )
         })}

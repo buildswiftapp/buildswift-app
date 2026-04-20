@@ -1,11 +1,10 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import {
   Plus,
-  Search,
   FileText,
   FileQuestion,
   FileCheck,
@@ -19,9 +18,9 @@ import {
   Clock3,
   CircleAlert,
 } from 'lucide-react'
-import { useApp } from '@/lib/app-context'
+import { apiFetch } from '@/lib/api'
+import { Spinner } from '@/components/ui/spinner'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import {
   DropdownMenu,
@@ -47,7 +46,6 @@ import {
 } from '@/components/ui/table'
 import {
   Empty,
-  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
@@ -64,7 +62,51 @@ function DocumentsContent() {
       ? typeFromUrl
       : 'all'
 
-  const { documents, projects, deleteDocument } = useApp()
+  const [documents, setDocuments] = useState<
+    Array<{
+      id: string
+      project_id: string
+      doc_type: 'rfi' | 'submittal' | 'change_order'
+      title: string
+      description: string
+      internal_status: string
+      current_version_no: number
+      created_by: string
+      created_at: string
+      updated_at: string
+    }>
+  >([])
+  const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([])
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(true)
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [projectRes, documentRes] = await Promise.all([
+          apiFetch<{ projects: Array<{ id: string; name: string }> }>('/api/projects'),
+          apiFetch<{ documents: Array<{
+            id: string
+            project_id: string
+            doc_type: 'rfi' | 'submittal' | 'change_order'
+            title: string
+            description: string
+            internal_status: string
+            current_version_no: number
+            created_by: string
+            created_at: string
+            updated_at: string
+          }> }>('/api/documents'),
+        ])
+        setProjects(projectRes.projects)
+        setDocuments(documentRes.documents)
+      } catch {
+        // Keep UI fallback behavior.
+      } finally {
+        setIsLoadingDocuments(false)
+      }
+    }
+    void load()
+  }, [])
+
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [projectFilter, setProjectFilter] = useState<string>('all')
@@ -72,10 +114,18 @@ function DocumentsContent() {
   const filteredDocuments = documents.filter((doc) => {
     const matchesSearch =
       doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      doc.content.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesType = typeFilter === 'all' || doc.type === typeFilter
-    const matchesStatus = statusFilter === 'all' || doc.status === statusFilter
-    const matchesProject = projectFilter === 'all' || doc.projectId === projectFilter
+      doc.description.toLowerCase().includes(searchQuery.toLowerCase())
+    const normalizedStatus: DocumentStatus =
+      doc.internal_status === 'in_review'
+        ? 'pending_review'
+        : doc.internal_status === 'pending_reviewer'
+          ? 'pending_review'
+          : doc.internal_status === 'revising'
+            ? 'revision_requested'
+            : (doc.internal_status as DocumentStatus)
+    const matchesType = typeFilter === 'all' || doc.doc_type === typeFilter
+    const matchesStatus = statusFilter === 'all' || normalizedStatus === statusFilter
+    const matchesProject = projectFilter === 'all' || doc.project_id === projectFilter
     return matchesSearch && matchesType && matchesStatus && matchesProject
   })
 
@@ -92,17 +142,11 @@ function DocumentsContent() {
     }
   }
 
-  const getDocumentTypeName = (type: string) => {
-    switch (type) {
-      case 'rfi':
-        return 'RFI'
-      case 'submittal':
-        return 'Submittal'
-      case 'change_order':
-        return 'Change Order'
-      default:
-        return type
-    }
+  const formatDocumentCreatedAt = (iso: string | undefined) => {
+    if (!iso) return '—'
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return '—'
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }
 
   const getStatusBadge = (status: DocumentStatus) => {
@@ -204,93 +248,132 @@ function DocumentsContent() {
           ? 'New Change Order'
           : 'New Document'
 
+  const hasActiveFilters = searchQuery !== '' || statusFilter !== 'all' || projectFilter !== 'all'
+
   return (
     <div className="flex flex-col">
       <div className="flex-1 space-y-6 p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-1 flex-wrap items-center gap-3">
-            <div className="relative w-full max-w-sm">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search documents..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
+        <div className="space-y-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <h1 className="text-4xl font-bold tracking-tight text-[#0f172a]">
+                {typeFilter === 'rfi'
+                  ? 'Request for Information'
+                  : typeFilter === 'submittal'
+                    ? 'Submittals'
+                    : typeFilter === 'change_order'
+                      ? 'Change Orders'
+                      : 'Documents'}
+              </h1>
+              <p className="max-w-2xl text-xl leading-relaxed text-slate-600">
+                {typeFilter === 'rfi'
+                  ? 'Track and manage technical queries across architectural and structural domains with real-time status synchronization.'
+                  : 'Track and manage documents with real-time status synchronization.'}
+              </p>
             </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="draft">Draft</SelectItem>
-                <SelectItem value="pending_review">Pending Review</SelectItem>
-                <SelectItem value="approved">Approved</SelectItem>
-                <SelectItem value="rejected">Rejected</SelectItem>
-                <SelectItem value="revision_requested">Revision Requested</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={projectFilter} onValueChange={setProjectFilter}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Project" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Projects</SelectItem>
-                {projects.map((project) => (
-                  <SelectItem key={project.id} value={project.id}>
-                    {project.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {typeFilter !== 'all' ? (
-            <Button asChild className={newDocCtaClassName}>
-              <Link
-                href={
-                  typeFilter === 'change_order'
-                    ? '/change-orders/new'
-                    : `/documents/new?type=${typeFilter}`
-                }
-              >
-                <Plus className="size-4" />
-                {newDocumentCtaLabel}
-              </Link>
-            </Button>
-          ) : (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button className={newDocCtaClassName}>
-                  <Plus className="size-4" />
-                  {newDocumentCtaLabel}
+            <div className="flex flex-wrap items-center gap-3">
+              {typeFilter !== 'all' ? (
+                <Button asChild className={newDocCtaClassName}>
+                  <Link
+                    href={
+                      typeFilter === 'change_order'
+                        ? '/change-orders/new'
+                        : `/documents/new?type=${typeFilter}`
+                    }
+                  >
+                    <Plus className="size-4" />
+                    {typeFilter === 'rfi' ? 'Create New RFI' : `Create ${newDocumentCtaLabel}`}
+                  </Link>
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem asChild>
-                  <Link href="/documents/new?type=rfi">
-                    <FileQuestion className="mr-2 h-4 w-4" />
-                    New RFI
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/documents/new?type=submittal">
-                    <FileCheck className="mr-2 h-4 w-4" />
-                    New Submittal
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/change-orders/new">
-                    <FilePen className="mr-2 h-4 w-4" />
-                    New Change Order
-                  </Link>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+              ) : (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button className={newDocCtaClassName}>
+                      <Plus className="size-4" />
+                      Create New Document
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem asChild>
+                      <Link href="/documents/new?type=rfi">
+                        <FileQuestion className="mr-2 h-4 w-4" />
+                        New RFI
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/documents/new?type=submittal">
+                        <FileCheck className="mr-2 h-4 w-4" />
+                        New Submittal
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/change-orders/new">
+                        <FilePen className="mr-2 h-4 w-4" />
+                        New Change Order
+                      </Link>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200/90 bg-slate-50 px-4 py-4 shadow-sm">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-1 flex-wrap items-center gap-3">
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger size="sm" className="w-[190px]">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    <SelectItem value="draft">Draft</SelectItem>
+                    <SelectItem value="pending_review">Pending Review</SelectItem>
+                    <SelectItem value="approved">Approved</SelectItem>
+                    <SelectItem value="rejected">Rejected</SelectItem>
+                    <SelectItem value="revision_requested">Revision Requested</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={projectFilter} onValueChange={setProjectFilter}>
+                  <SelectTrigger size="sm" className="w-[210px]">
+                    <SelectValue placeholder="Project" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">
+                      All Projects
+                    </SelectItem>
+                    {projects.map((project) => (
+                      <SelectItem key={project.id} value={project.id}>
+                        {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="px-2 text-[#0f172a]"
+                  onClick={() => {
+                    setSearchQuery('')
+                    setStatusFilter('all')
+                    setProjectFilter('all')
+                  }}
+                  disabled={!hasActiveFilters}
+                >
+                  Clear Filters
+                </Button>
+              </div>
+
+            </div>
+          </div>
         </div>
 
-        {filteredDocuments.length === 0 ? (
+        {isLoadingDocuments ? (
+          <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/40 text-muted-foreground">
+            <Spinner className="size-8" />
+            <p className="text-sm">Loading documents...</p>
+          </div>
+        ) : filteredDocuments.length === 0 ? (
           <Empty>
             <EmptyMedia variant="icon">
               <FileText className="h-10 w-10" />
@@ -303,16 +386,6 @@ function DocumentsContent() {
                   : 'Create your first document to get started'}
               </EmptyDescription>
             </EmptyHeader>
-            {!searchQuery && statusFilter === 'all' && projectFilter === 'all' ? (
-              <EmptyContent>
-                <Button asChild className={newDocCtaClassName}>
-                  <Link href={newDocumentHref}>
-                    <Plus className="size-4" />
-                    {newDocumentCtaLabel}
-                  </Link>
-                </Button>
-              </EmptyContent>
-            ) : null}
           </Empty>
         ) : (
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -345,7 +418,7 @@ function DocumentsContent() {
                   <TableRow key={doc.id} className="group border-slate-100 hover:bg-slate-50/60">
                     <TableCell className="py-4">
                       <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-                        {getDocumentTypeIcon(doc.type)}
+                        {getDocumentTypeIcon(doc.doc_type)}
                       </div>
                     </TableCell>
                     <TableCell className="py-4">
@@ -355,30 +428,40 @@ function DocumentsContent() {
                       >
                         {doc.title}
                       </Link>
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        {`${doc.id.toUpperCase()} \u2022 ${getDocumentTypeName(doc.type)} \u2022 ${getProjectName(doc.projectId)}`}
+                      <p className="mt-0.5 min-w-0 break-words text-xs text-slate-500">
+                        {`${getProjectName(doc.project_id)} \u2022 ${formatDocumentCreatedAt(doc.created_at)}`}
                       </p>
                     </TableCell>
                     <TableCell className="hidden py-4 sm:table-cell">
-                      <p className="text-sm font-medium text-slate-800">{formatRelativeUpdate(doc.updatedAt)}</p>
-                      <p className="text-xs text-slate-500">{`by ${getUserName(doc.createdBy)}`}</p>
+                      <p className="text-sm font-medium text-slate-800">{formatRelativeUpdate(doc.updated_at)}</p>
+                      <p className="text-xs text-slate-500">{`by ${getUserName(doc.created_by)}`}</p>
                     </TableCell>
                     <TableCell className="hidden py-4 md:table-cell">
                       <Badge
                         variant="secondary"
                         className="rounded-md border-0 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700"
                       >
-                        {`v${doc.version}.0`}
+                        {`v${doc.current_version_no}.0`}
                       </Badge>
                     </TableCell>
                     <TableCell className="hidden py-4 lg:table-cell">
                       <div className="flex flex-wrap gap-1.5">
-                        {getReviewerTracking(doc.id, doc.status).map((item) => (
+                        {getReviewerTracking(doc.id, 'draft').map((item) => (
                           <span key={`${doc.id}-${item}`}>{trackingBadge(item)}</span>
                         ))}
                       </div>
                     </TableCell>
-                    <TableCell className="py-4">{getStatusBadge(doc.status)}</TableCell>
+                    <TableCell className="py-4">
+                      {getStatusBadge(
+                        doc.internal_status === 'in_review'
+                          ? 'pending_review'
+                          : doc.internal_status === 'pending_reviewer'
+                            ? 'pending_review'
+                            : doc.internal_status === 'revising'
+                              ? 'revision_requested'
+                              : (doc.internal_status as DocumentStatus)
+                      )}
+                    </TableCell>
                     <TableCell className="py-4">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -399,7 +482,10 @@ function DocumentsContent() {
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
-                            onClick={() => deleteDocument(doc.id)}
+                            onClick={async () => {
+                              await apiFetch('/api/documents/' + doc.id, { method: 'DELETE' })
+                              setDocuments((prev) => prev.filter((d) => d.id !== doc.id))
+                            }}
                             className="text-destructive"
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
@@ -421,7 +507,14 @@ function DocumentsContent() {
 
 export default function DocumentsPage() {
   return (
-    <Suspense fallback={<div className="p-6">Loading...</div>}>
+    <Suspense
+      fallback={
+        <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 p-6 text-muted-foreground">
+          <Spinner className="size-8" />
+          <p className="text-sm">Loading...</p>
+        </div>
+      }
+    >
       <DocumentsContent />
     </Suspense>
   )

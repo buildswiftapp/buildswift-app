@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
-import { useApp } from '@/lib/app-context'
+import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -20,7 +20,6 @@ import { toast } from 'sonner'
 
 export default function NewProjectPage() {
   const router = useRouter()
-  const { addProject, user } = useApp()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
@@ -43,22 +42,20 @@ export default function NewProjectPage() {
     setIsSubmitting(true)
 
     try {
-      addProject({
-        name: formData.name,
-        description: formData.description,
-        clientName: formData.clientName,
-        address: formData.address,
-        status: formData.status,
-        startDate: formData.startDate,
-        endDate: formData.endDate || undefined,
-        companyId: user?.companyId || 'company-1',
-        teamMembers: [user?.id || 'user-1'],
+      await apiFetch<{ project: { id: string } }>('/api/projects', {
+        method: 'POST',
+        json: {
+          name: formData.name,
+          description: formData.description,
+          address: formData.address,
+          client_owner: formData.clientName,
+        },
       })
 
       toast.success('Project created successfully')
       router.push('/projects')
     } catch (error) {
-      toast.error('Failed to create project')
+      toast.error(error instanceof Error ? error.message : 'Failed to create project')
     } finally {
       setIsSubmitting(false)
     }

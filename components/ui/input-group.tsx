@@ -13,15 +13,15 @@ function InputGroup({ className, ...props }: React.ComponentProps<'div'>) {
       data-slot="input-group"
       role="group"
       className={cn(
-        'group/input-group border-input dark:bg-input/30 relative flex w-full items-center rounded-md border shadow-xs transition-[color,box-shadow] outline-none',
-        'h-9 has-[>textarea]:h-auto',
+        'group/input-group relative flex w-full items-center rounded-[6px] border border-[#DEE2E6] bg-[#E9ECEF] shadow-none outline-none transition-[color,box-shadow,border-color]',
+        'h-12 min-h-12 has-[>textarea]:h-auto has-[>textarea]:min-h-0',
 
         'has-[>[data-align=inline-start]]:[&>input]:pl-2',
         'has-[>[data-align=inline-end]]:[&>input]:pr-2',
         'has-[>[data-align=block-start]]:h-auto has-[>[data-align=block-start]]:flex-col has-[>[data-align=block-start]]:[&>input]:pb-3',
         'has-[>[data-align=block-end]]:h-auto has-[>[data-align=block-end]]:flex-col has-[>[data-align=block-end]]:[&>input]:pt-3',
 
-        'has-[[data-slot=input-group-control]:focus-visible]:border-ring has-[[data-slot=input-group-control]:focus-visible]:ring-ring/50 has-[[data-slot=input-group-control]:focus-visible]:ring-[3px]',
+        'has-[[data-slot=input-group-control]:focus-visible]:border-[#adb5bd] has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-[#2563eb]/20',
 
         'has-[[data-slot][aria-invalid=true]]:ring-destructive/20 has-[[data-slot][aria-invalid=true]]:border-destructive dark:has-[[data-slot][aria-invalid=true]]:ring-destructive/40',
 
