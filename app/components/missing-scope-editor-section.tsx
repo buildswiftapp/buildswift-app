@@ -73,7 +73,11 @@ export function MissingScopeEditorSection(props: {
       const initialDescription = getMissingScopeSeed(documentApiType)
       const result = await apiFetch<MissingScopeApiResponse>('/api/ai/missing-scope', {
         method: 'POST',
-        json: { type: documentApiType, content: value, initialDescription },
+        json: {
+          type: documentApiType,
+          content: value,
+          ...(initialDescription ? { initialDescription } : {}),
+        },
       })
       setAnalysisResult({
         issues: Array.isArray(result.issues) ? result.issues : [],
