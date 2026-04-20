@@ -30,6 +30,8 @@ export interface Project {
   name: string
   description: string
   companyId: string
+  /** True when the project is archived on the server (API status archived). */
+  isArchived?: boolean
   status: 'active' | 'completed' | 'on_hold'
   address?: string
   clientName?: string

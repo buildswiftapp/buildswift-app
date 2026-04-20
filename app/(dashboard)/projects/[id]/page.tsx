@@ -1,23 +1,20 @@
 'use client'
 
-import { use, useState } from 'react'
+import { use, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import {
   Plus,
   FileQuestion,
+  FileText,
   FileCheck,
   FilePen,
-  Calendar,
-  MapPin,
-  Users,
-  FileText,
+  DollarSign,
   MoreHorizontal,
   Trash2,
   Edit,
   Clock,
-} from 'lucide-react'
-import { useApp } from '@/lib/app-context'
+} from 'lucide-react' 
+import { apiFetch } from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -56,6 +53,7 @@ import {
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { Spinner } from '@/components/ui/spinner'
 import { toast } from 'sonner'
 
 export default function ProjectDetailPage({
@@ -64,11 +62,28 @@ export default function ProjectDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
-  const router = useRouter()
-  const { projects, documents, deleteDocument, updateProject } = useApp()
-
-  const project = projects.find((p) => p.id === id)
-  const projectDocuments = documents.filter((d) => d.projectId === id)
+  const [project, setProject] = useState<{
+    id: string
+    name: string
+    description: string
+    clientName?: string
+    address?: string
+    status: 'active' | 'on_hold' | 'completed'
+    startDate: string
+    endDate?: string
+  } | null>(null)
+  const [projectDocuments, setProjectDocuments] = useState<
+    Array<{
+      id: string
+      projectId: string
+      type: 'rfi' | 'submittal' | 'change_order'
+      title: string
+      status: 'draft' | 'pending_review' | 'approved' | 'rejected' | 'revision_requested'
+      updatedAt: string
+      dueDate?: string
+    }>
+  >([])
+  const [isLoading, setIsLoading] = useState(true)
   const [editDrawerOpen, setEditDrawerOpen] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [editFormData, setEditFormData] = useState({
@@ -81,10 +96,119 @@ export default function ProjectDetailPage({
     endDate: project?.endDate || '',
   })
 
+  useEffect(() => {
+    const load = async () => {
+      setIsLoading(true)
+      try {
+        const [projectRes, docsRes] = await Promise.all([
+          apiFetch<{
+            projects: Array<{
+              id: string
+              name: string
+              description: string | null
+              address: string | null
+              client_owner_name: string | null
+              status: 'active' | 'archived' | 'deleted'
+              created_at: string
+            }>
+          }>('/api/projects'),
+          apiFetch<{
+            documents: Array<{
+              id: string
+              project_id: string
+              doc_type: 'rfi' | 'submittal' | 'change_order'
+              title: string
+              internal_status: string
+              updated_at: string
+            }>
+          }>(`/api/documents?project_id=${id}`),
+        ])
+
+        const current = projectRes.projects.find((p) => p.id === id) || null
+        if (current) {
+          setProject({
+            id: current.id,
+            name: current.name,
+            description: current.description ?? '',
+            clientName: current.client_owner_name ?? undefined,
+            address: current.address ?? undefined,
+            status: current.status === 'archived' ? 'completed' : 'active',
+            startDate: current.created_at,
+            endDate: undefined,
+          })
+        } else {
+          setProject(null)
+        }
+
+        setProjectDocuments(
+          docsRes.documents.map((d) => ({
+            id: d.id,
+            projectId: d.project_id,
+            type: d.doc_type,
+            title: d.title,
+            status:
+              d.internal_status === 'in_review'
+                ? 'pending_review'
+                : d.internal_status === 'pending_reviewer'
+                  ? 'pending_review'
+                  : d.internal_status === 'revising'
+                    ? 'revision_requested'
+                    : (d.internal_status as 'draft' | 'pending_review' | 'approved' | 'rejected' | 'revision_requested'),
+            updatedAt: d.updated_at,
+          }))
+        )
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to load project details')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    void load()
+  }, [id])
+
   const documentsByType = {
     rfi: projectDocuments.filter((d) => d.type === 'rfi'),
     submittal: projectDocuments.filter((d) => d.type === 'submittal'),
     change_order: projectDocuments.filter((d) => d.type === 'change_order'),
+  }
+  const pendingReviewCount = projectDocuments.filter((d) => d.status === 'pending_review').length
+  const projectMetricCards = [
+    {
+      key: 'rfis',
+      label: 'RFIs',
+      value: documentsByType.rfi.length,
+      Icon: FileText,
+      iconClassName: 'bg-blue-50 text-blue-500',
+    },
+    {
+      key: 'submittals',
+      label: 'Submittals',
+      value: documentsByType.submittal.length,
+      Icon: FileCheck,
+      iconClassName: 'bg-amber-50 text-amber-500',
+    },
+    {
+      key: 'change-orders',
+      label: 'Change Orders',
+      value: documentsByType.change_order.length,
+      Icon: DollarSign,
+      iconClassName: 'bg-orange-50 text-orange-500',
+    },
+    {
+      key: 'pending-review',
+      label: 'Pending Review',
+      value: pendingReviewCount,
+      Icon: Clock,
+      iconClassName: 'bg-yellow-50 text-yellow-500',
+    },
+  ]
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <Spinner className="size-8" />
+      </div>
+    )
   }
 
   if (!project) {
@@ -205,7 +329,8 @@ export default function ProjectDetailPage({
                   <DropdownMenuItem
                     onClick={(e) => {
                       e.preventDefault()
-                      deleteDocument(doc.id)
+                      void apiFetch('/api/documents/' + doc.id, { method: 'DELETE' })
+                      setProjectDocuments((prev) => prev.filter((d) => d.id !== doc.id))
                     }}
                     className="text-destructive"
                   >
@@ -243,15 +368,28 @@ export default function ProjectDetailPage({
 
     setIsSaving(true)
     try {
-      updateProject(project.id, {
-        name: editFormData.name,
-        description: editFormData.description,
-        clientName: editFormData.clientName,
-        address: editFormData.address,
-        status: editFormData.status,
-        startDate: editFormData.startDate,
-        endDate: editFormData.endDate || undefined,
+      await apiFetch('/api/projects/' + project.id, {
+        method: 'PATCH',
+        json: {
+          name: editFormData.name,
+          description: editFormData.description,
+          client_owner: editFormData.clientName,
+          address: editFormData.address,
+          status: editFormData.status === 'completed' ? 'archived' : 'active',
+        },
       })
+      setProject((prev) =>
+        prev
+          ? {
+              ...prev,
+              name: editFormData.name,
+              description: editFormData.description,
+              clientName: editFormData.clientName || undefined,
+              address: editFormData.address || undefined,
+              status: editFormData.status,
+            }
+          : prev
+      )
       toast.success('Project updated successfully')
       setEditDrawerOpen(false)
     } catch {
@@ -306,45 +444,20 @@ export default function ProjectDetailPage({
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <CardContent className="flex items-center gap-4 pt-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
-                <Users className="h-6 w-6 text-primary" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Client</p>
-                <p className="font-semibold">{project.clientName || 'Not specified'}</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="flex items-center gap-4 pt-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
-                <MapPin className="h-6 w-6 text-primary" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Location</p>
-                <p className="font-semibold">{project.address || 'Not specified'}</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="flex items-center gap-4 pt-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
-                <Calendar className="h-6 w-6 text-primary" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Timeline</p>
-                <p className="font-semibold">
-                  {formatDate(project.startDate)}
-                  {project.endDate && ` - ${formatDate(project.endDate)}`}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="grid gap-4 md:grid-cols-4">
+          {projectMetricCards.map(({ key, label, value, Icon, iconClassName }) => (
+            <Card key={key}>
+              <CardContent className="flex min-h-[94px] items-start gap-3 px-5 py-4">
+                <div className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded-md ${iconClassName}`}>
+                  <Icon className="h-[18px] w-[18px]" />
+                </div>
+                <div>
+                  <p className="text-3xl font-semibold leading-none tracking-tight">{value}</p>
+                  <p className="mt-1.5 text-xs text-muted-foreground">{label}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
 
         <Tabs defaultValue="all" className="space-y-4">

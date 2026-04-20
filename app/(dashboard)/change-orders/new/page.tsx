@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback, Suspense } from 'react'
+import { useState, useRef, useCallback, Suspense, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -9,16 +9,11 @@ import {
   Upload,
   X,
   FileText,
-  Eye,
-  Lightbulb,
   Save,
-  CalendarDays,
 } from 'lucide-react'
-import { useApp } from '@/lib/app-context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { Card, CardContent } from '@/components/ui/card'
 import {
   Select,
   SelectContent,
@@ -29,10 +24,23 @@ import {
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import type { Attachment as DocAttachment } from '@/lib/types'
+import { uploadPendingAttachments } from '@/lib/supabase/upload-attachments'
 import { ReviewerManagementSection } from '@/app/components/reviewer-management-section'
-import { MissingScopeCallout } from '@/app/components/missing-scope-callout'
+import { MissingScopeEditorSection } from '@/app/components/missing-scope-editor-section'
+import { docTypeToMissingScopeType, setMissingScopeSeedIfMissing } from '@/lib/missing-scope-client'
+import { apiFetch } from '@/lib/api'
 
+const PAGE_BG = '#f1f5f9'
 const NAVY = '#0f172a'
+const capLabel = 'mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-[#64748b]'
+const capLabelRow = 'text-[11px] font-semibold uppercase tracking-[0.14em] text-[#64748b]'
+
+function formCardClassName(extra?: string) {
+  return cn(
+    'rounded-xl border border-[#e2e8f0] bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.06)] sm:p-6 lg:p-7 xl:p-8',
+    extra
+  )
+}
 
 const REASON_OPTIONS = [
   { value: 'owner_request', label: 'Owner Request' },
@@ -59,7 +67,18 @@ interface LocalAttachment {
   id: string
   name: string
   size: string
+  file?: File
+  url?: string
 }
+
+type ApiProject = {
+  id: string
+  name: string
+  address: string | null
+  created_at: string
+}
+
+type AiGenerateResponse = { generatedContent: string }
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -115,16 +134,11 @@ function NewChangeOrderContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const projectFromUrl = searchParams.get('project')
-  const { projects, addDocument, user } = useApp()
   const fileInputRef = useRef<HTMLInputElement>(null)
-
-  const defaultProjectId =
-    (projectFromUrl && projects.some((p) => p.id === projectFromUrl) ? projectFromUrl : null) ||
-    projects[0]?.id ||
-    ''
+  const [projects, setProjects] = useState<ApiProject[]>([])
 
   const [formData, setFormData] = useState({
-    projectId: defaultProjectId,
+    projectId: '',
     changeOrderNumber: 'CO-005',
     title: 'Additional Electrical Outlets – Levels 2 & 3',
     date: '2025-04-24',
@@ -137,12 +151,33 @@ function NewChangeOrderContent() {
   })
 
   const [attachments, setAttachments] = useState<LocalAttachment[]>([
-    { id: '1', name: 'Electrical_Layout_Level2.pdf', size: '245 KB' },
-    { id: '2', name: 'Electrical_Layout_Level3.pdf', size: '198 KB' },
-    { id: '3', name: 'Site_Photo_Outlet_Location.jpg', size: '1.2 MB' },
+    { id: '1', name: 'Electrical_Layout_Level2.pdf', size: '245 KB', url: '#' },
+    { id: '2', name: 'Electrical_Layout_Level3.pdf', size: '198 KB', url: '#' },
+    { id: '3', name: 'Site_Photo_Outlet_Location.jpg', size: '1.2 MB', url: '#' },
   ])
 
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isGeneratingDescription, setIsGeneratingDescription] = useState(false)
+
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        const data = await apiFetch<{ projects: ApiProject[] }>('/api/projects')
+        setProjects(data.projects)
+        setFormData((prev) => {
+          if (prev.projectId) return prev
+          const nextId =
+            (projectFromUrl && data.projects.some((p) => p.id === projectFromUrl) ? projectFromUrl : null) ||
+            data.projects[0]?.id ||
+            ''
+          return { ...prev, projectId: nextId }
+        })
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to load projects')
+      }
+    }
+    void loadProjects()
+  }, [projectFromUrl])
 
   const selectedProject = projects.find((p) => p.id === formData.projectId)
 
@@ -160,6 +195,7 @@ function NewChangeOrderContent() {
       id: `new-${Date.now()}-${index}`,
       name: file.name,
       size: formatBytes(file.size),
+      file,
     }))
     setAttachments((prev) => [...prev, ...next])
     e.target.value = ''
@@ -173,6 +209,7 @@ function NewChangeOrderContent() {
       id: `drop-${Date.now()}-${index}`,
       name: file.name,
       size: formatBytes(file.size),
+      file,
     }))
     setAttachments((prev) => [...prev, ...next])
   }, [])
@@ -181,13 +218,63 @@ function NewChangeOrderContent() {
     setAttachments((prev) => prev.filter((a) => a.id !== id))
   }
 
-  const docAttachments: DocAttachment[] = attachments.map((a) => ({
-    id: a.id,
-    name: a.name,
-    url: '#',
-    size: 0,
-    type: a.name.split('.').pop() || 'file',
-  }))
+  const handleDownloadAttachment = (attachment: LocalAttachment) => {
+    // For files selected in this browser session, create a direct download.
+    if (attachment.file) {
+      const blobUrl = URL.createObjectURL(attachment.file)
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.download = attachment.name
+      document.body.append(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 0)
+      return
+    }
+
+    // For server-backed files, use provided URL when available.
+    if (attachment.url && attachment.url !== '#') {
+      const link = document.createElement('a')
+      link.href = attachment.url
+      link.download = attachment.name
+      document.body.append(link)
+      link.click()
+      link.remove()
+      return
+    }
+
+    toast.error('File content is not available for download yet')
+  }
+
+  const handleGenerateDescription = async () => {
+    const trimmedDescription = formData.description.trim()
+    if (!trimmedDescription) {
+      toast.error('Enter an initial description before generating with AI')
+      return
+    }
+    setMissingScopeSeedIfMissing(docTypeToMissingScopeType('change_order'), trimmedDescription)
+    setIsGeneratingDescription(true)
+    try {
+      const data = await apiFetch<AiGenerateResponse>('/api/ai/generate', {
+        method: 'POST',
+        json: {
+          documentType: 'ChangeOrder',
+          description: trimmedDescription,
+        },
+      })
+      const generated = data.generatedContent?.trim()
+      if (!generated) {
+        toast.error('AI generation temporarily unavailable. Please try again.')
+        return
+      }
+      setFormData((prev) => ({ ...prev, description: generated }))
+      toast.success('Description generated')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'AI generation temporarily unavailable. Please try again.')
+    } finally {
+      setIsGeneratingDescription(false)
+    }
+  }
 
   const handleSubmit = async (asDraft: boolean) => {
     if (!formData.projectId) {
@@ -209,6 +296,18 @@ function NewChangeOrderContent() {
 
     setIsSubmitting(true)
     try {
+      const uploaded = await uploadPendingAttachments({
+        attachments,
+        accountIdHint: formData.projectId,
+      })
+      const docAttachments: DocAttachment[] = uploaded.map((a) => ({
+        id: a.id,
+        name: a.name,
+        url: a.url,
+        size: a.size,
+        type: a.type,
+      }))
+
       const content = buildChangeOrderHtml({
         coNumber: formData.changeOrderNumber,
         date: formData.date,
@@ -221,66 +320,56 @@ function NewChangeOrderContent() {
         notes: formData.notes,
       })
 
-      addDocument({
-        projectId: formData.projectId,
-        type: 'change_order',
-        title: formData.title,
-        content,
-        status: asDraft ? 'draft' : 'pending_review',
-        createdBy: user?.id || 'user-1',
-        dueDate: formData.date,
-        metadata: {
-          reason: reasonLabel,
-          proposedAmount: costNumeric,
-          changeOrderNumber: formData.changeOrderNumber,
-          changeOrderDate: formData.date,
-          scheduleImpact: scheduleLabel,
-          notes: formData.notes || undefined,
-          attachments: docAttachments,
+      await apiFetch('/api/documents', {
+        method: 'POST',
+        json: {
+          project_id: formData.projectId,
+          doc_type: 'change_order',
+          doc_number: formData.changeOrderNumber,
+          title: formData.title,
+          description: content,
+          save_as_draft: asDraft,
+          metadata: {
+            reason: reasonLabel,
+            proposedAmount: costNumeric,
+            changeOrderNumber: formData.changeOrderNumber,
+            changeOrderDate: formData.date,
+            scheduleImpact: scheduleLabel,
+            notes: formData.notes || undefined,
+            attachments: docAttachments,
+          },
         },
       })
 
       toast.success(asDraft ? 'Draft saved successfully' : 'Change order generated successfully')
       router.push('/documents?type=change_order')
-    } catch {
-      toast.error('Failed to save change order')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to save change order')
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  const sectionTitle = (n: number, title: string, required?: boolean) => (
-    <div className="mb-4 flex items-center gap-3">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground shadow-sm">
-        {n}
-      </div>
-      <h2 className="text-lg font-semibold leading-tight" style={{ color: NAVY }}>
-        {title}
-        {required ? <span className="text-destructive"> *</span> : null}
-      </h2>
-    </div>
-  )
-
-  const labelClass = 'mb-1.5 block text-sm font-medium'
-  const hintClass = 'mt-1.5 text-xs text-muted-foreground'
+  const hintClass = 'mt-1.5 text-xs text-[#64748b]'
 
   return (
-    <div className="min-h-full bg-[#f8f9fb] px-4 py-8 sm:px-6 lg:px-10">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="max-w-2xl">
-            <h1 className="text-3xl font-bold tracking-tight" style={{ color: NAVY }}>
+    <div
+      className="min-h-full w-full px-3 py-6 sm:px-4 sm:py-7 lg:px-6 lg:py-8 xl:px-8 2xl:px-10"
+      style={{ backgroundColor: PAGE_BG }}
+    >
+      <div className="mx-auto w-full max-w-[min(100%,1920px)]">
+        <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between lg:mb-10">
+          <div className="min-w-0 max-w-3xl">
+            <h1 className="text-3xl font-bold tracking-tight text-[#0f172a]">
               Create New Change Order
             </h1>
-            <p className="mt-2 text-base leading-relaxed text-muted-foreground">
-              Enter the details below. BuildSwift will generate a professional change order document
-              based on your input.
+            <p className="mt-2 text-base leading-relaxed text-[#64748b]">
+              Organize your change request by section. BuildSwift generates a professional document from your inputs.
             </p>
           </div>
           <Button
             variant="outline"
-            className="shrink-0 gap-2 rounded-lg border-slate-200 bg-white px-4 shadow-sm hover:bg-slate-50"
-            style={{ color: NAVY }}
+            className="shrink-0 gap-2 rounded-lg border-[#e2e8f0] bg-white px-4 text-[#0f172a] shadow-sm hover:bg-[#f8fafc]"
             asChild
           >
             <Link href="/documents?type=change_order">
@@ -290,104 +379,102 @@ function NewChangeOrderContent() {
           </Button>
         </div>
 
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-          <div className="min-w-0 flex-1 lg:max-w-[calc(100%-20rem)]">
-            <Card className="border border-slate-200/80 bg-white shadow-sm">
-              <CardContent className="space-y-10 p-6 sm:p-8">
-                <section>
-                  {sectionTitle(1, 'Project & Change Order Info')}
-                  <div className="grid gap-5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-                    <div className="min-w-0">
-                      <label className={labelClass} style={{ color: NAVY }}>
-                        Project <span className="text-destructive">*</span>
-                      </label>
-                      <Select
-                        value={formData.projectId}
-                        onValueChange={(value) => setFormData({ ...formData, projectId: value })}
-                      >
-                        <SelectTrigger className="h-9 w-full min-w-0 rounded-lg border-slate-200 text-left shadow-xs">
-                          <SelectValue placeholder="Select a project" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {projects.map((project) => (
-                            <SelectItem key={project.id} value={project.id}>
-                              {project.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {selectedProject ? (
-                        <p className="mt-1.5 text-xs text-muted-foreground">
-                          {selectedProject.projectNumber} • {selectedProject.address}
-                        </p>
-                      ) : null}
-                    </div>
-
-                    <div>
-                      <label className={labelClass} style={{ color: NAVY }}>
-                        Change Order Number <span className="text-destructive">*</span>
-                      </label>
-                      <Input
-                        value={formData.changeOrderNumber}
-                        onChange={(e) =>
-                          setFormData({ ...formData, changeOrderNumber: e.target.value })
-                        }
-                        className="rounded-lg border-slate-200 shadow-xs"
-                      />
-                      <p className={hintClass}>Next number: CO-005</p>
-                    </div>
-
-                    <div className="sm:col-span-2">
-                      <label className={labelClass} style={{ color: NAVY }}>
-                        Title <span className="text-destructive">*</span>
-                      </label>
-                      <Input
-                        value={formData.title}
-                        onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                        className="rounded-lg border-slate-200 shadow-xs"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-2">
-                      <label className={labelClass} style={{ color: NAVY }}>
-                        Date <span className="text-destructive">*</span>
-                      </label>
-                      <div className="relative max-w-xs">
-                        <Input
-                          type="date"
-                          value={formData.date}
-                          onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                          className="rounded-lg border-slate-200 pr-10 shadow-xs"
-                        />
-                        <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      </div>
-                    </div>
-                  </div>
-                </section>
-
-                <section>
-                  {sectionTitle(2, 'Description of Change', true)}
-                  <p className="mb-3 text-sm text-muted-foreground">
-                    Provide a clear description of the work change.
-                  </p>
-                  <Textarea
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    rows={5}
-                    className="resize-none rounded-lg border-slate-200 text-[15px] leading-relaxed shadow-xs"
+        <div className="grid grid-cols-1 gap-6 md:gap-7 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
+          <div className="min-w-0 space-y-6">
+            <div className={formCardClassName()}>
+              <div className="grid gap-5 sm:grid-cols-3">
+                <div className="min-w-0 sm:col-span-1">
+                  <label className={capLabel}>
+                    Project <span className="text-destructive">*</span>
+                  </label>
+                  <Select
+                    value={formData.projectId}
+                    onValueChange={(value) => setFormData((p) => ({ ...p, projectId: value }))}
+                  >
+                    <SelectTrigger className="w-full min-w-0 text-left">
+                      <SelectValue placeholder="Select a project" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {projects.map((project) => (
+                        <SelectItem key={project.id} value={project.id}>
+                          {project.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedProject?.address ? (
+                    <p className="mt-1.5 text-xs text-[#94a3b8]">{selectedProject.address}</p>
+                  ) : null}
+                </div>
+                <div>
+                  <label className={capLabel}>
+                    Change order number <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    value={formData.changeOrderNumber}
+                    onChange={(e) => setFormData((p) => ({ ...p, changeOrderNumber: e.target.value }))}
                   />
-                  <p className={hintClass}>{formData.description.length} characters</p>
-                </section>
+                  <p className={hintClass}>Next number: CO-005</p>
+                </div>
+                <div>
+                  <label className={capLabel}>
+                    Document date <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    type="date"
+                    value={formData.date}
+                    onChange={(e) => setFormData((p) => ({ ...p, date: e.target.value }))}
+                  />
+                </div>
+              </div>
+            </div>
 
-                <MissingScopeCallout />
+            <div className={formCardClassName()}>
+              <div className="mb-6">
+                <label className={capLabel}>
+                  Title <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  value={formData.title}
+                  onChange={(e) => setFormData((p) => ({ ...p, title: e.target.value }))}
+                  placeholder="e.g., Additional Electrical Outlets - Levels 2 and 3"
+                />
+              </div>
 
-                <section>
-                  {sectionTitle(3, 'Reason for Change')}
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <span className={capLabelRow}>Description of change</span>
+                <button
+                  type="button"
+                  onClick={() => void handleGenerateDescription()}
+                  disabled={isGeneratingDescription}
+                  className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-[#0f172a] transition-colors hover:text-[#334155] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb]/25 focus-visible:ring-offset-2"
+                >
+                  <Sparkles className="h-4 w-4 text-[#ca8a04]" strokeWidth={2} aria-hidden />
+                  AI Generate Description
+                </button>
+              </div>
+              <MissingScopeEditorSection
+                variant="document-description"
+                documentApiType={docTypeToMissingScopeType('change_order')}
+                value={formData.description}
+                onChange={(v) => setFormData((prev) => ({ ...prev, description: v }))}
+                isGeneratingDescription={isGeneratingDescription}
+                rows={8}
+                placeholder="Describe the requested change, affected area, and intended outcome..."
+              />
+              <p className={hintClass}>{formData.description.length} characters</p>
+            </div>
+
+            <div className={formCardClassName()}>
+              <h2 className="mb-5 text-lg font-semibold text-[#0f172a]">Change details</h2>
+              <div className="grid gap-5 sm:grid-cols-3">
+                <div>
+                  <label className={capLabel}>Reason for change</label>
                   <Select
                     value={formData.reason}
-                    onValueChange={(value) => setFormData({ ...formData, reason: value })}
+                    onValueChange={(value) => setFormData((p) => ({ ...p, reason: value }))}
                   >
-                    <SelectTrigger className="w-full max-w-md rounded-lg border-slate-200 shadow-xs sm:w-72">
+                    <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select reason" />
                     </SelectTrigger>
                     <SelectContent>
@@ -398,270 +485,267 @@ function NewChangeOrderContent() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className={hintClass}>Why is this change necessary?</p>
-                </section>
-
-                <section>
-                  {sectionTitle(4, 'Cost & Schedule Impact')}
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    <div>
-                      <label className={labelClass} style={{ color: NAVY }}>
-                        Cost Impact
-                      </label>
-                      <div className="relative max-w-md">
-                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                          $
-                        </span>
-                        <Input
-                          value={formData.costImpact}
-                          onChange={(e) =>
-                            setFormData({ ...formData, costImpact: e.target.value })
-                          }
-                          className="rounded-lg border-slate-200 pl-7 pr-14 shadow-xs"
-                          placeholder="8,750.00"
-                        />
-                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                          USD
-                        </span>
-                      </div>
-                      <p className={hintClass}>Enter 0 if no cost impact</p>
-                    </div>
-
-                    <div>
-                      <label className={labelClass} style={{ color: NAVY }}>
-                        Schedule Impact
-                      </label>
-                      <Select
-                        value={formData.scheduleImpact}
-                        onValueChange={(value) =>
-                          setFormData({ ...formData, scheduleImpact: value })
-                        }
-                      >
-                        <SelectTrigger className="max-w-md rounded-lg border-slate-200 shadow-xs">
-                          <SelectValue placeholder="Select impact" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {SCHEDULE_OPTIONS.map((o) => (
-                            <SelectItem key={o.value} value={o.value}>
-                              {o.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className={hintClass}>How many days will this add to the schedule?</p>
-                    </div>
-                  </div>
-                </section>
-
-                <section>
-                  {sectionTitle(5, 'Attachments (Optional)')}
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => fileInputRef.current?.click()}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        fileInputRef.current?.click()
-                      }
-                    }}
-                    onDragOver={(e) => {
-                      e.preventDefault()
-                      e.dataTransfer.dropEffect = 'copy'
-                    }}
-                    onDrop={onDrop}
-                    className={cn(
-                      'mb-4 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 transition-colors',
-                      'border-primary/35 bg-primary/5 hover:border-primary/55 hover:bg-primary/10'
-                    )}
-                  >
-                    <Upload className="mb-2 h-8 w-8 text-primary" />
-                    <p className="text-center text-sm font-medium" style={{ color: NAVY }}>
-                      Drag & drop files here, or{' '}
-                      <span className="text-primary underline underline-offset-2">
-                        click to browse
-                      </span>
-                    </p>
-                    <p className="mt-1 text-center text-xs text-muted-foreground">
-                      Drawings, photos, specifications, etc. (PDF, JPG, PNG, DOC)
-                    </p>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      className="hidden"
-                      onChange={handleFileUpload}
-                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                </div>
+                <div>
+                  <label className={capLabel}>Cost impact</label>
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                      $
+                    </span>
+                    <Input
+                      value={formData.costImpact}
+                      onChange={(e) => setFormData((p) => ({ ...p, costImpact: e.target.value }))}
+                      className="pl-7 pr-14"
+                      placeholder="8,750.00"
                     />
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                      USD
+                    </span>
                   </div>
-
-                  {attachments.length > 0 && (
-                    <div className="space-y-2">
-                      {attachments.map((file) => (
-                        <div
-                          key={file.id}
-                          className="flex items-center justify-between rounded-lg border border-sky-100 bg-sky-50/90 px-4 py-3"
-                        >
-                          <div className="flex min-w-0 items-center gap-3">
-                            <FileText className="h-5 w-5 shrink-0 text-sky-700/70" />
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-medium text-sky-950 underline decoration-sky-300">
-                                {file.name}
-                              </p>
-                              <p className="text-xs text-muted-foreground">{file.size}</p>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              removeAttachment(file.id)
-                            }}
-                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-white/80 hover:text-foreground"
-                            aria-label={`Remove ${file.name}`}
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
+                </div>
+                <div>
+                  <label className={capLabel}>Schedule impact</label>
+                  <Select
+                    value={formData.scheduleImpact}
+                    onValueChange={(value) => setFormData((p) => ({ ...p, scheduleImpact: value }))}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select impact" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SCHEDULE_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                        </SelectItem>
                       ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            <div className={formCardClassName()}>
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-[#0f172a]">Supporting documents</h2>
+                <span className="rounded-full bg-[#dbeafe] px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-[#1e40af]">
+                  Upload related files
+                </span>
+              </div>
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    fileInputRef.current?.click()
+                  }
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'copy'
+                }}
+                onDrop={onDrop}
+                className={cn(
+                  'mb-4 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#cbd5e1] bg-[#f8fafc] p-10 transition-colors hover:border-[#94a3b8] hover:bg-[#f1f5f9]'
+                )}
+              >
+                <Upload className="mb-3 h-10 w-10 text-[#94a3b8]" strokeWidth={1.25} />
+                <p className="text-center text-sm font-medium text-[#334155]">
+                  Drag and drop change docs or{' '}
+                  <span className="font-semibold text-[#0f172a] underline decoration-[#cbd5e1] underline-offset-2">
+                    browse files
+                  </span>{' '}
+                  from your computer
+                </p>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleFileUpload}
+                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+              />
+              <div className="space-y-2">
+                {attachments.map((file) => (
+                  <div
+                    key={file.id}
+                    className="flex items-center justify-between rounded-lg border border-[#e2e8f0] bg-[#f1f5f9] px-4 py-3"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <FileText className="h-5 w-5 shrink-0 text-[#64748b]" />
+                      <div className="min-w-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDownloadAttachment(file)
+                          }}
+                          className="truncate text-left text-sm font-semibold text-[#0f172a] hover:text-[#1e3a8a]"
+                        >
+                          {file.name}
+                        </button>
+                        <p className="text-xs text-[#64748b]">{file.size}</p>
+                      </div>
                     </div>
-                  )}
-                </section>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        removeAttachment(file.id)
+                      }}
+                      className="rounded-md p-1.5 text-[#ef4444] transition-colors hover:bg-red-50"
+                      aria-label={`Remove ${file.name}`}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-                <section>
-                  {sectionTitle(6, 'Notes (Optional)')}
-                  <Textarea
-                    value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    placeholder="Please review and approve. Work to begin upon approval."
-                    rows={3}
-                    className="resize-none rounded-lg border-slate-200 shadow-xs"
-                  />
-                  <p className={hintClass}>{formData.notes.length} characters</p>
-                </section>
+            <div className={formCardClassName()}>
+              <label className={capLabel}>Additional notes (optional)</label>
+              <Textarea
+                value={formData.notes}
+                onChange={(e) => setFormData((p) => ({ ...p, notes: e.target.value }))}
+                placeholder="Please review and approve. Work to begin upon approval."
+                rows={3}
+                className="resize-none"
+              />
+              <p className={hintClass}>{formData.notes.length} characters</p>
+            </div>
 
-                <div className="flex flex-col gap-3 border-t border-slate-100 pt-6 sm:flex-row sm:items-center">
-                  <Button
-                    type="button"
-                    onClick={() => handleSubmit(false)}
-                    disabled={isSubmitting}
-                    className="gap-2 rounded-lg px-5 shadow-sm"
-                  >
-                    <Sparkles className="h-4 w-4" />
-                    Generate Change Order
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => handleSubmit(true)}
-                    disabled={isSubmitting}
-                    className="gap-2 rounded-lg border-slate-200 bg-white px-5 shadow-xs"
-                    style={{ color: NAVY }}
-                  >
-                    <Save className="h-4 w-4" />
-                    Save Draft
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+            <div className="flex flex-col gap-3 border-t border-[#e2e8f0] pt-6 sm:flex-row sm:items-center sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-2 border-2 border-dashed border-[#60a5fa] bg-white text-[#1e3a8a] shadow-sm hover:bg-[#eff6ff]"
+                onClick={() => handleSubmit(true)}
+                disabled={isSubmitting}
+              >
+                <Save className="h-4 w-4" />
+                Save as Draft
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                className="min-w-[10rem] !bg-[#0b1d3a] text-white shadow-[0_4px_14px_rgba(15,23,42,0.25)] hover:!bg-[#132b4f] hover:brightness-100"
+                onClick={() => handleSubmit(false)}
+                disabled={isSubmitting}
+              >
+                Send for Review
+              </Button>
+            </div>
           </div>
 
-          <div className="w-full shrink-0 space-y-4 lg:w-88">
-            <Card className="border border-slate-200/80 bg-white shadow-sm">
-              <CardContent className="p-6">
-                <h3 className="mb-5 text-base font-semibold" style={{ color: NAVY }}>
-                  Summary
-                </h3>
+          <aside className="w-full min-w-0 space-y-6 lg:sticky lg:top-6 lg:self-start">
+            <div className={formCardClassName()}>
+              <ReviewerManagementSection
+                embedded
+                layout="create"
+                onSend={async () => {
+                  // Creation flow has no document id yet; keep UX consistent with other sections.
+                }}
+              />
+            </div>
 
-                <div className="space-y-4">
-                  <div>
-                    <p className="text-xs text-muted-foreground">Project</p>
-                    <p className="text-sm font-semibold" style={{ color: NAVY }}>
-                      {selectedProject?.name ?? '—'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {selectedProject?.projectNumber ?? ''}
-                    </p>
-                  </div>
-
-                  <div className="border-t border-slate-100 pt-4">
-                    <p className="text-xs text-muted-foreground">Change Order #</p>
-                    <p className="text-sm font-semibold" style={{ color: NAVY }}>
-                      {formData.changeOrderNumber || '—'}
-                    </p>
-                  </div>
-
-                  <div className="border-t border-slate-100 pt-4">
-                    <p className="text-xs text-muted-foreground">Title</p>
-                    <p className="text-sm font-semibold leading-snug" style={{ color: NAVY }}>
-                      {formData.title || '—'}
-                    </p>
-                  </div>
-
-                  <div className="border-t border-slate-100 pt-4">
-                    <p className="text-xs text-muted-foreground">Date</p>
-                    <p className="text-sm font-semibold" style={{ color: NAVY }}>
-                      {formData.date
-                        ? new Date(formData.date + 'T12:00:00').toLocaleDateString('en-US', {
-                            month: 'long',
-                            day: 'numeric',
-                            year: 'numeric',
-                          })
-                        : '—'}
-                    </p>
-                  </div>
-
-                  <div className="border-t border-slate-100 pt-4">
-                    <p className="text-xs text-muted-foreground">Cost Impact</p>
-                    <p className="text-2xl font-bold tracking-tight" style={{ color: NAVY }}>
-                      {formData.costImpact.trim()
-                        ? `$${formatUsd(parseMoneyInput(formData.costImpact))}`
-                        : '—'}
-                    </p>
-                  </div>
-
-                  <div className="border-t border-slate-100 pt-4">
-                    <p className="text-xs text-muted-foreground">Schedule Impact</p>
-                    <p className="text-2xl font-bold tracking-tight" style={{ color: NAVY }}>
-                      {scheduleLabel}
-                    </p>
-                  </div>
-
-                  <Button
-                    type="button"
-                    className="mt-2 w-full gap-2 rounded-lg shadow-sm"
-                    onClick={() =>
-                      toast.message('Preview', {
-                        description: 'Document preview will open here.',
-                      })
-                    }
-                  >
-                    <Eye className="h-4 w-4" />
-                    Preview Document
-                  </Button>
+            <div className={formCardClassName()}>
+              <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">
+                Categorization
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label className={capLabel}>Reason</label>
+                  <p className="text-sm font-medium text-[#0f172a]">{reasonLabel}</p>
                 </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 bg-sky-50/90 shadow-sm ring-1 ring-sky-100">
-              <CardContent className="p-5">
-                <div className="flex gap-3">
-                  <Lightbulb className="mt-0.5 h-5 w-5 shrink-0 text-sky-800/70" />
-                  <div>
-                    <h4 className="text-sm font-semibold" style={{ color: NAVY }}>
-                      Need Help?
-                    </h4>
-                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                      Be specific and detailed for better results. You can always edit before
-                      generating.
-                    </p>
-                  </div>
+                <div className="border-t border-[#e2e8f0] pt-4">
+                  <label className={capLabel}>Schedule impact</label>
+                  <p className="text-sm font-medium text-[#0f172a]">{scheduleLabel}</p>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
 
-            <ReviewerManagementSection />
-          </div>
+            <div className={formCardClassName()}>
+              <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">
+                Summary
+              </h3>
+
+              <div className="space-y-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Project</p>
+                  <p className="text-sm font-semibold" style={{ color: NAVY }}>
+                    {selectedProject?.name ?? '—'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{selectedProject?.address ?? ''}</p>
+                </div>
+
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">Change Order #</p>
+                  <p className="text-sm font-semibold" style={{ color: NAVY }}>
+                    {formData.changeOrderNumber || '—'}
+                  </p>
+                </div>
+
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">Title</p>
+                  <p className="text-sm font-semibold leading-snug" style={{ color: NAVY }}>
+                    {formData.title || '—'}
+                  </p>
+                </div>
+
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">Date</p>
+                  <p className="text-sm font-semibold" style={{ color: NAVY }}>
+                    {formData.date
+                      ? new Date(formData.date + 'T12:00:00').toLocaleDateString('en-US', {
+                          month: 'long',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })
+                      : '—'}
+                  </p>
+                </div>
+
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">Cost Impact</p>
+                  <p className="text-2xl font-bold tracking-tight" style={{ color: NAVY }}>
+                    {formData.costImpact.trim()
+                      ? `$${formatUsd(parseMoneyInput(formData.costImpact))}`
+                      : '—'}
+                  </p>
+                </div>
+
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">Schedule Impact</p>
+                  <p className="text-2xl font-bold tracking-tight" style={{ color: NAVY }}>
+                    {scheduleLabel}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="relative overflow-hidden rounded-xl border border-[#e2e8f0] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+              <div
+                className="aspect-[4/3] bg-cover bg-center bg-no-repeat"
+                style={{
+                  backgroundImage:
+                    "url('https://lh3.googleusercontent.com/aida-public/AB6AXuD7_4vd9OR1EKDJrX4T4pU1yOiptI0UoYbbOj4vqoVlL2cp6BJs173PepMwegslSa7ee1TNhCyjvXkiUUuL_PuNaxYgDwpRZ0TxEEn4NB7oKeW8ql6vx0K1FXp1eLA9iAI3P4R2b_HoBBmqCRTbBkmL2XsW7HHZWjryVmWG9mrQfD1c4WuCt-r2kwYqSfqc77yaaGEQSiKQhbm5-5c1i_P2TL-OpAedYi3Bw-VvmEauxJOLSm2bPWzsD5_bDiT-1yojYmMWyNu58d4')",
+                }}
+              />
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
+              <div className="absolute bottom-4 left-4 right-4 text-white">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/80">
+                  Reference context
+                </p>
+                <p className="mt-1 text-xl font-bold tracking-tight">Coordination Zone</p>
+                <p className="mt-1 text-xs text-white/70">
+                  Attach sketches and photos to speed up reviewer approval.
+                </p>
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
     </div>

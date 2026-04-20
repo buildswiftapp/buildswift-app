@@ -1,25 +1,34 @@
 'use client'
 
-import { use, useCallback, useMemo, useRef, useState } from 'react'
+import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft,
-  CalendarDays,
-  Eye,
-  FileText,
-  Lightbulb,
   Save,
-  Sparkles,
   Trash2,
   Upload,
   X,
 } from 'lucide-react'
-import { useApp } from '@/lib/app-context'
+import { toast } from 'sonner'
+import { apiFetch } from '@/lib/api'
+import {
+  buildChangeOrderHtml,
+  buildRfiHtml,
+  buildSubmittalHtml,
+  CO_REASON_OPTIONS,
+  CO_SCHEDULE_OPTIONS,
+  formatUsd,
+  getLatestVersion,
+  initialChangeOrderState,
+  initialRfiState,
+  initialSubmittalState,
+  parseMoneyInput,
+} from '@/lib/document-html'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { Spinner } from '@/components/ui/spinner'
 import {
   Select,
   SelectContent,
@@ -27,71 +36,49 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from '@/components/ui/empty'
 import { cn } from '@/lib/utils'
-import { toast } from 'sonner'
-import { mockTeamMembers } from '@/lib/mock-data'
-import type { Attachment as DocAttachment } from '@/lib/types'
-import { MissingScopeCallout } from '@/app/components/missing-scope-callout'
+import { MissingScopeEditorSection } from '@/app/components/missing-scope-editor-section'
+import { docTypeToMissingScopeType, setMissingScopeSeedIfMissing } from '@/lib/missing-scope-client'
 import { ReviewerManagementSection } from '@/app/components/reviewer-management-section'
+import type { Attachment as DocAttachment } from '@/lib/types'
 
+const PAGE_BG = '#f1f5f9'
 const NAVY = '#0f172a'
-const PREVIEW_BLUE = '#2563eb'
+const capLabel = 'mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-[#64748b]'
+const capLabelRow = 'text-[11px] font-semibold uppercase tracking-[0.14em] text-[#64748b]'
 
-const REASON_OPTIONS = [
-  { value: 'owner_request', label: 'Owner Request' },
-  { value: 'design_change', label: 'Design Change' },
-  { value: 'field_conditions', label: 'Field Conditions' },
-  { value: 'code_requirement', label: 'Code Requirement' },
-  { value: 'value_engineering', label: 'Value Engineering' },
-  { value: 'other', label: 'Other' },
-] as const
+function formCardClassName(extra?: string) {
+  return cn(
+    'rounded-xl border border-[#e2e8f0] bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.06)] sm:p-6 lg:p-7 xl:p-8',
+    extra
+  )
+}
 
-const SCHEDULE_OPTIONS = [
-  { value: 'none', label: 'No Impact' },
-  { value: '+1', label: '+ 1 day' },
-  { value: '+2', label: '+ 2 days' },
-  { value: '+3', label: '+ 3 days' },
-  { value: '+5', label: '+ 5 days' },
-  { value: '+7', label: '+ 7 days' },
-  { value: '+14', label: '+ 14 days' },
-  { value: '+30', label: '+ 30 days' },
-  { value: 'tbd', label: 'TBD' },
-] as const
+type ApiProject = { id: string; name: string; address?: string | null }
+
+type ApiDocVersion = {
+  version_no: number
+  title: string
+  description: string
+  metadata: Record<string, unknown> | null
+}
+
+type ApiDocument = {
+  id: string
+  project_id: string
+  doc_type: 'rfi' | 'submittal' | 'change_order'
+  doc_number: string | null
+  title: string
+  description: string
+  document_versions: ApiDocVersion[]
+  attachments?: Array<{ id: string; file_name: string; size_bytes: number | null }>
+}
+type AiGenerateResponse = { generatedContent: string }
 
 interface LocalAttachment {
   id: string
   name: string
   size: string
-}
-
-function stripHtml(value: string): string {
-  return value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
-function extractNumberFromHtml(content: string, type: 'rfi' | 'submittal'): string {
-  const pattern =
-    type === 'rfi'
-      ? /RFI Number:<\/strong>\s*([^<]+)/i
-      : /Submittal Number:<\/strong>\s*([^<]+)/i
-  const match = content.match(pattern)
-  return match?.[1]?.trim() || (type === 'rfi' ? 'RFI-001' : 'SUB-001')
 }
 
 function formatBytes(bytes: number): string {
@@ -100,207 +87,154 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function parseMoneyInput(raw: string): number {
-  const n = parseFloat(raw.replace(/[^0-9.]/g, ''))
-  return Number.isFinite(n) ? n : 0
+function attachmentsFromMeta(raw: unknown): LocalAttachment[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map((a: Record<string, unknown>, i: number) => ({
+    id: String(a.id ?? `att-${i}`),
+    name: String(a.name ?? 'file'),
+    size:
+      typeof a.size === 'number'
+        ? formatBytes(a.size)
+        : String(a.size ?? ''),
+  }))
 }
 
-function formatUsd(n: number): string {
-  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+function attachmentsFromRows(
+  rows: Array<{ id: string; file_name: string; size_bytes: number | null }> | undefined
+): LocalAttachment[] {
+  if (!rows?.length) return []
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.file_name,
+    size: typeof row.size_bytes === 'number' ? formatBytes(row.size_bytes) : '',
+  }))
 }
 
-function buildRfiHtml(values: {
-  number: string
-  title: string
-  date: string
-  projectName: string
-  question: string
-  description: string
-  notes: string
-}): string {
-  const dateLong = values.date
-    ? new Date(values.date + 'T12:00:00').toLocaleDateString('en-US', {
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric',
-      })
-    : ''
-  return `<h2>Request for Information</h2>
-<p><strong>RFI Number:</strong> ${values.number}</p>
-<p><strong>Date:</strong> ${dateLong}</p>
-<p><strong>Project:</strong> ${values.projectName}</p>
-<p><strong>Title:</strong> ${values.title}</p>
-<h3>Question</h3>
-<p>${values.question || values.description}</p>
-<h3>Description / Context</h3>
-<p>${values.description}</p>
-${values.notes ? `<h3>Notes</h3><p>${values.notes}</p>` : ''}`
+function toDocAttachments(items: LocalAttachment[]): DocAttachment[] {
+  return items.map((a) => ({
+    id: a.id,
+    name: a.name,
+    url: '#',
+    size: 0,
+    type: a.name.split('.').pop() || 'file',
+  }))
 }
 
-function buildSubmittalHtml(values: {
-  number: string
-  title: string
-  date: string
-  projectName: string
-  specSection: string
-  manufacturer: string
-  productName: string
-  description: string
-  notes: string
-}): string {
-  const dateLong = values.date
-    ? new Date(values.date + 'T12:00:00').toLocaleDateString('en-US', {
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric',
-      })
-    : ''
-  return `<h2>Product Submittal</h2>
-<p><strong>Submittal Number:</strong> ${values.number}</p>
-<p><strong>Date:</strong> ${dateLong}</p>
-<p><strong>Project:</strong> ${values.projectName}</p>
-<p><strong>Title:</strong> ${values.title}</p>
-<p><strong>Specification Section:</strong> ${values.specSection || 'N/A'}</p>
-<h3>Product Information</h3>
-<p><strong>Manufacturer:</strong> ${values.manufacturer || 'TBD'}</p>
-<p><strong>Product:</strong> ${values.productName || 'TBD'}</p>
-<h3>Description</h3>
-<p>${values.description}</p>
-${values.notes ? `<h3>Notes</h3><p>${values.notes}</p>` : ''}`
-}
-
-function buildChangeOrderHtml(values: {
-  coNumber: string
-  date: string
-  projectName: string
-  title: string
-  description: string
-  reasonLabel: string
-  cost: number
-  scheduleLabel: string
-  notes: string
-}): string {
-  const dateLong = values.date
-    ? new Date(values.date + 'T12:00:00').toLocaleDateString('en-US', {
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric',
-      })
-    : ''
-  const desc = values.description.split('\n').join('</p><p>')
-  return `<h2>Change Order Request</h2>
-<p><strong>Change Order Number:</strong> ${values.coNumber}</p>
-<p><strong>Date:</strong> ${dateLong}</p>
-<p><strong>Project:</strong> ${values.projectName}</p>
-<p><strong>Title:</strong> ${values.title}</p>
-<h3>Description of Change</h3>
-<p>${desc}</p>
-<h3>Reason for Change</h3>
-<p>${values.reasonLabel}</p>
-<h3>Cost Impact</h3>
-<p>$${formatUsd(values.cost)}</p>
-<h3>Schedule Impact</h3>
-<p>${values.scheduleLabel}</p>
-${values.notes ? `<h3>Notes</h3><p>${values.notes}</p>` : ''}`
-}
-
-export default function DocumentDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>
-}) {
+export default function DocumentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const router = useRouter()
-  const { documents, projects, deleteDocument, updateDocument } = useApp()
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
-  const [isGenerating, setIsGenerating] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const document = documents.find((d) => d.id === id)
-  if (!document) {
-    return (
-      <div className="flex flex-col">
-        <div className="flex-1 p-6">
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>Document not found</EmptyTitle>
-              <EmptyDescription>
-                The document you are looking for does not exist.
-              </EmptyDescription>
-            </EmptyHeader>
-            <EmptyContent>
-              <Button asChild>
-                <Link href="/documents">Back to Documents</Link>
-              </Button>
-            </EmptyContent>
-          </Empty>
-        </div>
-      </div>
-    )
-  }
+  const [loading, setLoading] = useState(true)
+  const [projects, setProjects] = useState<ApiProject[]>([])
+  const [doc, setDoc] = useState<ApiDocument | null>(null)
 
-  const isSubmittal = document.type === 'submittal'
-  const isChangeOrder = document.type === 'change_order'
-  const attachmentsFromDoc = document.metadata.attachments || []
-  const [attachments, setAttachments] = useState<LocalAttachment[]>(
-    attachmentsFromDoc.map((a) => ({
-      id: a.id,
-      name: a.name,
-      size: a.size ? formatBytes(a.size) : 'Attached file',
-    }))
-  )
-  const [formData, setFormData] = useState(() => {
-    const reasonValue =
-      REASON_OPTIONS.find((r) => r.label === document.metadata.reason)?.value || 'other'
-    const scheduleValue =
-      SCHEDULE_OPTIONS.find((s) => s.label === document.metadata.scheduleImpact)?.value || 'none'
-    return {
-      projectId: document.projectId,
-      number: extractNumberFromHtml(document.content, isSubmittal ? 'submittal' : 'rfi'),
-      title: document.title,
-      date: (document.metadata.changeOrderDate || document.createdAt).slice(0, 10),
-      question: document.metadata.question || '',
-      description: stripHtml(document.content),
-      specSection: document.metadata.specSection || '',
-      manufacturer: document.metadata.manufacturer || '',
-      productName: document.metadata.productName || '',
-      notes: document.metadata.notes || '',
-      reason: reasonValue,
-      costImpact: document.metadata.proposedAmount ? `${document.metadata.proposedAmount}` : '0',
-      scheduleImpact: scheduleValue,
-      changeOrderNumber: document.metadata.changeOrderNumber || 'CO-001',
-    }
+  const [rfi, setRfi] = useState({
+    number: '',
+    title: '',
+    date: '',
+    question: '',
+    description: '',
+    notes: '',
   })
+  const [sub, setSub] = useState({
+    number: '',
+    title: '',
+    date: '',
+    specSection: '',
+    manufacturer: '',
+    productName: '',
+    description: '',
+    notes: '',
+  })
+  const [co, setCo] = useState({
+    changeOrderNumber: '',
+    date: '',
+    title: '',
+    description: '',
+    reason: 'owner_request',
+    costImpact: '0',
+    scheduleImpact: 'none',
+    notes: '',
+  })
+  const [attachments, setAttachments] = useState<LocalAttachment[]>([])
 
-  const selectedProject = useMemo(
-    () => projects.find((p) => p.id === formData.projectId),
-    [projects, formData.projectId]
-  )
+  const [isSaving, setIsSaving] = useState(false)
+  const [isGeneratingDescription, setIsGeneratingDescription] = useState(false)
 
-  const getCreatorName = (userId: string) => {
-    const user = mockTeamMembers.find((m) => m.id === userId)
-    return user?.name || 'Unknown User'
-  }
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [docRes, projRes] = await Promise.all([
+          apiFetch<{ document: ApiDocument }>('/api/documents/' + id),
+          apiFetch<{ projects: ApiProject[] }>('/api/projects'),
+        ])
+        const d = docRes.document
+        setDoc(d)
+        setProjects(projRes.projects)
 
-  const sectionTitle = (n: number, title: string, required?: boolean) => (
-    <div className="mb-4 flex items-center gap-3">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground shadow-sm">
-        {n}
-      </div>
-      <h2 className="text-lg font-semibold leading-tight" style={{ color: NAVY }}>
-        {title}
-        {required ? <span className="text-destructive"> *</span> : null}
-      </h2>
-    </div>
-  )
+        const latest = getLatestVersion(d.document_versions)
+        const meta = (latest?.metadata as Record<string, unknown>) ?? {}
+        const html = d.description || ''
+
+        const metaAttachments = attachmentsFromMeta(meta.attachments)
+        const rowAttachments = attachmentsFromRows(d.attachments)
+        const initialAttachments = metaAttachments.length > 0 ? metaAttachments : rowAttachments
+
+        if (d.doc_type === 'rfi') {
+          const s = initialRfiState({ doc: d, latestMeta: meta, html })
+          setRfi(s)
+          setAttachments(initialAttachments)
+        } else if (d.doc_type === 'submittal') {
+          const s = initialSubmittalState({ doc: d, latestMeta: meta, html })
+          setSub(s)
+          setAttachments(initialAttachments)
+        } else {
+          const s = initialChangeOrderState({ doc: d, latestMeta: meta, html })
+          setCo({
+            changeOrderNumber: s.changeOrderNumber,
+            date: s.date,
+            title: s.title,
+            description: s.description,
+            reason: s.reason,
+            costImpact: s.costImpact,
+            scheduleImpact: s.scheduleImpact,
+            notes: s.notes,
+          })
+          setAttachments(initialAttachments)
+        }
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to load document')
+      } finally {
+        setLoading(false)
+      }
+    }
+    void load()
+  }, [id])
+
+  const projectId = doc?.project_id ?? ''
+  const selectedProject = projects.find((p) => p.id === projectId)
+  const docType = doc?.doc_type ?? 'rfi'
 
   const reasonLabel =
-    REASON_OPTIONS.find((r) => r.value === formData.reason)?.label ?? 'Other'
+    CO_REASON_OPTIONS.find((r) => r.value === co.reason)?.label ?? co.reason
   const scheduleLabel =
-    SCHEDULE_OPTIONS.find((s) => s.value === formData.scheduleImpact)?.label ?? 'No Impact'
-  const costNumeric = parseMoneyInput(formData.costImpact)
-  const labelClass = 'mb-1.5 block text-sm font-medium'
+    CO_SCHEDULE_OPTIONS.find((s) => s.value === co.scheduleImpact)?.label ?? '—'
+  const costNumeric = parseMoneyInput(co.costImpact)
+
+  const hintClass = 'mt-1.5 text-xs text-[#64748b]'
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files?.length) return
+    const next: LocalAttachment[] = Array.from(files).map((file, index) => ({
+      id: `up-${Date.now()}-${index}`,
+      name: file.name,
+      size: formatBytes(file.size),
+    }))
+    setAttachments((prev) => [...prev, ...next])
+    e.target.value = ''
+  }
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -314,555 +248,619 @@ export default function DocumentDetailPage({
     setAttachments((prev) => [...prev, ...next])
   }, [])
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files?.length) return
-    const next: LocalAttachment[] = Array.from(files).map((file, index) => ({
-      id: `upload-${Date.now()}-${index}`,
-      name: file.name,
-      size: formatBytes(file.size),
-    }))
-    setAttachments((prev) => [...prev, ...next])
-    e.target.value = ''
+  const removeAttachment = (aid: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== aid))
   }
 
-  const removeAttachment = (idToRemove: string) => {
-    setAttachments((prev) => prev.filter((a) => a.id !== idToRemove))
-  }
-
-  const handleAIGenerate = async () => {
-    if (!formData.title.trim() && !formData.description.trim()) {
-      toast.error('Add a title or description first')
-      return
-    }
-
-    setIsGenerating(true)
-    try {
-      const res = await fetch('/api/ai/generate-description', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: formData.title || formData.description }),
-      })
-      const data = await res.json()
-      setFormData((prev) => ({ ...prev, description: data.description || prev.description }))
-      toast.success('AI draft generated')
-    } catch {
-      toast.error('Failed to generate with AI')
-    } finally {
-      setIsGenerating(false)
-    }
-  }
-
-  const handleSave = async () => {
-    if (!formData.projectId) return toast.error('Project is required')
-    if (!formData.title.trim()) return toast.error('Title is required')
-    if (!formData.description.trim()) return toast.error('Description is required')
-    if (!isSubmittal && !isChangeOrder && !formData.question.trim()) {
-      return toast.error('Question is required for RFI')
-    }
-
-    const docAttachments: DocAttachment[] = attachments.map((a) => ({
-      id: a.id,
-      name: a.name,
-      url: '#',
-      size: 0,
-      type: a.name.split('.').pop() || 'file',
-    }))
-
-    const content = isChangeOrder
-      ? buildChangeOrderHtml({
-          coNumber: formData.changeOrderNumber,
-          date: formData.date,
-          projectName: selectedProject?.name || '',
-          title: formData.title,
-          description: formData.description,
-          reasonLabel,
-          cost: costNumeric,
-          scheduleLabel,
-          notes: formData.notes,
-        })
-      : isSubmittal
-      ? buildSubmittalHtml({
-          number: formData.number,
-          title: formData.title,
-          date: formData.date,
-          projectName: selectedProject?.name || '',
-          specSection: formData.specSection,
-          manufacturer: formData.manufacturer,
-          productName: formData.productName,
-          description: formData.description,
-          notes: formData.notes,
-        })
-      : buildRfiHtml({
-          number: formData.number,
-          title: formData.title,
-          date: formData.date,
-          projectName: selectedProject?.name || '',
-          question: formData.question,
-          description: formData.description,
-          notes: formData.notes,
-        })
-
+  const savePatch = async (body: {
+    title: string
+    description: string
+    doc_number?: string | null
+    metadata: Record<string, unknown>
+  }) => {
+    if (!doc) return
     setIsSaving(true)
     try {
-      updateDocument(id, {
-        projectId: formData.projectId,
-        title: formData.title,
-        content,
-        metadata: {
-          ...document.metadata,
-          question: isSubmittal || isChangeOrder ? undefined : formData.question || undefined,
-          specSection: isSubmittal ? formData.specSection : undefined,
-          manufacturer: isSubmittal ? formData.manufacturer : undefined,
-          productName: isSubmittal ? formData.productName : undefined,
-          reason: isChangeOrder ? reasonLabel : undefined,
-          proposedAmount: isChangeOrder ? costNumeric : undefined,
-          changeOrderNumber: isChangeOrder ? formData.changeOrderNumber : undefined,
-          changeOrderDate: isChangeOrder ? formData.date : undefined,
-          scheduleImpact: isChangeOrder ? scheduleLabel : undefined,
-          attachments: docAttachments,
-          notes: formData.notes || undefined,
+      await apiFetch('/api/documents/' + id, {
+        method: 'PATCH',
+        json: {
+          ...body,
+          increment_version: true,
         },
       })
       toast.success('Document updated')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update')
     } finally {
       setIsSaving(false)
     }
   }
 
-  const handleDelete = () => {
-    deleteDocument(id)
-    router.push('/documents')
-    toast.success('Document deleted')
+  const handleSaveRfi = async () => {
+    if (!doc || !rfi.title.trim() || !rfi.description.trim()) {
+      toast.error('Title and description are required')
+      return
+    }
+    const html = buildRfiHtml({
+      number: rfi.number,
+      title: rfi.title,
+      date: rfi.date,
+      projectName: selectedProject?.name ?? '',
+      question: rfi.question.trim() || rfi.description,
+      description: rfi.description,
+      notes: rfi.notes,
+    })
+    await savePatch({
+      title: rfi.title,
+      doc_number: rfi.number,
+      description: html,
+      metadata: {
+        notes: rfi.notes || undefined,
+        attachments: toDocAttachments(attachments),
+      },
+    })
+  }
+
+  const handleSaveSubmittal = async () => {
+    if (!doc || !sub.title.trim() || !sub.description.trim()) {
+      toast.error('Title and description are required')
+      return
+    }
+    const html = buildSubmittalHtml({
+      number: sub.number,
+      title: sub.title,
+      date: sub.date,
+      projectName: selectedProject?.name ?? '',
+      specSection: sub.specSection,
+      manufacturer: sub.manufacturer,
+      productName: sub.productName,
+      description: sub.description,
+      notes: sub.notes,
+    })
+    await savePatch({
+      title: sub.title,
+      doc_number: sub.number,
+      description: html,
+      metadata: {
+        specSection: sub.specSection || undefined,
+        manufacturer: sub.manufacturer || undefined,
+        productName: sub.productName || undefined,
+        notes: sub.notes || undefined,
+        attachments: toDocAttachments(attachments),
+      },
+    })
+  }
+
+  const handleSaveCo = async () => {
+    if (!doc || !co.title.trim() || !co.description.trim()) {
+      toast.error('Title and description are required')
+      return
+    }
+    const html = buildChangeOrderHtml({
+      coNumber: co.changeOrderNumber,
+      date: co.date,
+      projectName: selectedProject?.name ?? '',
+      title: co.title,
+      description: co.description,
+      reasonLabel,
+      cost: costNumeric,
+      scheduleLabel,
+      notes: co.notes,
+    })
+    await savePatch({
+      title: co.title,
+      doc_number: co.changeOrderNumber,
+      description: html,
+      metadata: {
+        reason: reasonLabel,
+        proposedAmount: costNumeric,
+        changeOrderNumber: co.changeOrderNumber,
+        changeOrderDate: co.date,
+        scheduleImpact: scheduleLabel,
+        notes: co.notes || undefined,
+        attachments: toDocAttachments(attachments),
+      },
+    })
+  }
+
+  const handleSave = () => {
+    if (docType === 'rfi') void handleSaveRfi()
+    else if (docType === 'submittal') void handleSaveSubmittal()
+    else void handleSaveCo()
+  }
+
+  const handleDelete = async () => {
+    try {
+      await apiFetch('/api/documents/' + id, { method: 'DELETE' })
+      toast.success('Document deleted')
+      router.push('/documents')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to delete')
+    }
+  }
+
+  const handleGenerateDescription = async () => {
+    const currentDescription =
+      docType === 'rfi' ? rfi.description : docType === 'submittal' ? sub.description : co.description
+    const trimmedDescription = currentDescription.trim()
+    if (!trimmedDescription) {
+      toast.error('Enter an initial description before generating with AI')
+      return
+    }
+    setMissingScopeSeedIfMissing(docTypeToMissingScopeType(docType), trimmedDescription)
+
+    setIsGeneratingDescription(true)
+    try {
+      const data = await apiFetch<AiGenerateResponse>('/api/ai/generate', {
+        method: 'POST',
+        json: {
+          documentType: docType === 'rfi' ? 'RFI' : docType === 'submittal' ? 'Submittal' : 'ChangeOrder',
+          description: trimmedDescription,
+        },
+      })
+      const generated = data.generatedContent?.trim()
+      if (!generated) {
+        toast.error('AI generation temporarily unavailable. Please try again.')
+        return
+      }
+
+      if (docType === 'rfi') setRfi((p) => ({ ...p, description: generated }))
+      else if (docType === 'submittal') setSub((p) => ({ ...p, description: generated }))
+      else setCo((p) => ({ ...p, description: generated }))
+      toast.success('Description generated')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'AI generation temporarily unavailable. Please try again.')
+    } finally {
+      setIsGeneratingDescription(false)
+    }
+  }
+
+  const pageTitle = useMemo(() => {
+    if (!doc) return 'Document'
+    if (doc.doc_type === 'rfi') return 'Edit RFI'
+    if (doc.doc_type === 'submittal') return 'Edit Submittal'
+    return 'Edit Change Order'
+  }, [doc])
+
+  if (loading || !doc) {
+    return (
+      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-muted-foreground">
+        <Spinner className="size-8" />
+        <p className="text-sm">Loading document...</p>
+      </div>
+    )
   }
 
   return (
-    <div className="min-h-full bg-[#f8f9fb] px-4 py-8 sm:px-6 lg:px-10">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="max-w-2xl">
-            <h1 className="text-3xl font-bold tracking-tight" style={{ color: NAVY }}>
-              {isChangeOrder ? 'Change Order Details' : isSubmittal ? 'Submittal Details' : 'RFI Details'}
-            </h1>
-            <p className="mt-2 text-base leading-relaxed text-muted-foreground">
-              {isChangeOrder
-                ? 'Same layout as new change order, prefilled from this document.'
-                : 'Same builder layout as create page, prefilled from the selected document.'}
+    <div
+      className="min-h-full w-full px-3 py-6 sm:px-4 sm:py-7 lg:px-6 lg:py-8 xl:px-8 2xl:px-10"
+      style={{ backgroundColor: PAGE_BG }}
+    >
+      <div className="mx-auto w-full max-w-[min(100%,1920px)]">
+        <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between lg:mb-10">
+          <div className="min-w-0 max-w-3xl">
+            <h1 className="text-3xl font-bold tracking-tight text-[#0f172a]">{pageTitle}</h1>
+            <p className="mt-2 text-base leading-relaxed text-[#64748b]">
+              Update your document using the same structured workflow as document creation.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
-              className="gap-2 rounded-lg border-slate-200 bg-white px-4 shadow-sm hover:bg-slate-50"
-              style={{ color: NAVY }}
+              className="shrink-0 gap-2 rounded-lg border-[#e2e8f0] bg-white px-4 text-[#0f172a] shadow-sm hover:bg-[#f8fafc]"
               asChild
             >
-              <Link href={`/documents?type=${document.type}`}>
+              <Link href={`/documents?type=${doc.doc_type}`}>
                 <ArrowLeft className="h-4 w-4" />
                 Back
               </Link>
             </Button>
-            <Button className="gap-2 rounded-lg px-4 shadow-sm" onClick={handleSave} disabled={isSaving}>
-              <Save className="h-4 w-4" />
-              {isSaving ? 'Saving...' : 'Save Changes'}
-            </Button>
-            <Button
-              variant="outline"
-              className="gap-2 rounded-lg border-red-200 bg-white px-4 text-destructive shadow-sm hover:bg-red-50"
-              onClick={() => setDeleteDialogOpen(true)}
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete
-            </Button>
           </div>
         </div>
 
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-          <div className={`min-w-0 flex-1 ${isChangeOrder ? 'lg:max-w-[calc(100%-20rem)]' : 'lg:max-w-[calc(100%-22rem)]'}`}>
-            <Card className="border border-slate-200/80 bg-white shadow-sm">
-              <CardContent className="space-y-10 p-6 sm:p-8">
-                <section>
-                  {sectionTitle(1, isChangeOrder ? 'Project & Change Order Info' : isSubmittal ? 'Project & Submittal Info' : 'Project & RFI Info')}
-                  <div className="grid gap-5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-                    <div className="min-w-0">
-                      <label className={labelClass} style={{ color: NAVY }}>
-                        Project <span className="text-destructive">*</span>
-                      </label>
-                      <Select
-                        value={formData.projectId}
-                        onValueChange={(value) => setFormData((prev) => ({ ...prev, projectId: value }))}
-                      >
-                        <SelectTrigger className="h-9 w-full min-w-0 rounded-lg border-slate-200 text-left shadow-xs">
-                          <SelectValue placeholder="Select a project" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {projects.map((p) => (
-                            <SelectItem key={p.id} value={p.id}>
-                              {p.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {selectedProject ? (
-                        <p className="mt-1.5 text-xs text-muted-foreground">
-                          {selectedProject.projectNumber} • {selectedProject.address}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div>
-                      <label className={labelClass} style={{ color: NAVY }}>
-                        {isChangeOrder ? 'Change Order Number' : isSubmittal ? 'Submittal Number' : 'RFI Number'} <span className="text-destructive">*</span>
-                      </label>
-                      <Input
-                        value={isChangeOrder ? formData.changeOrderNumber : formData.number}
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            ...(isChangeOrder
-                              ? { changeOrderNumber: e.target.value }
-                              : { number: e.target.value }),
-                          }))
-                        }
-                        className="rounded-lg border-slate-200 shadow-xs"
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className={labelClass} style={{ color: NAVY }}>
-                        Title <span className="text-destructive">*</span>
-                      </label>
-                      <Input
-                        value={formData.title}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, title: e.target.value }))}
-                        className="rounded-lg border-slate-200 shadow-xs"
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className={labelClass} style={{ color: NAVY }}>
-                        Date <span className="text-destructive">*</span>
-                      </label>
-                      <div className="relative max-w-xs">
-                        <Input
-                          type="date"
-                          value={formData.date}
-                          onChange={(e) => setFormData((prev) => ({ ...prev, date: e.target.value }))}
-                          className="rounded-lg border-slate-200 pr-10 shadow-xs"
-                        />
-                        <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      </div>
-                    </div>
+        <div className="grid grid-cols-1 gap-6 md:gap-7 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
+          <div className="min-w-0 space-y-6">
+            <div className={formCardClassName()}>
+              <div className="grid gap-5 sm:grid-cols-3">
+                <div className="min-w-0 sm:col-span-1">
+                  <label className={capLabel}>Project</label>
+                  <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] px-3 py-2 text-sm text-[#0f172a]">
+                    {selectedProject?.name ?? '—'}
                   </div>
-                </section>
-
-                <section>
-                  {sectionTitle(2, isChangeOrder ? 'Description of Change' : isSubmittal ? 'Description of Submittal' : 'Question & Description', true)}
-                  {!isSubmittal && !isChangeOrder ? (
-                    <>
-                      <label className={labelClass} style={{ color: NAVY }}>
-                        Question <span className="text-destructive">*</span>
-                      </label>
-                      <Textarea
-                        value={formData.question}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, question: e.target.value }))}
-                        rows={3}
-                        className="mb-4 resize-none rounded-lg border-slate-200 text-[15px] leading-relaxed shadow-xs"
-                      />
-                    </>
+                  {selectedProject?.address ? (
+                    <p className="mt-1.5 text-xs text-[#94a3b8]">{selectedProject.address}</p>
                   ) : null}
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <label className={labelClass} style={{ color: NAVY }}>
-                      Description <span className="text-destructive">*</span>
-                    </label>
-                    <Button type="button" variant="outline" size="sm" onClick={handleAIGenerate} disabled={isGenerating}>
-                      <Sparkles className="mr-1 h-3.5 w-3.5" />
-                      {isGenerating ? 'Generating...' : 'AI Generate'}
-                    </Button>
-                  </div>
-                  <Textarea
-                    value={formData.description}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
-                    rows={5}
-                    className="resize-none rounded-lg border-slate-200 text-[15px] leading-relaxed shadow-xs"
-                  />
-                  <p className="mt-1.5 text-xs text-muted-foreground">{formData.description.length} characters</p>
-                </section>
-
-                <MissingScopeCallout />
-
-                {isSubmittal ? (
-                  <section>
-                    {sectionTitle(3, 'Submittal Details')}
-                    <div className="grid gap-5 sm:grid-cols-3">
-                      <div>
-                        <label className={labelClass} style={{ color: NAVY }}>Spec Section</label>
-                        <Input value={formData.specSection} onChange={(e) => setFormData((prev) => ({ ...prev, specSection: e.target.value }))} className="rounded-lg border-slate-200 shadow-xs" />
-                      </div>
-                      <div>
-                        <label className={labelClass} style={{ color: NAVY }}>Manufacturer</label>
-                        <Input value={formData.manufacturer} onChange={(e) => setFormData((prev) => ({ ...prev, manufacturer: e.target.value }))} className="rounded-lg border-slate-200 shadow-xs" />
-                      </div>
-                      <div>
-                        <label className={labelClass} style={{ color: NAVY }}>Product Name</label>
-                        <Input value={formData.productName} onChange={(e) => setFormData((prev) => ({ ...prev, productName: e.target.value }))} className="rounded-lg border-slate-200 shadow-xs" />
-                      </div>
-                    </div>
-                  </section>
-                ) : null}
-
-                {isChangeOrder ? (
-                  <>
-                    <section>
-                      {sectionTitle(3, 'Reason for Change')}
-                      <Select value={formData.reason} onValueChange={(value) => setFormData((prev) => ({ ...prev, reason: value as (typeof REASON_OPTIONS)[number]['value'] }))}>
-                        <SelectTrigger className="w-full max-w-md rounded-lg border-slate-200 shadow-xs sm:w-72">
-                          <SelectValue placeholder="Select reason" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {REASON_OPTIONS.map((o) => (
-                            <SelectItem key={o.value} value={o.value}>
-                              {o.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </section>
-
-                    <section>
-                      {sectionTitle(4, 'Cost & Schedule Impact')}
-                      <div className="grid gap-5 sm:grid-cols-2">
-                        <div>
-                          <label className={labelClass} style={{ color: NAVY }}>Cost Impact</label>
-                          <div className="relative max-w-md">
-                            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                            <Input
-                              value={formData.costImpact}
-                              onChange={(e) => setFormData((prev) => ({ ...prev, costImpact: e.target.value }))}
-                              className="rounded-lg border-slate-200 pl-7 pr-14 shadow-xs"
-                              placeholder="0.00"
-                            />
-                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">USD</span>
-                          </div>
-                        </div>
-                        <div>
-                          <label className={labelClass} style={{ color: NAVY }}>Schedule Impact</label>
-                          <Select value={formData.scheduleImpact} onValueChange={(value) => setFormData((prev) => ({ ...prev, scheduleImpact: value as (typeof SCHEDULE_OPTIONS)[number]['value'] }))}>
-                            <SelectTrigger className="max-w-md rounded-lg border-slate-200 shadow-xs">
-                              <SelectValue placeholder="Select impact" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {SCHEDULE_OPTIONS.map((o) => (
-                                <SelectItem key={o.value} value={o.value}>
-                                  {o.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </section>
-                  </>
-                ) : null}
-
-                <section>
-                  {sectionTitle(isChangeOrder ? 5 : isSubmittal ? 4 : 3, isChangeOrder ? 'Attachments (Optional)' : 'Attachments')}
-                  {isChangeOrder ? (
-                    <>
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => fileInputRef.current?.click()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            fileInputRef.current?.click()
-                          }
-                        }}
-                        onDragOver={(e) => {
-                          e.preventDefault()
-                          e.dataTransfer.dropEffect = 'copy'
-                        }}
-                        onDrop={onDrop}
-                        className={cn(
-                          'mb-4 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 transition-colors',
-                          'border-primary/35 bg-primary/5 hover:border-primary/55 hover:bg-primary/10'
-                        )}
-                      >
-                        <Upload className="mb-2 h-8 w-8 text-primary" />
-                        <p className="text-center text-sm font-medium" style={{ color: NAVY }}>
-                          Drag & drop files here, or <span className="text-primary underline underline-offset-2">click to browse</span>
-                        </p>
-                        <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileUpload} />
-                      </div>
-                      {attachments.length > 0 ? (
-                        <div className="space-y-2">
-                          {attachments.map((file) => (
-                            <div key={file.id} className="flex items-center justify-between rounded-lg border border-sky-100 bg-sky-50/90 px-4 py-3">
-                              <div className="flex min-w-0 items-center gap-3">
-                                <FileText className="h-5 w-5 shrink-0 text-sky-700/70" />
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-medium text-sky-950 underline decoration-sky-300">{file.name}</p>
-                                  <p className="text-xs text-muted-foreground">{file.size}</p>
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  removeAttachment(file.id)
-                                }}
-                                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-white/80 hover:text-foreground"
-                              >
-                                <X className="h-4 w-4" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">No attachments</p>
-                      )}
-                    </>
-                  ) : (
-                    <div className="space-y-2">
-                      {attachments.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">No attachments</p>
-                      ) : (
-                        attachments.map((attachment) => (
-                          <div key={attachment.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
-                            <p className="truncate text-sm font-medium" style={{ color: NAVY }}>{attachment.name}</p>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </section>
-
-                <section>
-                  {sectionTitle(isChangeOrder ? 6 : isSubmittal ? 5 : 4, 'Notes (Optional)')}
-                  <Textarea
-                    value={formData.notes}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
-                    rows={3}
-                    className="resize-none rounded-lg border-slate-200 shadow-xs"
-                  />
-                </section>
-
-                <div className="border-t border-slate-200 pt-5">
-                  <Button className="gap-2 rounded-lg px-4 shadow-sm" onClick={handleSave} disabled={isSaving}>
-                    <Save className="h-4 w-4" />
-                    {isSaving ? 'Saving...' : 'Save Changes'}
-                  </Button>
                 </div>
-              </CardContent>
-            </Card>
+                <div>
+                  <label className={capLabel}>
+                    {docType === 'rfi'
+                      ? 'RFI number'
+                      : docType === 'submittal'
+                        ? 'Submittal number'
+                        : 'Change order number'}{' '}
+                    <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    value={
+                      docType === 'rfi'
+                        ? rfi.number
+                        : docType === 'submittal'
+                          ? sub.number
+                          : co.changeOrderNumber
+                    }
+                    onChange={(e) => {
+                      if (docType === 'rfi') setRfi((p) => ({ ...p, number: e.target.value }))
+                      else if (docType === 'submittal') setSub((p) => ({ ...p, number: e.target.value }))
+                      else setCo((p) => ({ ...p, changeOrderNumber: e.target.value }))
+                    }}
+                  />
+                </div>
+                <div>
+                  <label className={capLabel}>
+                    Document date <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    type="date"
+                    value={docType === 'rfi' ? rfi.date : docType === 'submittal' ? sub.date : co.date}
+                    onChange={(e) => {
+                      if (docType === 'rfi') setRfi((p) => ({ ...p, date: e.target.value }))
+                      else if (docType === 'submittal') setSub((p) => ({ ...p, date: e.target.value }))
+                      else setCo((p) => ({ ...p, date: e.target.value }))
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className={formCardClassName()}>
+              <div className="mb-6">
+                <label className={capLabel}>
+                  {docType === 'change_order' ? 'Change order title' : docType === 'rfi' ? 'RFI title' : 'Submittal title'}{' '}
+                  <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  value={docType === 'rfi' ? rfi.title : docType === 'submittal' ? sub.title : co.title}
+                  onChange={(e) => {
+                    if (docType === 'rfi') setRfi((p) => ({ ...p, title: e.target.value }))
+                    else if (docType === 'submittal') setSub((p) => ({ ...p, title: e.target.value }))
+                    else setCo((p) => ({ ...p, title: e.target.value }))
+                  }}
+                />
+              </div>
+
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <span className={capLabelRow}>
+                  {docType === 'rfi'
+                    ? 'Description / Question'
+                    : docType === 'change_order'
+                      ? 'Description of Change'
+                      : 'Description'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleGenerateDescription()}
+                  disabled={isGeneratingDescription}
+                  className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-[#0f172a] transition-colors hover:text-[#334155] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb]/25 focus-visible:ring-offset-2"
+                >
+                  <span className="text-[#ca8a04]" aria-hidden>
+                    ✨
+                  </span>
+                  AI Generate Description
+                </button>
+              </div>
+              <MissingScopeEditorSection
+                variant="document-description"
+                documentApiType={docTypeToMissingScopeType(docType)}
+                value={docType === 'rfi' ? rfi.description : docType === 'submittal' ? sub.description : co.description}
+                onChange={(v) => {
+                  if (docType === 'rfi') setRfi((p) => ({ ...p, description: v }))
+                  else if (docType === 'submittal') setSub((p) => ({ ...p, description: v }))
+                  else setCo((p) => ({ ...p, description: v }))
+                }}
+                isGeneratingDescription={isGeneratingDescription}
+                rows={8}
+              />
+              <p className={hintClass}>
+                {(docType === 'rfi' ? rfi.description : docType === 'submittal' ? sub.description : co.description).length}{' '}
+                characters
+              </p>
+            </div>
+
+            {docType === 'submittal' ? (
+              <div className={formCardClassName()}>
+                <h2 className="mb-5 text-lg font-semibold text-[#0f172a]">Submittal details</h2>
+                <div className="grid gap-5 sm:grid-cols-3">
+                  <div>
+                    <label className={capLabel}>Spec section</label>
+                    <Input
+                      value={sub.specSection}
+                      onChange={(e) => setSub((p) => ({ ...p, specSection: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className={capLabel}>Manufacturer</label>
+                    <Input
+                      value={sub.manufacturer}
+                      onChange={(e) => setSub((p) => ({ ...p, manufacturer: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className={capLabel}>Product name</label>
+                    <Input
+                      value={sub.productName}
+                      onChange={(e) => setSub((p) => ({ ...p, productName: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {docType === 'change_order' ? (
+              <div className={formCardClassName()}>
+                <h2 className="mb-5 text-lg font-semibold text-[#0f172a]">Change details</h2>
+                <div className="grid gap-5 sm:grid-cols-3">
+                  <div>
+                    <label className={capLabel}>Reason for change</label>
+                    <Select value={co.reason} onValueChange={(v) => setCo((p) => ({ ...p, reason: v }))}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CO_REASON_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className={capLabel}>Cost impact</label>
+                    <div className="relative">
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                        $
+                      </span>
+                      <Input
+                        value={co.costImpact}
+                        onChange={(e) => setCo((p) => ({ ...p, costImpact: e.target.value }))}
+                        className="pl-7 pr-14"
+                        placeholder="8,750.00"
+                      />
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                        USD
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className={capLabel}>Schedule impact</label>
+                    <Select value={co.scheduleImpact} onValueChange={(v) => setCo((p) => ({ ...p, scheduleImpact: v }))}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CO_SCHEDULE_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            <div className={formCardClassName()}>
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-[#0f172a]">Supporting documents</h2>
+              </div>
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    fileInputRef.current?.click()
+                  }
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'copy'
+                }}
+                onDrop={onDrop}
+                className={cn(
+                  'mb-4 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#cbd5e1] bg-[#f8fafc] p-10 transition-colors hover:border-[#94a3b8] hover:bg-[#f1f5f9]'
+                )}
+              >
+                <Upload className="mb-3 h-10 w-10 text-[#94a3b8]" strokeWidth={1.25} />
+                <p className="text-center text-sm font-medium text-[#334155]">
+                  Drag and drop files or{' '}
+                  <span className="font-semibold text-[#0f172a] underline decoration-[#cbd5e1] underline-offset-2">
+                    browse files
+                  </span>{' '}
+                  from your computer
+                </p>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleFileUpload}
+                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+              />
+              <div className="space-y-2">
+                {attachments.map((file) => (
+                  <div
+                    key={file.id}
+                    className="flex items-center justify-between rounded-lg border border-[#e2e8f0] bg-[#f1f5f9] px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[#0f172a]">{file.name}</p>
+                      <p className="text-xs text-[#64748b]">{file.size}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(file.id)}
+                      className="rounded-md p-1.5 text-[#ef4444] transition-colors hover:bg-red-50"
+                      aria-label={`Remove ${file.name}`}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className={formCardClassName()}>
+              <label className={capLabel}>Additional notes (optional)</label>
+              <Textarea
+                value={docType === 'rfi' ? rfi.notes : docType === 'submittal' ? sub.notes : co.notes}
+                onChange={(e) => {
+                  if (docType === 'rfi') setRfi((p) => ({ ...p, notes: e.target.value }))
+                  else if (docType === 'submittal') setSub((p) => ({ ...p, notes: e.target.value }))
+                  else setCo((p) => ({ ...p, notes: e.target.value }))
+                }}
+                rows={3}
+                className="resize-none"
+              />
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-[#e2e8f0] pt-6 sm:flex-row sm:items-center sm:justify-end">
+              <Button variant="outline" onClick={handleDelete} className="gap-2 text-red-700 hover:bg-red-50">
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </Button>
+              <Button onClick={handleSave} disabled={isSaving} className="gap-2">
+                <Save className="h-4 w-4" />
+                {isSaving ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
           </div>
 
-          <div className={`w-full shrink-0 space-y-4 ${isChangeOrder ? 'lg:w-88' : 'lg:w-88 lg:sticky lg:top-8'}`}>
-            <Card className="border border-slate-200/80 bg-white shadow-sm">
-              <CardContent className="p-5">
-                <h3 className="mb-5 text-base font-semibold" style={{ color: NAVY }}>
-                  Summary
-                </h3>
-                <div className="space-y-4">
-                  <div>
-                    <p className="text-xs text-muted-foreground">Project</p>
-                    <p className="text-sm font-semibold" style={{ color: NAVY }}>{selectedProject?.name || '—'}</p>
-                    <p className="text-xs text-muted-foreground">{selectedProject?.projectNumber || '—'}</p>
-                  </div>
-                  <div className="border-t border-slate-100 pt-4">
-                    <p className="text-xs text-muted-foreground">
-                      {isChangeOrder ? 'Change Order #' : isSubmittal ? 'Submittal #' : 'RFI #'}
-                    </p>
-                    <p className="text-sm font-semibold" style={{ color: NAVY }}>
-                      {isChangeOrder ? formData.changeOrderNumber : formData.number || '—'}
-                    </p>
-                  </div>
-                  <div className="border-t border-slate-100 pt-4">
-                    <p className="text-xs text-muted-foreground">Title</p>
-                    <p className="text-sm font-semibold leading-snug" style={{ color: NAVY }}>{formData.title || '—'}</p>
-                  </div>
-                  <div className="border-t border-slate-100 pt-4">
-                    <p className="text-xs text-muted-foreground">Date</p>
-                    <p className="text-sm font-semibold" style={{ color: NAVY }}>
-                      {formData.date
-                        ? new Date(formData.date + 'T12:00:00').toLocaleDateString('en-US', {
-                            month: 'long',
-                            day: 'numeric',
-                            year: 'numeric',
-                          })
-                        : '—'}
-                    </p>
-                  </div>
-                  {isChangeOrder ? (
-                    <>
-                      <div className="border-t border-slate-100 pt-4">
-                        <p className="text-xs text-muted-foreground">Cost Impact</p>
-                        <p className="text-2xl font-bold tracking-tight" style={{ color: NAVY }}>
-                          ${formatUsd(costNumeric)}
-                        </p>
-                      </div>
-                      <div className="border-t border-slate-100 pt-4">
-                        <p className="text-xs text-muted-foreground">Schedule Impact</p>
-                        <p className="text-2xl font-bold tracking-tight" style={{ color: NAVY }}>
-                          {scheduleLabel}
-                        </p>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="border-t border-slate-100 pt-4">
-                      <p className="text-xs text-muted-foreground">Created By</p>
-                      <p className="text-sm font-semibold" style={{ color: NAVY }}>{getCreatorName(document.createdBy)}</p>
-                    </div>
-                  )}
-                  <Button className="w-full" variant="default" style={{ backgroundColor: PREVIEW_BLUE }}>
-                    <Eye className="mr-2 h-4 w-4" />
-                    Preview Document
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {isChangeOrder ? (
+          <aside className="w-full min-w-0 space-y-6 lg:sticky lg:top-6 lg:self-start">
+            {docType === 'change_order' ? (
               <>
-                <Card className="border-0 bg-sky-50/90 shadow-sm ring-1 ring-sky-100">
-                  <CardContent className="p-5">
-                    <div className="flex gap-3">
-                      <Lightbulb className="mt-0.5 h-5 w-5 shrink-0 text-sky-800/70" />
-                      <div>
-                        <h4 className="text-sm font-semibold" style={{ color: NAVY }}>Need Help?</h4>
-                        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                          Be specific and detailed for better results. You can always edit before generating.
-                        </p>
-                      </div>
+                <div className={formCardClassName()}>
+                  <ReviewerManagementSection
+                    embedded
+                    layout="create"
+                    onSend={async (emails) => {
+                      await apiFetch('/api/documents/' + id + '/send-for-review', {
+                        method: 'POST',
+                        json: { reviewers: emails },
+                      })
+                    }}
+                  />
+                </div>
+
+                <div className={formCardClassName()}>
+                  <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">Categorization</h3>
+                  <div className="space-y-4">
+                    <div>
+                      <label className={capLabel}>Reason</label>
+                      <p className="text-sm font-medium text-[#0f172a]">{reasonLabel}</p>
                     </div>
-                  </CardContent>
-                </Card>
-                <ReviewerManagementSection />
+                    <div className="border-t border-[#e2e8f0] pt-4">
+                      <label className={capLabel}>Schedule impact</label>
+                      <p className="text-sm font-medium text-[#0f172a]">{scheduleLabel}</p>
+                    </div>
+                  </div>
+                </div>
               </>
             ) : (
-              <ReviewerManagementSection />
+              <div className={formCardClassName()}>
+                <ReviewerManagementSection
+                  onSend={async (emails) => {
+                    await apiFetch('/api/documents/' + id + '/send-for-review', {
+                      method: 'POST',
+                      json: { reviewers: emails },
+                    })
+                  }}
+                />
+              </div>
             )}
-          </div>
+
+            <div className={formCardClassName()}>
+              <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">Summary</h3>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Project</p>
+                  <p className="text-sm font-semibold text-[#0f172a]">{selectedProject?.name ?? '—'}</p>
+                  <p className="text-xs text-muted-foreground">{selectedProject?.address ?? ''}</p>
+                </div>
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">
+                    {docType === 'change_order' ? 'Change Order #' : docType === 'rfi' ? 'RFI #' : 'Submittal #'}
+                  </p>
+                  <p className="text-sm font-semibold text-[#0f172a]">
+                    {docType === 'change_order' ? co.changeOrderNumber : docType === 'rfi' ? rfi.number : sub.number}
+                  </p>
+                </div>
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">Title</p>
+                  <p className="text-sm font-semibold text-[#0f172a]">
+                    {docType === 'change_order'
+                      ? co.title || '—'
+                      : docType === 'rfi'
+                        ? rfi.title || '—'
+                        : sub.title || '—'}
+                  </p>
+                </div>
+                {docType === 'change_order' ? (
+                  <>
+                    <div className="border-t border-slate-100 pt-4">
+                      <p className="text-xs text-muted-foreground">Date</p>
+                      <p className="text-sm font-semibold text-[#0f172a]">
+                        {co.date
+                          ? new Date(co.date + 'T12:00:00').toLocaleDateString('en-US', {
+                              month: 'long',
+                              day: 'numeric',
+                              year: 'numeric',
+                            })
+                          : '—'}
+                      </p>
+                    </div>
+                    <div className="border-t border-slate-100 pt-4">
+                      <p className="text-xs text-muted-foreground">Cost Impact</p>
+                      <p className="text-sm font-semibold text-[#0f172a]">
+                        {co.costImpact.trim() ? `$${formatUsd(parseMoneyInput(co.costImpact))}` : '—'}
+                      </p>
+                    </div>
+                    <div className="border-t border-slate-100 pt-4">
+                      <p className="text-xs text-muted-foreground">Schedule Impact</p>
+                      <p className="text-sm font-semibold text-[#0f172a]">{scheduleLabel}</p>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </div>
+
+            {docType === 'change_order' ? (
+              <div className="relative overflow-hidden rounded-xl border border-[#e2e8f0] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+                <div
+                  className="aspect-[4/3] bg-cover bg-center bg-no-repeat"
+                  style={{
+                    backgroundImage:
+                      "url('https://lh3.googleusercontent.com/aida-public/AB6AXuD7_4vd9OR1EKDJrX4T4pU1yOiptI0UoYbbOj4vqoVlL2cp6BJs173PepMwegslSa7ee1TNhCyjvXkiUUuL_PuNaxYgDwpRZ0TxEEn4NB7oKeW8ql6vx0K1FXp1eLA9iAI3P4R2b_HoBBmqCRTbBkmL2XsW7HHZWjryVmWG9mrQfD1c4WuCt-r2kwYqSfqc77yaaGEQSiKQhbm5-5c1i_P2TL-OpAedYi3Bw-VvmEauxJOLSm2bPWzsD5_bDiT-1yojYmMWyNu58d4')",
+                  }}
+                />
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
+                <div className="absolute bottom-4 left-4 right-4 text-white">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/80">
+                    Reference context
+                  </p>
+                  <p className="mt-1 text-xl font-bold tracking-tight">Coordination Zone</p>
+                  <p className="mt-1 text-xs text-white/70">
+                    Attach sketches and photos to speed up reviewer approval.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+          </aside>
         </div>
       </div>
-
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Document</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this document? This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }
