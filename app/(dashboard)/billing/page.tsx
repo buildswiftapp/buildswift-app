@@ -1,13 +1,14 @@
 'use client'
 
-import { useState } from 'react'
-import { Check, CreditCard, Download, Zap } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { Check, CreditCard, Download } from 'lucide-react'
 import { useApp } from '@/lib/app-context'
+import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { Separator } from '@/components/ui/separator'
 import {
   Table,
   TableBody,
@@ -28,12 +29,115 @@ const invoices = [
 
 export default function BillingPage() {
   const { company } = useApp()
-  const [selectedPlan, setSelectedPlan] = useState<string | null>(null)
+  const searchParams = useSearchParams()
+  const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null)
+  const [openingPortal, setOpeningPortal] = useState(false)
+  const [checkoutNotice, setCheckoutNotice] = useState<{
+    tone: 'success' | 'error' | 'info'
+    message: string
+  } | null>(null)
 
   const currentPlan = subscriptionPlans.find((p) => p.tier === company?.subscriptionTier)
 
-  const handleUpgrade = (planId: string) => {
-    toast.success('Redirecting to checkout...')
+  useEffect(() => {
+    let cancelled = false
+    const clearQuery = () => {
+      const q = new URLSearchParams(window.location.search)
+      q.delete('checkout')
+      q.delete('session_id')
+      const next = q.toString()
+      window.history.replaceState({}, '', next ? `/billing?${next}` : '/billing')
+    }
+    const checkoutState = searchParams.get('checkout')
+    const sessionId = searchParams.get('session_id')
+    if (checkoutState === 'success' && sessionId) {
+      void (async () => {
+        try {
+          const result = await apiFetch<{
+            paid: boolean
+            status: string
+            payment_status: string
+          }>(`/api/billing/checkout-status?session_id=${encodeURIComponent(sessionId)}`)
+          if (cancelled) return
+          if (result.paid) {
+            setCheckoutNotice({
+              tone: 'success',
+              message: 'Payment successful. Your subscription is active.',
+            })
+            toast.success('Payment successful. Your subscription is active.')
+          } else {
+            setCheckoutNotice({
+              tone: 'error',
+              message: 'Payment was not completed. Please try again.',
+            })
+            toast.error('Payment was not completed. Please try again.')
+          }
+        } catch (e) {
+          if (cancelled) return
+          const msg = e instanceof Error ? e.message : 'Unable to verify checkout status'
+          setCheckoutNotice({ tone: 'error', message: msg })
+          toast.error(msg)
+        } finally {
+          if (!cancelled) window.setTimeout(clearQuery, 600)
+        }
+      })()
+      return () => {
+        cancelled = true
+      }
+    }
+
+    if (checkoutState === 'success') {
+      setCheckoutNotice({
+        tone: 'success',
+        message: 'Checkout completed successfully.',
+      })
+      toast.success('Checkout completed successfully.')
+      clearQuery()
+    } else if (checkoutState === 'cancelled') {
+      setCheckoutNotice({
+        tone: 'info',
+        message: 'Checkout cancelled.',
+      })
+      toast.info('Checkout cancelled.')
+      clearQuery()
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [searchParams])
+
+  const openPortal = async () => {
+    try {
+      setOpeningPortal(true)
+      const { url } = await apiFetch<{ url: string }>('/api/billing/portal', {
+        method: 'POST',
+        json: {},
+      })
+      window.location.href = url
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Unable to open Stripe portal')
+    } finally {
+      setOpeningPortal(false)
+    }
+  }
+
+  const handleUpgrade = async (tier: string, planId: string) => {
+    if (tier === 'free') {
+      await openPortal()
+      return
+    }
+    try {
+      setLoadingPlanId(planId)
+      const { url } = await apiFetch<{ url: string }>('/api/billing/checkout', {
+        method: 'POST',
+        json: { tier },
+      })
+      window.location.href = url
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Unable to start Stripe checkout')
+    } finally {
+      setLoadingPlanId(null)
+    }
   }
 
   const handleDownloadInvoice = (invoiceId: string) => {
@@ -43,6 +147,18 @@ export default function BillingPage() {
   return (
     <div className="flex flex-col">
       <div className="flex-1 space-y-6 p-6">
+        {checkoutNotice ? (
+          <div
+            className={cn(
+              'rounded-lg border px-4 py-3 text-sm',
+              checkoutNotice.tone === 'success' && 'border-emerald-200 bg-emerald-50 text-emerald-900',
+              checkoutNotice.tone === 'error' && 'border-rose-200 bg-rose-50 text-rose-900',
+              checkoutNotice.tone === 'info' && 'border-sky-200 bg-sky-50 text-sky-900'
+            )}
+          >
+            {checkoutNotice.message}
+          </div>
+        ) : null}
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -160,9 +276,14 @@ export default function BillingPage() {
                       <Button
                         className="w-full"
                         variant={isPopular ? 'default' : 'outline'}
-                        onClick={() => handleUpgrade(plan.id)}
+                        onClick={() => void handleUpgrade(plan.tier, plan.id)}
+                        disabled={loadingPlanId === plan.id}
                       >
-                        {plan.price === 0 ? 'Downgrade' : 'Upgrade'}
+                        {loadingPlanId === plan.id
+                          ? 'Redirecting...'
+                          : plan.price === 0
+                            ? 'Downgrade in Stripe'
+                            : 'Upgrade'}
                       </Button>
                     )}
                   </CardFooter>
@@ -186,8 +307,13 @@ export default function BillingPage() {
                 <p className="font-medium">Visa ending in 4242</p>
                 <p className="text-sm text-muted-foreground">Expires 12/2025</p>
               </div>
-              <Button variant="outline" size="sm">
-                Update
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void openPortal()}
+                disabled={openingPortal}
+              >
+                {openingPortal ? 'Opening...' : 'Update'}
               </Button>
             </div>
           </CardContent>

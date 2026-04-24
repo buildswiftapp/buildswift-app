@@ -14,9 +14,6 @@ import {
   CheckCircle2,
   Eye,
   XCircle,
-  Send,
-  Clock3,
-  CircleAlert,
   Search,
 } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
@@ -72,6 +69,7 @@ function DocumentsContent() {
       title: string
       description: string
       internal_status: string
+      external_status: string
       current_version_no: number
       created_by: string
       created_at: string
@@ -92,6 +90,7 @@ function DocumentsContent() {
             title: string
             description: string
             internal_status: string
+            external_status: string
             current_version_no: number
             created_by: string
             created_at: string
@@ -151,15 +150,53 @@ function DocumentsContent() {
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }
 
-  const getStatusBadge = (status: DocumentStatus) => {
-    const styles: Record<string, { className: string; label: string }> = {
-      draft: { className: 'bg-slate-100 text-slate-700 hover:bg-slate-100', label: 'Draft Pending' },
-      pending_review: { className: 'bg-blue-100 text-blue-700 hover:bg-blue-100', label: 'In Review' },
-      approved: { className: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100', label: 'Pending Close' },
-      rejected: { className: 'bg-rose-100 text-rose-700 hover:bg-rose-100', label: 'Action Required' },
-      revision_requested: { className: 'bg-rose-100 text-rose-700 hover:bg-rose-100', label: 'Action Required' },
+  const internalStateBadge = (internal: string) => {
+    const map: Record<string, { label: string; className: string }> = {
+      draft: { label: 'Draft', className: 'bg-zinc-200 text-zinc-900 hover:bg-zinc-200' },
+      in_review: { label: 'In Review', className: 'bg-violet-200 text-violet-950 hover:bg-violet-200' },
+      pending_reviewer: {
+        label: 'Pending Reviewer',
+        className: 'bg-orange-200 text-orange-950 hover:bg-orange-200',
+      },
+      revising: { label: 'Revising', className: 'bg-rose-200 text-rose-950 hover:bg-rose-200' },
+      approved: { label: 'Approved', className: 'bg-emerald-200 text-emerald-950 hover:bg-emerald-200' },
+      rejected: { label: 'Rejected', className: 'bg-red-200 text-red-950 hover:bg-red-200' },
+      answered: { label: 'Answered', className: 'bg-lime-200 text-lime-950 hover:bg-lime-200' },
+      closed: { label: 'Closed', className: 'bg-neutral-200 text-neutral-800 hover:bg-neutral-200' },
+      pending_execution: {
+        label: 'Pending Execution',
+        className: 'bg-purple-200 text-purple-950 hover:bg-purple-200',
+      },
     }
-    const style = styles[status] || styles.draft
+    const style =
+      map[internal] ?? {
+        label: internal.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+        className: 'bg-slate-100 text-slate-700 hover:bg-slate-100',
+      }
+    return (
+      <Badge className={`rounded-md border-0 px-2.5 py-1 text-xs font-semibold ${style.className}`}>
+        {style.label}
+      </Badge>
+    )
+  }
+
+  const externalStateBadge = (external: string) => {
+    const map: Record<string, { label: string; className: string }> = {
+      draft: { label: 'Draft', className: 'bg-stone-200 text-stone-900 hover:bg-stone-200' },
+      sent: { label: 'Sent', className: 'bg-cyan-200 text-cyan-950 hover:bg-cyan-200' },
+      viewed: { label: 'Viewed', className: 'bg-sky-200 text-sky-950 hover:bg-sky-200' },
+      approved: { label: 'Approved', className: 'bg-teal-200 text-teal-950 hover:bg-teal-200' },
+      rejected: { label: 'Rejected', className: 'bg-red-200 text-red-950 hover:bg-red-200' },
+      pending_reviewer: {
+        label: 'Pending Reviewer',
+        className: 'bg-amber-200 text-amber-950 hover:bg-amber-200',
+      },
+    }
+    const style =
+      map[external] ?? {
+        label: external.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+        className: 'bg-slate-100 text-slate-700 hover:bg-slate-100',
+      }
     return (
       <Badge className={`rounded-md border-0 px-2.5 py-1 text-xs font-semibold ${style.className}`}>
         {style.label}
@@ -208,23 +245,23 @@ function DocumentsContent() {
   const trackingBadge = (key: 'sent' | 'viewed' | 'failed') => {
     if (key === 'sent') {
       return (
-        <Badge className="rounded-md border-0 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50">
-          <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+        <Badge className="rounded-md border border-amber-300/80 bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-950 hover:bg-amber-100">
+          <CheckCircle2 className="mr-1 h-3.5 w-3.5 text-amber-800" />
           SENT
         </Badge>
       )
     }
     if (key === 'viewed') {
       return (
-        <Badge className="rounded-md border-0 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-50">
-          <Eye className="mr-1 h-3.5 w-3.5" />
+        <Badge className="rounded-md border border-indigo-300/80 bg-indigo-100 px-2.5 py-1 text-[11px] font-semibold text-indigo-950 hover:bg-indigo-100">
+          <Eye className="mr-1 h-3.5 w-3.5 text-indigo-800" />
           VIEWED
         </Badge>
       )
     }
     return (
-      <Badge className="rounded-md border-0 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-50">
-        <XCircle className="mr-1 h-3.5 w-3.5" />
+      <Badge className="rounded-md border border-red-300/70 bg-red-100 px-2.5 py-1 text-[11px] font-semibold text-red-950 hover:bg-red-100">
+        <XCircle className="mr-1 h-3.5 w-3.5 text-red-800" />
         FAILED
       </Badge>
     )
@@ -258,7 +295,7 @@ function DocumentsContent() {
         <div className="space-y-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-1">
-              <h1 className="text-4xl font-bold tracking-tight text-[#0f172a]">
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900">
                 {typeFilter === 'rfi'
                   ? 'Request for Information'
                   : typeFilter === 'submittal'
@@ -267,7 +304,7 @@ function DocumentsContent() {
                       ? 'Change Orders'
                       : 'Documents'}
               </h1>
-              <p className="max-w-2xl text-xl leading-relaxed text-slate-600">
+              <p className="max-w-2xl text-sm text-slate-500">
                 {typeFilter === 'rfi'
                   ? 'Track and manage technical queries across architectural and structural domains with real-time status synchronization.'
                   : 'Track and manage documents with real-time status synchronization.'}
@@ -417,14 +454,26 @@ function DocumentsContent() {
                   <TableHead className="hidden lg:table-cell py-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Reviewer Tracking
                   </TableHead>
-                  <TableHead className="py-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Status
+                  <TableHead className="hidden lg:table-cell py-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Internal State
+                  </TableHead>
+                  <TableHead className="hidden lg:table-cell py-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    External State
                   </TableHead>
                   <TableHead className="w-10 py-4"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredDocuments.map((doc) => (
+                {filteredDocuments.map((doc) => {
+                  const normalizedRowStatus: DocumentStatus =
+                    doc.internal_status === 'in_review'
+                      ? 'pending_review'
+                      : doc.internal_status === 'pending_reviewer'
+                        ? 'pending_review'
+                        : doc.internal_status === 'revising'
+                          ? 'revision_requested'
+                          : (doc.internal_status as DocumentStatus)
+                  return (
                   <TableRow key={doc.id} className="group border-slate-100 hover:bg-slate-50/60">
                     <TableCell className="py-4">
                       <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -456,21 +505,16 @@ function DocumentsContent() {
                     </TableCell>
                     <TableCell className="hidden py-4 lg:table-cell">
                       <div className="flex flex-wrap gap-1.5">
-                        {getReviewerTracking(doc.id, 'draft').map((item) => (
+                        {getReviewerTracking(doc.id, normalizedRowStatus).map((item) => (
                           <span key={`${doc.id}-${item}`}>{trackingBadge(item)}</span>
                         ))}
                       </div>
                     </TableCell>
-                    <TableCell className="py-4">
-                      {getStatusBadge(
-                        doc.internal_status === 'in_review'
-                          ? 'pending_review'
-                          : doc.internal_status === 'pending_reviewer'
-                            ? 'pending_review'
-                            : doc.internal_status === 'revising'
-                              ? 'revision_requested'
-                              : (doc.internal_status as DocumentStatus)
-                      )}
+                    <TableCell className="hidden py-4 lg:table-cell">
+                      {internalStateBadge(doc.internal_status)}
+                    </TableCell>
+                    <TableCell className="hidden py-4 lg:table-cell">
+                      {externalStateBadge(doc.external_status ?? 'draft')}
                     </TableCell>
                     <TableCell className="py-4">
                       <DropdownMenu>
@@ -505,7 +549,8 @@ function DocumentsContent() {
                       </DropdownMenu>
                     </TableCell>
                   </TableRow>
-                ))}
+                  )
+                })}
               </TableBody>
             </Table>
           </div>

@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Search, X } from 'lucide-react'
+import { AlertCircle, Brain, CheckCircle2, Loader2, RefreshCw, Sparkles, X } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -22,6 +22,28 @@ function toAiGenerateDocumentType(type: MissingScopeApiType): 'RFI' | 'ChangeOrd
   if (type === 'RFI') return 'RFI'
   if (type === 'Submittal') return 'Submittal'
   return 'ChangeOrder'
+}
+
+function getScopePromptByType(type: MissingScopeApiType) {
+  if (type === 'RFI') {
+    return {
+      prompt: 'Would you like to make this request clearer and more complete?',
+      buttonLabel: 'Improve & Clarify',
+      Icon: Sparkles,
+    }
+  }
+  if (type === 'Submittal') {
+    return {
+      prompt: 'Would you like to make this submittal description more complete and professional?',
+      buttonLabel: 'Improve & Refine',
+      Icon: Sparkles,
+    }
+  }
+  return {
+    prompt: 'Would you like AI to review this for missing scope items or unclear details?',
+    buttonLabel: 'Analyze Scope with AI',
+    Icon: Brain,
+  }
 }
 
 export function MissingScopeEditorSection(props: {
@@ -57,6 +79,7 @@ export function MissingScopeEditorSection(props: {
   const [ignoredSuggestionIndexes, setIgnoredSuggestionIndexes] = useState<Set<number>>(new Set())
   const [analysisResult, setAnalysisResult] = useState<MissingScopeApiResponse | null>(null)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const scopePrompt = getScopePromptByType(documentApiType)
 
   const runAnalyze = useCallback(async () => {
     if (!value.trim()) {
@@ -165,8 +188,8 @@ export function MissingScopeEditorSection(props: {
         </>
       ) : (
         <>
-          <span aria-hidden>🔍</span>
-          Check Missing Scope
+          <scopePrompt.Icon className="h-4 w-4 shrink-0" strokeWidth={2} />
+          {scopePrompt.buttonLabel}
         </>
       )}
     </Button>
@@ -188,8 +211,8 @@ export function MissingScopeEditorSection(props: {
         </>
       ) : (
         <>
-          <Search className="h-4 w-4 shrink-0 text-slate-700" strokeWidth={2} />
-          Check Missing Scope
+          <scopePrompt.Icon className="h-4 w-4 shrink-0 text-slate-700" strokeWidth={2} />
+          {scopePrompt.buttonLabel}
         </>
       )}
     </Button>
@@ -244,7 +267,7 @@ export function MissingScopeEditorSection(props: {
               i
             </span>
             <span className="text-sm font-medium leading-snug text-[#0f172a]">
-              Unsure if this request is already covered in project specs?
+              {scopePrompt.prompt}
             </span>
           </div>
           {checkButtonDocDescription}

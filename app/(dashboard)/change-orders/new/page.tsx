@@ -12,6 +12,7 @@ import {
   Save,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -25,10 +26,14 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import type { Attachment as DocAttachment } from '@/lib/types'
 import { uploadPendingAttachments } from '@/lib/supabase/upload-attachments'
-import { ReviewerManagementSection } from '@/app/components/reviewer-management-section'
+import {
+  ReviewerManagementSection,
+  type ReviewInviteSendPayload,
+} from '@/app/components/reviewer-management-section'
 import { MissingScopeEditorSection } from '@/app/components/missing-scope-editor-section'
 import { docTypeToMissingScopeType, setMissingScopeSeedIfMissing } from '@/lib/missing-scope-client'
 import { apiFetch } from '@/lib/api'
+import { scheduleImpactValueToInputText } from '@/lib/document-html'
 
 const PAGE_BG = '#f1f5f9'
 const NAVY = '#0f172a'
@@ -49,18 +54,6 @@ const REASON_OPTIONS = [
   { value: 'code_requirement', label: 'Code Requirement' },
   { value: 'value_engineering', label: 'Value Engineering' },
   { value: 'other', label: 'Other' },
-] as const
-
-const SCHEDULE_OPTIONS = [
-  { value: 'none', label: 'No Impact' },
-  { value: '+1', label: '+ 1 day' },
-  { value: '+2', label: '+ 2 days' },
-  { value: '+3', label: '+ 3 days' },
-  { value: '+5', label: '+ 5 days' },
-  { value: '+7', label: '+ 7 days' },
-  { value: '+14', label: '+ 14 days' },
-  { value: '+30', label: '+ 30 days' },
-  { value: 'tbd', label: 'TBD' },
 ] as const
 
 interface LocalAttachment {
@@ -146,7 +139,8 @@ function NewChangeOrderContent() {
       "Per client request, add (12) duplex electrical outlets to Levels 2 and 3. Locations to be coordinated on-site with owner's representative. Includes materials, labor, and testing.",
     reason: 'owner_request',
     costImpact: '8750.00',
-    scheduleImpact: '+5',
+    scheduleNoImpact: false,
+    scheduleImpactText: scheduleImpactValueToInputText('+5'),
     notes: 'Please review and approve. Work to begin upon approval.',
   })
 
@@ -158,6 +152,13 @@ function NewChangeOrderContent() {
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isGeneratingDescription, setIsGeneratingDescription] = useState(false)
+  const [reviewConfig, setReviewConfig] = useState<{
+    reviewers: string[]
+    expires_in_days: 3 | 7 | 14
+  }>({
+    reviewers: [],
+    expires_in_days: 7,
+  })
 
   useEffect(() => {
     const loadProjects = async () => {
@@ -183,8 +184,9 @@ function NewChangeOrderContent() {
 
   const reasonLabel =
     REASON_OPTIONS.find((r) => r.value === formData.reason)?.label ?? formData.reason
-  const scheduleLabel =
-    SCHEDULE_OPTIONS.find((s) => s.value === formData.scheduleImpact)?.label ?? '—'
+  const scheduleLabel = formData.scheduleNoImpact
+    ? 'No Impact'
+    : formData.scheduleImpactText.trim() || '—'
 
   const costNumeric = parseMoneyInput(formData.costImpact)
 
@@ -276,73 +278,114 @@ function NewChangeOrderContent() {
     }
   }
 
-  const handleSubmit = async (asDraft: boolean) => {
+  const validateForm = () => {
     if (!formData.projectId) {
       toast.error('Please select a project')
-      return
+      return false
     }
     if (!formData.title.trim()) {
       toast.error('Please enter a title')
-      return
+      return false
     }
     if (!formData.date) {
       toast.error('Please select a date')
-      return
+      return false
     }
     if (!formData.description.trim()) {
       toast.error('Please enter a description of change')
+      return false
+    }
+    return true
+  }
+
+  const createDocument = async (asDraft: boolean) => {
+    const uploaded = await uploadPendingAttachments({
+      attachments,
+      accountIdHint: formData.projectId,
+    })
+    const docAttachments: DocAttachment[] = uploaded.map((a) => ({
+      id: a.id,
+      name: a.name,
+      url: a.url,
+      size: a.size,
+      type: a.type,
+    }))
+
+    const content = buildChangeOrderHtml({
+      coNumber: formData.changeOrderNumber,
+      date: formData.date,
+      projectName: selectedProject?.name ?? '',
+      title: formData.title,
+      description: formData.description,
+      reasonLabel,
+      cost: costNumeric,
+      scheduleLabel,
+      notes: formData.notes,
+    })
+
+    const created = await apiFetch<{ document: { id: string } }>('/api/documents', {
+      method: 'POST',
+      json: {
+        project_id: formData.projectId,
+        doc_type: 'change_order',
+        doc_number: formData.changeOrderNumber,
+        title: formData.title,
+        description: content,
+        save_as_draft: asDraft,
+        metadata: {
+          reason: reasonLabel,
+          proposedAmount: costNumeric,
+          changeOrderNumber: formData.changeOrderNumber,
+          changeOrderDate: formData.date,
+          scheduleImpact: scheduleLabel,
+          notes: formData.notes || undefined,
+          attachments: docAttachments,
+        },
+      },
+    })
+    return created.document.id
+  }
+
+  const handleSubmit = async (asDraft: boolean) => {
+    if (!validateForm()) return
+
+    setIsSubmitting(true)
+    try {
+      await createDocument(asDraft)
+      toast.success(asDraft ? 'Draft saved successfully' : 'Change order generated successfully')
+      router.push('/documents?type=change_order')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to save change order')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleSendForReview = async (payload: ReviewInviteSendPayload) => {
+    if (!validateForm()) return
+    if (payload.reviewers.length === 0) {
+      toast.error('Add at least one reviewer before sending')
       return
     }
 
     setIsSubmitting(true)
     try {
-      const uploaded = await uploadPendingAttachments({
-        attachments,
-        accountIdHint: formData.projectId,
-      })
-      const docAttachments: DocAttachment[] = uploaded.map((a) => ({
-        id: a.id,
-        name: a.name,
-        url: a.url,
-        size: a.size,
-        type: a.type,
-      }))
-
-      const content = buildChangeOrderHtml({
-        coNumber: formData.changeOrderNumber,
-        date: formData.date,
-        projectName: selectedProject?.name ?? '',
-        title: formData.title,
-        description: formData.description,
-        reasonLabel,
-        cost: costNumeric,
-        scheduleLabel,
-        notes: formData.notes,
-      })
-
-      await apiFetch('/api/documents', {
-        method: 'POST',
-        json: {
-          project_id: formData.projectId,
-          doc_type: 'change_order',
-          doc_number: formData.changeOrderNumber,
-          title: formData.title,
-          description: content,
-          save_as_draft: asDraft,
-          metadata: {
-            reason: reasonLabel,
-            proposedAmount: costNumeric,
-            changeOrderNumber: formData.changeOrderNumber,
-            changeOrderDate: formData.date,
-            scheduleImpact: scheduleLabel,
-            notes: formData.notes || undefined,
-            attachments: docAttachments,
-          },
-        },
-      })
-
-      toast.success(asDraft ? 'Draft saved successfully' : 'Change order generated successfully')
-      router.push('/documents?type=change_order')
+      const documentId = await createDocument(false)
+      try {
+        await apiFetch(`/api/documents/${documentId}/send-for-review`, {
+          method: 'POST',
+          json: payload,
+        })
+        toast.success('Change order created and review invitations sent')
+        router.push('/documents?type=change_order')
+      } catch (sendErr) {
+        toast.error(
+          sendErr instanceof Error
+            ? sendErr.message
+            : 'Change order was saved but review emails could not be sent'
+        )
+        router.push(`/documents/${documentId}`)
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to save change order')
     } finally {
@@ -505,21 +548,31 @@ function NewChangeOrderContent() {
                 </div>
                 <div>
                   <label className={capLabel}>Schedule impact</label>
-                  <Select
-                    value={formData.scheduleImpact}
-                    onValueChange={(value) => setFormData((p) => ({ ...p, scheduleImpact: value }))}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select impact" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {SCHEDULE_OPTIONS.map((o) => (
-                        <SelectItem key={o.value} value={o.value}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex min-h-10 items-center gap-3">
+                    <label
+                      htmlFor="new-co-schedule-no-impact"
+                      className="flex shrink-0 cursor-pointer items-center gap-2 text-sm whitespace-nowrap text-[#0f172a]"
+                    >
+                      <Checkbox
+                        checked={formData.scheduleNoImpact}
+                        onCheckedChange={(checked) =>
+                          setFormData((p) => ({ ...p, scheduleNoImpact: checked === true }))
+                        }
+                        id="new-co-schedule-no-impact"
+                      />
+                      <span>No Impact</span>
+                    </label>
+                    <Input
+                      className="min-w-0 flex-1"
+                      value={formData.scheduleImpactText}
+                      onChange={(e) =>
+                        setFormData((p) => ({ ...p, scheduleImpactText: e.target.value }))
+                      }
+                      disabled={formData.scheduleNoImpact}
+                      placeholder="+ 5 days"
+                      aria-label="Schedule impact description"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -632,8 +685,14 @@ function NewChangeOrderContent() {
                 type="button"
                 variant="default"
                 className="min-w-[10rem] !bg-[#0b1d3a] text-white shadow-[0_4px_14px_rgba(15,23,42,0.25)] hover:!bg-[#132b4f] hover:brightness-100"
-                onClick={() => handleSubmit(false)}
-                disabled={isSubmitting}
+                onClick={() =>
+                  void handleSendForReview({
+                    reviewers: reviewConfig.reviewers,
+                    expires_in_days: reviewConfig.expires_in_days,
+                    resend: false,
+                  })
+                }
+                disabled={isSubmitting || reviewConfig.reviewers.length === 0}
               >
                 Send for Review
               </Button>
@@ -645,9 +704,8 @@ function NewChangeOrderContent() {
               <ReviewerManagementSection
                 embedded
                 layout="create"
-                onSend={async () => {
-                  // Creation flow has no document id yet; keep UX consistent with other sections.
-                }}
+                onReviewConfigChange={setReviewConfig}
+                onSend={handleSendForReview}
               />
             </div>
 
