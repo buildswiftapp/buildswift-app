@@ -30,6 +30,7 @@ import { uploadPendingAttachments } from '@/lib/supabase/upload-attachments'
 import { ReviewerManagementSection } from '@/app/components/reviewer-management-section'
 import { MissingScopeEditorSection } from '@/app/components/missing-scope-editor-section'
 import { docTypeToMissingScopeType, setMissingScopeSeedIfMissing } from '@/lib/missing-scope-client'
+import { buildRfiDescriptionBody, buildSubmittalDescriptionBody } from '@/lib/document-html'
 
 const PAGE_BG = '#f1f5f9'
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
@@ -59,63 +60,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function buildRfiHtml(values: {
-  number: string
-  title: string
-  date: string
-  projectName: string
-  description: string
-  notes: string
-}): string {
-  const dateLong = values.date
-    ? new Date(values.date + 'T12:00:00').toLocaleDateString('en-US', {
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric',
-      })
-    : ''
-  return `<h2>Request for Information</h2>
-<p><strong>RFI Number:</strong> ${values.number}</p>
-<p><strong>Date:</strong> ${dateLong}</p>
-<p><strong>Project:</strong> ${values.projectName}</p>
-<p><strong>Title:</strong> ${values.title}</p>
-<h3>Questions/Descriptions</h3>
-<p>${values.description}</p>
-${values.notes ? `<h3>Notes</h3><p>${values.notes}</p>` : ''}`
-}
-
-function buildSubmittalHtml(values: {
-  number: string
-  title: string
-  date: string
-  projectName: string
-  specSection: string
-  manufacturer: string
-  productName: string
-  description: string
-  notes: string
-}): string {
-  const dateLong = values.date
-    ? new Date(values.date + 'T12:00:00').toLocaleDateString('en-US', {
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric',
-      })
-    : ''
-  return `<h2>Product Submittal</h2>
-<p><strong>Submittal Number:</strong> ${values.number}</p>
-<p><strong>Date:</strong> ${dateLong}</p>
-<p><strong>Project:</strong> ${values.projectName}</p>
-<p><strong>Title:</strong> ${values.title}</p>
-<p><strong>Specification Section:</strong> ${values.specSection || 'N/A'}</p>
-<h3>Product Information</h3>
-<p><strong>Manufacturer:</strong> ${values.manufacturer || 'TBD'}</p>
-<p><strong>Product:</strong> ${values.productName || 'TBD'}</p>
-<h3>Description</h3>
-<p>${values.description}</p>
-${values.notes ? `<h3>Notes</h3><p>${values.notes}</p>` : ''}`
 }
 
 function NewDocumentContent() {
@@ -156,6 +100,13 @@ function NewDocumentContent() {
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isGeneratingDescription, setIsGeneratingDescription] = useState(false)
+  const [reviewConfig, setReviewConfig] = useState<{
+    reviewers: string[]
+    expires_in_days: 3 | 7 | 14
+  }>({
+    reviewers: [],
+    expires_in_days: 7,
+  })
 
   useEffect(() => {
     const loadProjects = async () => {
@@ -244,6 +195,9 @@ function NewDocumentContent() {
     if (!formData.projectId) return toast.error('Please select a project')
     if (!formData.title.trim()) return toast.error('Please enter a title')
     if (!formData.description.trim()) return toast.error('Please add description')
+    if (!asDraft && reviewConfig.reviewers.length === 0) {
+      return toast.error('Add at least one reviewer before sending')
+    }
 
     setIsSubmitting(true)
     try {
@@ -259,39 +213,31 @@ function NewDocumentContent() {
         type: a.type,
       }))
 
-      const content =
+      const descriptionBody =
         formData.type === 'rfi'
-          ? buildRfiHtml({
-              number: formData.number,
-              title: formData.title,
-              date: formData.date,
-              projectName: selectedProject?.name || '',
+          ? buildRfiDescriptionBody({
+              question: '',
               description: formData.description,
               notes: formData.notes,
             })
-          : buildSubmittalHtml({
-              number: formData.number,
-              title: formData.title,
-              date: formData.date,
-              projectName: selectedProject?.name || '',
-              specSection: formData.specSection,
-              manufacturer: formData.manufacturer,
-              productName: formData.productName,
+          : buildSubmittalDescriptionBody({
               description: formData.description,
               notes: formData.notes,
             })
 
-      await apiFetch<{ document: { id: string } }>('/api/documents', {
+      const { document } = await apiFetch<{ document: { id: string } }>('/api/documents', {
         method: 'POST',
         json: {
           project_id: formData.projectId,
           doc_type: formData.type as DocumentType,
           doc_number: formData.number,
           title: formData.title,
-          description: content,
+          description: descriptionBody,
           due_date: formData.dueDate || null,
           save_as_draft: asDraft,
           metadata: {
+            rfiDate: formData.type === 'rfi' ? formData.date : undefined,
+            submittalDate: formData.type === 'submittal' ? formData.date : undefined,
             specSection: formData.type === 'submittal' ? formData.specSection : undefined,
             manufacturer: formData.type === 'submittal' ? formData.manufacturer : undefined,
             productName: formData.type === 'submittal' ? formData.productName : undefined,
@@ -302,7 +248,32 @@ function NewDocumentContent() {
         },
       })
 
-      toast.success(asDraft ? 'Draft saved successfully' : `${formData.type === 'rfi' ? 'RFI' : 'Submittal'} generated successfully`)
+      if (!asDraft) {
+        try {
+          await apiFetch(`/api/documents/${document.id}/send-for-review`, {
+            method: 'POST',
+            json: {
+              reviewers: reviewConfig.reviewers,
+              expires_in_days: reviewConfig.expires_in_days,
+              resend: false,
+            },
+          })
+          toast.success(
+            `${formData.type === 'rfi' ? 'RFI' : 'Submittal'} created and review invitations sent`
+          )
+        } catch (sendErr) {
+          toast.error(
+            sendErr instanceof Error
+              ? sendErr.message
+              : 'Document was saved but review emails could not be sent'
+          )
+          router.push(`/documents/${document.id}`)
+          return
+        }
+      } else {
+        toast.success('Draft saved successfully')
+      }
+
       router.push(`/documents?type=${formData.type}`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to save document')
@@ -618,7 +589,7 @@ function NewDocumentContent() {
                 variant="default"
                 className="min-w-[10rem] !bg-[#0b1d3a] text-white shadow-[0_4px_14px_rgba(15,23,42,0.25)] hover:!bg-[#132b4f] hover:brightness-100"
                 onClick={() => void handleSubmit(false)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || reviewConfig.reviewers.length === 0}
               >
                 Send for Review
               </Button>
@@ -627,7 +598,12 @@ function NewDocumentContent() {
 
           <aside className="w-full min-w-0 space-y-6 lg:sticky lg:top-6 lg:self-start">
             <div className={formCardClassName()}>
-              <ReviewerManagementSection embedded layout="create" hideSendButton />
+              <ReviewerManagementSection
+                embedded
+                layout="create"
+                hideSendButton
+                onReviewConfigChange={setReviewConfig}
+              />
             </div>
 
             <div className={formCardClassName()}>

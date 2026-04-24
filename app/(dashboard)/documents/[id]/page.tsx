@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft,
+  Download,
+  Eye,
   Save,
   Trash2,
   Upload,
@@ -14,18 +16,19 @@ import { toast } from 'sonner'
 import { apiFetch } from '@/lib/api'
 import {
   buildChangeOrderHtml,
-  buildRfiHtml,
-  buildSubmittalHtml,
+  buildRfiDescriptionBody,
+  buildSubmittalDescriptionBody,
   CO_REASON_OPTIONS,
-  CO_SCHEDULE_OPTIONS,
   formatUsd,
   getLatestVersion,
   initialChangeOrderState,
   initialRfiState,
   initialSubmittalState,
   parseMoneyInput,
+  scheduleImpactValueToInputText,
 } from '@/lib/document-html'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Spinner } from '@/components/ui/spinner'
@@ -67,6 +70,8 @@ type ApiDocument = {
   id: string
   project_id: string
   doc_type: 'rfi' | 'submittal' | 'change_order'
+  internal_status: string
+  external_status: string
   doc_number: string | null
   title: string
   description: string
@@ -154,13 +159,16 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     description: '',
     reason: 'owner_request',
     costImpact: '0',
-    scheduleImpact: 'none',
+    scheduleNoImpact: true,
+    scheduleImpactText: '',
     notes: '',
   })
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
 
   const [isSaving, setIsSaving] = useState(false)
   const [isGeneratingDescription, setIsGeneratingDescription] = useState(false)
+  const [openingPdfDetails, setOpeningPdfDetails] = useState(false)
+  const [exportingPdf, setExportingPdf] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -198,7 +206,8 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             description: s.description,
             reason: s.reason,
             costImpact: s.costImpact,
-            scheduleImpact: s.scheduleImpact,
+            scheduleNoImpact: s.scheduleImpact === 'none',
+            scheduleImpactText: scheduleImpactValueToInputText(s.scheduleImpact),
             notes: s.notes,
           })
           setAttachments(initialAttachments)
@@ -218,11 +227,30 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
 
   const reasonLabel =
     CO_REASON_OPTIONS.find((r) => r.value === co.reason)?.label ?? co.reason
-  const scheduleLabel =
-    CO_SCHEDULE_OPTIONS.find((s) => s.value === co.scheduleImpact)?.label ?? '—'
+  const scheduleLabel = co.scheduleNoImpact
+    ? 'No Impact'
+    : co.scheduleImpactText.trim() || '—'
   const costNumeric = parseMoneyInput(co.costImpact)
 
   const hintClass = 'mt-1.5 text-xs text-[#64748b]'
+  const normalizedStatus =
+    doc?.internal_status === 'in_review' || doc?.internal_status === 'pending_reviewer'
+      ? 'pending_review'
+      : doc?.internal_status === 'revising'
+        ? 'revision_requested'
+        : doc?.internal_status ?? 'draft'
+  const finalStatusLabel =
+    normalizedStatus === 'approved'
+      ? docType === 'rfi'
+        ? 'Answered'
+        : docType === 'change_order'
+          ? 'Approved as Noted'
+          : 'Approved'
+      : normalizedStatus === 'rejected'
+        ? docType === 'submittal' || docType === 'change_order'
+          ? 'Revise and Resubmit'
+          : 'Rejected'
+        : null
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -268,6 +296,10 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
           increment_version: true,
         },
       })
+      const refreshed = await apiFetch<{ document: ApiDocument }>(
+        '/api/documents/' + id
+      )
+      setDoc(refreshed.document)
       toast.success('Document updated')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to update')
@@ -281,20 +313,21 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       toast.error('Title and description are required')
       return
     }
-    const html = buildRfiHtml({
-      number: rfi.number,
-      title: rfi.title,
-      date: rfi.date,
-      projectName: selectedProject?.name ?? '',
-      question: rfi.question.trim() || rfi.description,
+    const latest = getLatestVersion(doc.document_versions)
+    const prevMeta = (latest?.metadata as Record<string, unknown>) ?? {}
+    const descriptionBody = buildRfiDescriptionBody({
+      question: rfi.question.trim(),
       description: rfi.description,
       notes: rfi.notes,
     })
     await savePatch({
       title: rfi.title,
       doc_number: rfi.number,
-      description: html,
+      description: descriptionBody,
       metadata: {
+        ...prevMeta,
+        rfiDate: rfi.date || undefined,
+        question: rfi.question.trim() || undefined,
         notes: rfi.notes || undefined,
         attachments: toDocAttachments(attachments),
       },
@@ -306,22 +339,19 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       toast.error('Title and description are required')
       return
     }
-    const html = buildSubmittalHtml({
-      number: sub.number,
-      title: sub.title,
-      date: sub.date,
-      projectName: selectedProject?.name ?? '',
-      specSection: sub.specSection,
-      manufacturer: sub.manufacturer,
-      productName: sub.productName,
+    const latest = getLatestVersion(doc.document_versions)
+    const prevMeta = (latest?.metadata as Record<string, unknown>) ?? {}
+    const descriptionBody = buildSubmittalDescriptionBody({
       description: sub.description,
       notes: sub.notes,
     })
     await savePatch({
       title: sub.title,
       doc_number: sub.number,
-      description: html,
+      description: descriptionBody,
       metadata: {
+        ...prevMeta,
+        submittalDate: sub.date || undefined,
         specSection: sub.specSection || undefined,
         manufacturer: sub.manufacturer || undefined,
         productName: sub.productName || undefined,
@@ -373,7 +403,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     try {
       await apiFetch('/api/documents/' + id, { method: 'DELETE' })
       toast.success('Document deleted')
-      router.push('/documents')
+      router.push(`/documents?type=${docType}`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to delete')
     }
@@ -415,6 +445,22 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     }
   }
 
+  const handleViewPdfDetails = () => {
+    if (openingPdfDetails) return
+    setOpeningPdfDetails(true)
+    const opened = window.open(`/api/documents/${id}/pdf`, '_blank', 'noopener,noreferrer')
+    if (!opened) toast.error('Popup blocked. Please allow popups to view PDF details.')
+    window.setTimeout(() => setOpeningPdfDetails(false), 600)
+  }
+
+  const handleExportPdf = () => {
+    if (exportingPdf || normalizedStatus !== 'approved') return
+    setExportingPdf(true)
+    const opened = window.open(`/api/documents/${id}/pdf?download=1`, '_blank', 'noopener,noreferrer')
+    if (!opened) toast.error('Popup blocked. Please allow popups to export PDF.')
+    window.setTimeout(() => setExportingPdf(false), 600)
+  }
+
   const pageTitle = useMemo(() => {
     if (!doc) return 'Document'
     if (doc.doc_type === 'rfi') return 'Edit RFI'
@@ -445,6 +491,16 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {finalStatusLabel ? (
+              <span
+                className={cn(
+                  'inline-flex items-center rounded-md px-3 py-1 text-xs font-semibold',
+                  normalizedStatus === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                )}
+              >
+                {finalStatusLabel}
+              </span>
+            ) : null}
             <Button
               variant="outline"
               className="shrink-0 gap-2 rounded-lg border-[#e2e8f0] bg-white px-4 text-[#0f172a] shadow-sm hover:bg-[#f8fafc]"
@@ -633,18 +689,29 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                   </div>
                   <div>
                     <label className={capLabel}>Schedule impact</label>
-                    <Select value={co.scheduleImpact} onValueChange={(v) => setCo((p) => ({ ...p, scheduleImpact: v }))}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CO_SCHEDULE_OPTIONS.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>
-                            {o.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="flex min-h-10 items-center gap-3">
+                      <label
+                        htmlFor="co-schedule-no-impact"
+                        className="flex shrink-0 cursor-pointer items-center gap-2 text-sm whitespace-nowrap text-[#0f172a]"
+                      >
+                        <Checkbox
+                          checked={co.scheduleNoImpact}
+                          onCheckedChange={(checked) =>
+                            setCo((p) => ({ ...p, scheduleNoImpact: checked === true }))
+                          }
+                          id="co-schedule-no-impact"
+                        />
+                        <span>No Impact</span>
+                      </label>
+                      <Input
+                        className="min-w-0 flex-1"
+                        value={co.scheduleImpactText}
+                        onChange={(e) => setCo((p) => ({ ...p, scheduleImpactText: e.target.value }))}
+                        disabled={co.scheduleNoImpact}
+                        placeholder="+ 5 days"
+                        aria-label="Schedule impact description"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -746,11 +813,12 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                   <ReviewerManagementSection
                     embedded
                     layout="create"
-                    onSend={async (emails) => {
+                    onSend={async ({ reviewers, expires_in_days, resend }) => {
                       await apiFetch('/api/documents/' + id + '/send-for-review', {
                         method: 'POST',
-                        json: { reviewers: emails },
+                        json: { reviewers, expires_in_days, resend },
                       })
+                      toast.success('Review invitations sent')
                     }}
                   />
                 </div>
@@ -772,11 +840,12 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             ) : (
               <div className={formCardClassName()}>
                 <ReviewerManagementSection
-                  onSend={async (emails) => {
+                  onSend={async ({ reviewers, expires_in_days, resend }) => {
                     await apiFetch('/api/documents/' + id + '/send-for-review', {
                       method: 'POST',
-                      json: { reviewers: emails },
+                      json: { reviewers, expires_in_days, resend },
                     })
+                    toast.success('Review invitations sent')
                   }}
                 />
               </div>
@@ -785,6 +854,17 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             <div className={formCardClassName()}>
               <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">Summary</h3>
               <div className="space-y-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Review status</p>
+                  <p className="text-sm font-semibold text-[#0f172a]">
+                    {finalStatusLabel ??
+                      (normalizedStatus === 'pending_review'
+                        ? 'Sent'
+                        : normalizedStatus === 'revision_requested'
+                          ? 'Revision Requested'
+                          : 'Draft')}
+                  </p>
+                </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Project</p>
                   <p className="text-sm font-semibold text-[#0f172a]">{selectedProject?.name ?? '—'}</p>
@@ -807,6 +887,32 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                         ? rfi.title || '—'
                         : sub.title || '—'}
                   </p>
+                </div>
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">PDF</p>
+                  <div className="mt-2 flex flex-col gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleViewPdfDetails}
+                      disabled={openingPdfDetails}
+                      className="w-full justify-start gap-2"
+                    >
+                      <Eye className="h-4 w-4" />
+                      {openingPdfDetails ? 'Opening PDF...' : 'View PDF Details'}
+                    </Button>
+                    {normalizedStatus === 'approved' ? (
+                      <Button
+                        type="button"
+                        onClick={handleExportPdf}
+                        disabled={exportingPdf}
+                        className="w-full justify-start gap-2"
+                      >
+                        <Download className="h-4 w-4" />
+                        {exportingPdf ? 'Exporting...' : 'Export to PDF'}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
                 {docType === 'change_order' ? (
                   <>
@@ -835,6 +941,16 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                   </>
                 ) : null}
               </div>
+            </div>
+
+            <div className={formCardClassName()}>
+              <h3 className="mb-3 text-lg font-semibold text-[#0f172a]">Linked Documents</h3>
+              <p className="mb-4 text-sm text-[#64748b]">
+                Create downstream change orders from this review outcome when needed.
+              </p>
+              <Button asChild variant="outline" className="w-full">
+                <Link href={`/change-orders/new?source_document_id=${id}`}>Create Change Order</Link>
+              </Button>
             </div>
 
             {docType === 'change_order' ? (

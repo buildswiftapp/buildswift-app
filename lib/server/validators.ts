@@ -51,8 +51,19 @@ export const updateDocumentSchema = z.object({
 })
 
 export const sendForReviewSchema = z.object({
-  reviewers: z.array(z.string().email()).min(1),
+  reviewers: z
+    .array(z.string().trim().toLowerCase().email())
+    .min(1)
+    .transform((reviewers) => Array.from(new Set(reviewers))),
+  /** When true, only refresh tokens for reviewers on the latest open review cycle (expired links only). */
   resend: z.boolean().optional().default(false),
+  /** Link lifetime for new tokens (days). Default 7. */
+  expires_in_days: z.coerce
+    .number()
+    .int()
+    .refine((n): n is 3 | 7 | 14 => [3, 7, 14].includes(n), { message: 'expires_in_days must be 3, 7, or 14' })
+    .optional()
+    .default(7),
 })
 
 export const reviewDecisionSchema = z.object({
@@ -60,6 +71,14 @@ export const reviewDecisionSchema = z.object({
   decision_notes: z.string().max(3000).optional(),
   full_name: z.string().trim().min(1),
   signature_url: z.string().url().optional(),
+})
+
+export const reviewSubmitSchema = z.object({
+  token: z.string().trim().min(16).max(512),
+  decision: z.enum(['approved', 'rejected']),
+  notes: z.string().max(3000).optional(),
+  signature_name: z.string().trim().min(1).max(200),
+  signature_image: z.string().min(1).max(2_000_000).optional(),
 })
 
 export const aiGenerateSchema = z.object({
@@ -76,4 +95,18 @@ export const missingScopeAiSchema = z.object({
     (value) => (typeof value === 'string' ? value : undefined),
     z.string().trim().min(1).max(6000).optional()
   ),
+})
+
+export const accountBrandingUpsertSchema = z.object({
+  company_name: z.string().trim().max(200).optional().nullable(),
+  primary_color: z
+    .string()
+    .trim()
+    .max(32)
+    .optional()
+    .nullable()
+    .refine((v) => v == null || v === undefined || v === '' || /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v), {
+      message: 'Invalid hex color',
+    }),
+  clear_logo: z.boolean().optional(),
 })

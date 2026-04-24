@@ -444,16 +444,18 @@ export default function ProjectDetailPage({
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {projectMetricCards.map(({ key, label, value, Icon, iconClassName }) => (
             <Card key={key}>
-              <CardContent className="flex min-h-[94px] items-start gap-3 px-5 py-4">
-                <div className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded-md ${iconClassName}`}>
-                  <Icon className="h-[18px] w-[18px]" />
+              <CardContent className="flex min-h-[110px] items-stretch gap-4 px-5 py-5">
+                <div
+                  className={`flex aspect-square h-full min-h-[56px] shrink-0 items-center justify-center rounded-lg ${iconClassName}`}
+                >
+                  <Icon className="h-5 w-5" />
                 </div>
-                <div>
-                  <p className="text-3xl font-semibold leading-none tracking-tight">{value}</p>
-                  <p className="mt-1.5 text-xs text-muted-foreground">{label}</p>
+                <div className="flex min-h-[56px] min-w-0 flex-col justify-center">
+                  <p className="text-3xl font-semibold leading-none tracking-tight sm:text-[2rem]">{value}</p>
+                  <p className="mt-2 text-sm font-medium leading-tight text-muted-foreground">{label}</p>
                 </div>
               </CardContent>
             </Card>
