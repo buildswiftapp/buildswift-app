@@ -6,6 +6,7 @@ import {
 import { getAccountBranding, resolveBrandingLogoDataUri } from '@/lib/server/account-branding'
 import { parseBrandingPrimaryColor } from '@/lib/branding-utils'
 import { getAuthContext } from '@/lib/server/auth'
+import { assertCanUseProFeature } from '@/lib/server/billing'
 import { findDocumentById } from '@/lib/server/document-store'
 import { generateReviewPdfBuffer } from '@/lib/server/review-pdf'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
@@ -27,6 +28,8 @@ export async function GET(req: Request, { params }: Params) {
 
   const supabase = createSupabaseAdminClient() ?? (await createSupabaseServerClient())
   if (!supabase) return serverError('Supabase is not configured')
+  const proGate = await assertCanUseProFeature(supabase as any, auth.accountId, 'PDF export')
+  if (!proGate.ok) return badRequest(proGate.reason)
 
   const { data: document, error: documentError } = await findDocumentById({
     supabase,
@@ -219,6 +222,7 @@ export async function GET(req: Request, { params }: Params) {
     attachments: attachmentNames,
     approvalRows: approvalRows.length ? approvalRows : undefined,
     reviewStatus: isApproved ? 'APPROVED' : isRejected ? 'REJECTED' : 'PENDING',
+    metadata,
   })
 
   return new Response(pdf, {

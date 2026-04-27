@@ -40,11 +40,11 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-background">
+    <div className="app-shell flex h-screen flex-col">
       <AppHeader />
       <div className="flex flex-1 overflow-hidden">
         <AppSidebarWithProjects />
-        <main className="flex-1 overflow-auto bg-[#f8f9fb]">
+        <main className="flex-1 overflow-auto bg-background">
           {children}
         </main>
       </div>

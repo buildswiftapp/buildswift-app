@@ -291,7 +291,11 @@ export function ReviewerManagementSection({
   )
 
   if (embedded) {
-    return <div className="space-y-0">{inner}</div>
+    return (
+      <div className="rounded-2xl border border-[#d7dee8] bg-white p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+        {inner}
+      </div>
+    )
   }
 
   return (

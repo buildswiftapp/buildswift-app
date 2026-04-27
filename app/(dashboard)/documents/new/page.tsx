@@ -9,7 +9,6 @@ import {
   X,
   Eye,
   Save,
-  Sparkles,
   FileImage,
 } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
@@ -28,8 +27,8 @@ import { toast } from 'sonner'
 import type { Attachment as DocAttachment, DocumentType, Project } from '@/lib/types'
 import { uploadPendingAttachments } from '@/lib/supabase/upload-attachments'
 import { ReviewerManagementSection } from '@/app/components/reviewer-management-section'
-import { MissingScopeEditorSection } from '@/app/components/missing-scope-editor-section'
-import { docTypeToMissingScopeType, setMissingScopeSeedIfMissing } from '@/lib/missing-scope-client'
+import { MissingScopeEditorSection } from '../../../components/missing-scope-editor-section'
+import { docTypeToMissingScopeType } from '@/lib/missing-scope-client'
 import { buildRfiDescriptionBody, buildSubmittalDescriptionBody } from '@/lib/document-html'
 
 const PAGE_BG = '#f1f5f9'
@@ -46,7 +45,6 @@ function formCardClassName(extra?: string) {
 }
 
 type BuilderType = 'rfi' | 'submittal'
-type AiGenerateResponse = { generatedContent: string }
 
 interface LocalAttachment {
   id: string
@@ -99,7 +97,6 @@ function NewDocumentContent() {
 
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isGeneratingDescription, setIsGeneratingDescription] = useState(false)
   const [reviewConfig, setReviewConfig] = useState<{
     reviewers: string[]
     expires_in_days: 3 | 7 | 14
@@ -282,39 +279,6 @@ function NewDocumentContent() {
     }
   }
 
-  const handleGenerateDescription = async () => {
-    const trimmedDescription = formData.description.trim()
-    if (!trimmedDescription) {
-      toast.error('Enter an initial description before generating with AI')
-      return
-    }
-    setMissingScopeSeedIfMissing(
-      docTypeToMissingScopeType(formData.type as DocumentType),
-      trimmedDescription
-    )
-    setIsGeneratingDescription(true)
-    try {
-      const data = await apiFetch<AiGenerateResponse>('/api/ai/generate', {
-        method: 'POST',
-        json: {
-          documentType: formData.type === 'rfi' ? 'RFI' : 'Submittal',
-          description: trimmedDescription,
-        },
-      })
-      const generated = data.generatedContent?.trim()
-      if (!generated) {
-        toast.error('AI generation temporarily unavailable. Please try again.')
-        return
-      }
-      setFormData((prev) => ({ ...prev, description: generated }))
-      toast.success('Description generated')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'AI generation temporarily unavailable. Please try again.')
-    } finally {
-      setIsGeneratingDescription(false)
-    }
-  }
-
   const hintClass = 'mt-1.5 text-xs text-[#64748b]'
 
   const priorityBtn = (key: 'low' | 'normal' | 'urgent', label: string) => {
@@ -443,23 +407,16 @@ function NewDocumentContent() {
               </div>
 
               <div className="mb-3 flex items-center justify-between gap-3">
-                <span className={capLabelRow}>{descriptionLabel}</span>
-                <button
-                  type="button"
-                  onClick={() => void handleGenerateDescription()}
-                  disabled={isGeneratingDescription}
-                  className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-[#0f172a] transition-colors hover:text-[#334155] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb]/25 focus-visible:ring-offset-2"
-                >
-                  <Sparkles className="h-4 w-4 text-[#ca8a04]" strokeWidth={2} aria-hidden />
-                  AI Generate Description
-                </button>
+                <span className={capLabelRow}>
+                  {descriptionLabel} <span className="text-destructive">*</span>
+                </span>
               </div>
               <MissingScopeEditorSection
                 variant="document-description"
                 documentApiType={docTypeToMissingScopeType(formData.type as DocumentType)}
                 value={formData.description}
                 onChange={(v) => setFormData((p) => ({ ...p, description: v }))}
-                isGeneratingDescription={isGeneratingDescription}
+                aiNotes={formData.notes}
                 rows={8}
                 placeholder={
                   formData.type === 'rfi'

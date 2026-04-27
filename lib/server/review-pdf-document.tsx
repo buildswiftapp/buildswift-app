@@ -17,6 +17,7 @@ export type ReviewPdfViewModel = {
   themeAccent: string
   badgeBackground: string
   footerLine: string
+  debugInfo?: string
   reviewTitle: string
   reviewNumber: string
   reviewStatus: string
@@ -42,6 +43,18 @@ export type ReviewPdfViewModel = {
   impactRows: Array<{ label: string; value: string }>
   attachments: string[]
   linkedDocuments: string[]
+  costItems?: Array<{ item: string; amount: string }>
+  assumptions?: string[]
+  contractorName?: string
+  contractorRole?: string
+  contractorPhone?: string
+  contractorEmail?: string
+  architectName?: string
+  architectRole?: string
+  architectPhone?: string
+  architectEmail?: string
+  scheduleExtension?: string
+  newCompletionDate?: string
   approvalRows: Array<{
     title: string
     role: string
@@ -81,7 +94,7 @@ function contactLines(address: string) {
 }
 
 const styles = StyleSheet.create({
-  page: { paddingTop: 22, paddingBottom: 20, paddingHorizontal: 22, fontSize: 10, color: '#0f172a' },
+  page: { paddingTop: 18, paddingBottom: 18, paddingHorizontal: 18, fontSize: 10, color: '#0f172a' },
   topHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -92,32 +105,32 @@ const styles = StyleSheet.create({
     borderBottomColor: '#cbd5e1',
   },
   topLeft: { flexDirection: 'row', alignItems: 'center' },
-  logo: { width: 26, height: 26 },
-  brandBlock: { marginLeft: 8 },
-  brand: { fontSize: 18, fontWeight: 700, color: '#1f3768' },
-  brandSub: { fontSize: 9, color: '#334155', marginTop: 1 },
+  logo: { width: 38, height: 38 },
+  brandBlock: { marginLeft: 10 },
+  brand: { fontSize: 18, fontWeight: 800, color: '#1f3768' },
+  brandSub: { fontSize: 10, color: '#334155', marginTop: 1, letterSpacing: 0.8 },
   contactBlock: { maxWidth: 220, textAlign: 'right', fontSize: 8, color: '#64748b', lineHeight: 1.4 },
 
   reviewBar: {
     marginTop: 2,
     backgroundColor: '#1f3768',
-    minHeight: 44,
+    minHeight: 48,
     paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  reviewTitle: { color: '#ffffff', fontSize: 15, fontWeight: 700 },
+  reviewTitle: { color: '#ffffff', fontSize: 17, fontWeight: 800 },
   rightBadgeWrap: { alignItems: 'flex-end' },
   numberBadge: {
     backgroundColor: '#d58a2f',
     color: '#ffffff',
-    fontSize: 15,
-    fontWeight: 700,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 12,
+    fontSize: 16,
+    fontWeight: 800,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 14,
   },
   statusPill: {
     marginTop: 3,
@@ -129,7 +142,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderRadius: 10,
   },
-  accent: { height: 2, backgroundColor: '#c37a29', marginBottom: 11 },
+  accent: { height: 3, backgroundColor: '#c37a29', marginBottom: 10 },
 
   metaRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   metaLeft: { fontSize: 9 },
@@ -150,7 +163,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   infoRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#e2e5ec' },
-  infoCell: { width: '50%', paddingVertical: 8, paddingHorizontal: 10, borderRightWidth: 1, borderRightColor: '#e2e5ec' },
+  infoCell: { width: '50%', paddingVertical: 9, paddingHorizontal: 10, borderRightWidth: 1, borderRightColor: '#e2e5ec' },
   infoCellLast: { borderRightWidth: 0 },
   infoLabel: { fontSize: 9, fontWeight: 700, color: '#1f3768' },
   infoValue: { fontSize: 11, marginTop: 2, lineHeight: 1.3 },
@@ -187,25 +200,28 @@ const styles = StyleSheet.create({
     borderColor: '#d9dce5',
     borderRadius: 5,
     overflow: 'hidden',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fcfcfe',
   },
   questionHeader: {
     backgroundColor: '#f5f0df',
     borderBottomWidth: 1,
     borderBottomColor: '#e5dcc4',
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     paddingVertical: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
+  sectionIcon: { fontSize: 10, color: '#b7791f', marginRight: 6 },
   questionHeaderText: { fontSize: 11, fontWeight: 700, color: '#1f3768' },
   questionBody: { paddingHorizontal: 12, paddingVertical: 11, fontSize: 11, lineHeight: 1.45 },
   sectionHeaderLine: { marginTop: 11, flexDirection: 'row', alignItems: 'center' },
-  sectionHeaderText: { fontSize: 10, fontWeight: 700, color: '#1f3768' },
+  sectionHeaderText: { fontSize: 11, fontWeight: 800, color: '#1f3768' },
   sectionHeaderAccent: { height: 1, flexGrow: 1, marginLeft: 5, backgroundColor: '#e2a65c' },
   listCard: {
     borderWidth: 1,
     borderColor: '#d9dce5',
     borderRadius: 5,
-    backgroundColor: '#fafafb',
+    backgroundColor: '#f8f8fc',
     marginTop: 5,
     marginBottom: 6,
     paddingHorizontal: 10,
@@ -214,10 +230,10 @@ const styles = StyleSheet.create({
   listItem: { fontSize: 10, marginBottom: 5, lineHeight: 1.35 },
   table: { marginTop: 5, borderWidth: 1, borderColor: '#d7dbe4', borderRadius: 5, overflow: 'hidden' },
   tableHeader: { flexDirection: 'row', backgroundColor: '#1f3768', paddingVertical: 6, paddingHorizontal: 8 },
-  tableHeaderCell: { color: '#ffffff', fontSize: 9, fontWeight: 700 },
+  tableHeaderCell: { color: '#ffffff', fontSize: 9, fontWeight: 800 },
   tableRow: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#e2e5ec', paddingVertical: 6, paddingHorizontal: 8 },
   tableCell: { fontSize: 9 },
-  signatureCell: { width: '22%', justifyContent: 'center' },
+  signatureCell: { justifyContent: 'center' },
   signatureImage: { width: 64, height: 18, objectFit: 'contain' },
   signatureNameText: { fontSize: 8, color: '#0f172a' },
   sigApproved: {
@@ -263,7 +279,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
-  impactHeaderText: { fontSize: 11, fontWeight: 700, color: '#92400e' },
+  impactHeaderText: { fontSize: 11, fontWeight: 800, color: '#92400e' },
   impactRow: { paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#f3e8d4' },
   impactRowLast: { borderBottomWidth: 0 },
   impactRowLabel: { fontSize: 9, fontWeight: 700, color: '#1f3768', marginBottom: 2 },
@@ -276,9 +292,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  footerRoleItem: { fontSize: 8, color: '#64748b', marginHorizontal: 8, marginBottom: 3 },
+  footerRoleItem: { fontSize: 8, color: '#334155', marginHorizontal: 8, marginBottom: 3 },
 
   footer: { marginTop: 10, textAlign: 'center', fontSize: 8, color: '#64748b' },
+  debugFooter: { marginTop: 3, textAlign: 'center', fontSize: 6, color: '#94a3b8' },
 })
 
 function titleCardLabel(docType: string) {
@@ -288,240 +305,376 @@ function titleCardLabel(docType: string) {
 }
 
 export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
-  const docNoLabel =
-    data.docType === 'rfi' ? 'RFI No:' : data.docType === 'submittal' ? 'Submittal No:' : 'Document No:'
-  const priorityColors = priorityBadgeStyle(data.priority)
-  const showAttachments = data.attachments.some((s) => s.trim() && s.trim() !== '—')
-  const showLinked = data.linkedDocuments.some((s) => s.trim() && s.trim() !== '—')
-  const showApproval = data.approvalRows.length > 0
-  const showNarrative = data.contentSections.length > 0
-  const showImpact = data.impactRows.length > 0
-  const primary = data.themePrimary
-  const accent = data.themeAccent
+  const isRfi = data.docType === 'rfi'
+  const isSubmittal = data.docType === 'submittal'
+  const isChangeOrder = data.docType === 'change_order'
+  const documentNumberLabel = isChangeOrder
+    ? 'Change Order No.'
+    : isSubmittal
+      ? 'Submittal No.'
+      : 'RFI No.'
+  const descriptionHeading = isChangeOrder
+    ? 'DESCRIPTION OF CHANGE'
+    : isSubmittal
+      ? 'SUBMITTAL DESCRIPTION'
+      : 'QUESTION / ISSUE'
+  const reasonHeading = isChangeOrder ? 'REASON FOR CHANGE' : isSubmittal ? 'SPECIFICATION / COMPLIANCE' : 'CONTRACTOR\'S PROPOSED INTERPRETATION'
+
+  const toBullets = (value: string) =>
+    value
+      .split('\n')
+      .map((line) => line.replace(/^[-*•]\s*/, '').trim())
+      .filter(Boolean)
+
+  const summaryCost =
+    data.impactRows.find((row) => row.label.toLowerCase().includes('cost'))?.value?.trim() || '—'
+  const summarySchedule =
+    data.impactRows.find((row) => row.label.toLowerCase().includes('schedule'))?.value?.trim() || '—'
+  const summaryScope =
+    data.impactRows.find((row) => row.label.toLowerCase().includes('scope'))?.value?.trim() || ''
+  const fallbackNarrative =
+    data.contentSections.find((s) => s.label.toLowerCase().includes('question'))?.body ||
+    data.contentSections[0]?.body ||
+    data.questionIssue ||
+    data.rawContent ||
+    '—'
+  const scopeBullets = toBullets(summaryScope || data.questionIssue)
+  const assumptionBullets =
+    (data.assumptions && data.assumptions.length
+      ? data.assumptions
+      : toBullets(
+          data.contentSections.find((s) => s.label.toLowerCase().includes('assumption'))?.body ||
+            "Work is based on current drawings.\nAny additional scope outside this description will be addressed separately."
+        )) || []
+  const costItems =
+    data.costItems && data.costItems.length
+      ? data.costItems
+      : [{ item: 'Total Added Cost', amount: summaryCost }]
+  const narrativeSections = data.contentSections.filter(
+    (section) => section.body && section.body.trim() && section.body.trim() !== '—'
+  )
+  const dividerColor = '#e5ecf8'
+  const contractorDisplayName = (data.contractorName || data.submittedBy || '').trim()
+  const contractorDisplayRole = (data.contractorRole || '').trim()
+  const contractorDisplayEmail = (data.contractorEmail || data.contactEmail || '').trim()
+  const contractorDisplayPhone = (data.contractorPhone || data.contactPhone || '').trim()
+  const architectDisplayName = (data.architectName || '').trim()
+  const architectDisplayRole = (data.architectRole || '').trim()
+  const architectDisplayEmail = (data.architectEmail || '').trim()
+  const architectDisplayPhone = (data.architectPhone || '').trim()
+  const BASE_SPACE = 8
+  const approvalDisplayRows =
+    data.approvalRows.length > 0
+      ? data.approvalRows
+      : isChangeOrder
+        ? [
+            {
+              title: contractorDisplayName || 'Contractor Company',
+              role: 'Contractor',
+              signature: 'pending' as const,
+              date: '____________',
+              notes: '—',
+            },
+            {
+              title: architectDisplayName || 'Architect/Engineer',
+              role: 'Architect',
+              signature: 'pending' as const,
+              date: '____________',
+              notes: '—',
+            },
+            {
+              title: 'Owner',
+              role: 'Owner',
+              signature: 'pending' as const,
+              date: '____________',
+              notes: '—',
+            },
+          ]
+        : [{ title: '—', role: '—', signature: 'pending' as const, date: '—', notes: '—' }]
+
+  const Section = ({ children, marginTop = 0, marginBottom = BASE_SPACE * 1.25 }: { children: React.ReactNode; marginTop?: number; marginBottom?: number }) => (
+    <View style={{ marginTop, marginBottom }}>{children}</View>
+  )
+
+  const SectionHeading = ({ title, marginTop = 0 }: { title: string; marginTop?: number }) => (
+    <View style={{ marginTop, marginBottom: 5 }}>
+      <Text style={{ fontSize: 13.2, fontWeight: 700, marginBottom: 2 }}>{title}</Text>
+      <View style={{ height: 1, backgroundColor: '#e4e9f4' }} />
+    </View>
+  )
 
   return (
     <Document>
-      <Page size="A4" style={styles.page}>
-        <View style={styles.topHeader}>
-          <View style={styles.topLeft}>
-            {data.logoDataUri ? <Image src={data.logoDataUri} style={styles.logo} /> : null}
-            <View style={styles.brandBlock}>
-              {data.brand ? <Text style={[styles.brand, { color: primary }]}>{data.brand}</Text> : null}
-              {data.brandSub ? <Text style={styles.brandSub}>{data.brandSub}</Text> : null}
-            </View>
-          </View>
-          <View style={styles.contactBlock}>
-            {contactLines(data.contactAddress).map((line, i) => (
-              <Text key={`addr-${i}`}>{line}</Text>
-            ))}
-            <Text>{data.contactPhone}</Text>
-            <Text>{data.contactEmail}</Text>
-          </View>
-        </View>
-
-        <View style={[styles.reviewBar, { backgroundColor: primary }]}>
-          <Text style={styles.reviewTitle}>{data.reviewTitle}</Text>
-          <View style={styles.rightBadgeWrap}>
-            <Text style={[styles.numberBadge, { backgroundColor: data.badgeBackground }]}>{data.reviewNumber}</Text>
-            <Text style={styles.statusPill}>{data.reviewStatus}</Text>
-          </View>
-        </View>
-        <View style={[styles.accent, { backgroundColor: accent }]} />
-
-        <View style={styles.metaRow}>
-          <Text style={styles.metaLeft}>{data.docTypeLine}</Text>
-          <Text style={styles.metaRight}>{data.generatedAt}</Text>
-        </View>
-
-        <View style={styles.infoGrid}>
-          <View style={styles.infoRow}>
-            <View style={styles.infoCell}>
-              <Text style={[styles.infoLabel, { color: primary }]}>Project:</Text>
-              <Text style={styles.infoValue}>{data.project}</Text>
-            </View>
-            <View style={[styles.infoCell, styles.infoCellLast]}>
-              <Text style={[styles.infoLabel, { color: primary }]}>Project No:</Text>
-              <Text style={styles.infoValue}>{data.projectNo}</Text>
-            </View>
-          </View>
-          <View style={styles.infoRow}>
-            <View style={styles.infoCell}>
-              <Text style={[styles.infoLabel, { color: primary }]}>Date:</Text>
-              <Text style={styles.infoValue}>{data.reportDate}</Text>
-            </View>
-            <View style={[styles.infoCell, styles.infoCellLast]}>
-              <Text style={[styles.infoLabel, { color: primary }]}>Action Needed By:</Text>
-              <Text style={styles.infoValue}>{data.actionNeededBy}</Text>
-            </View>
-          </View>
-          {data.docType === 'rfi' && data.contractDateDisplay ? (
-            <View style={styles.infoRow}>
-              <View style={{ width: '100%', paddingVertical: 6, paddingHorizontal: 8 }}>
-                <Text style={[styles.infoLabel, { color: primary }]}>Contract Date:</Text>
-                <Text style={styles.infoValue}>{data.contractDateDisplay}</Text>
+      <Page
+        size="A4"
+        style={{
+          paddingTop: 30,
+          paddingBottom: 34,
+          paddingHorizontal: 34,
+          fontSize: 10.2,
+          color: '#0f172a',
+          fontFamily: 'Helvetica',
+        }}
+      >
+        <View style={{ paddingHorizontal: 8, paddingTop: 4, paddingBottom: 2, marginBottom: 4 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {data.logoDataUri ? <Image src={data.logoDataUri} style={{ width: 66, height: 66 }} /> : null}
+              <View style={{ marginLeft: 8, paddingTop: 4 }}>
+                <Text
+                  style={{
+                    fontSize: 19.6,
+                    fontWeight: 500,
+                    color: '#243b6b',
+                    letterSpacing: 0.1,
+                  }}
+                >
+                  {data.brand || 'BuildSwift'}
+                </Text>
+                <View
+                  style={{
+                    marginTop: 1,
+                    width: 116,
+                    height: 0.9,
+                    backgroundColor: '#3b5f97',
+                  }}
+                />
               </View>
             </View>
-          ) : null}
-          <View style={styles.infoRow}>
-            <View style={styles.infoCell}>
-              <Text style={[styles.infoLabel, { color: primary }]}>{docNoLabel}</Text>
-              <Text style={styles.infoValue}>{data.rfiNo}</Text>
-            </View>
-            <View style={[styles.infoCell, styles.infoCellLast]}>
-              <Text style={[styles.infoLabel, { color: primary }]}>Priority:</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 1 }}>
-                {priorityColors ? (
-                  <Text style={[styles.priorityBadge, { backgroundColor: priorityColors.backgroundColor, color: priorityColors.color }]}>
-                    {data.priority}
-                  </Text>
-                ) : (
-                  <Text style={styles.infoValue}>{data.priority}</Text>
-                )}
-              </View>
-            </View>
-          </View>
-          <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
-            <View style={styles.infoCell}>
-              <Text style={[styles.infoLabel, { color: primary }]}>Submitted By:</Text>
-              <Text style={styles.infoValue}>{data.submittedBy}</Text>
-            </View>
-            <View style={[styles.infoCell, styles.infoCellLast]}>
-              <Text style={[styles.infoLabel, { color: primary }]}>Spec Section:</Text>
-              <Text style={styles.infoValue}>{data.specSection}</Text>
+            <View style={{ alignItems: 'flex-end', paddingTop: 14 }}>
+              <Text style={{ fontSize: 13.5, fontWeight: 700 }}>{`${documentNumberLabel} ${data.reviewNumber}`}</Text>
+              <Text style={{ marginTop: 4, fontSize: 11.5 }}>{data.reportDate}</Text>
             </View>
           </View>
         </View>
+        <View style={{ height: 1.2, backgroundColor: '#2d5fa8', marginTop: 6, marginBottom: BASE_SPACE * 1.8 }} />
 
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Text style={[styles.cardHeaderLabel, { color: primary }]}>{titleCardLabel(data.docType)}</Text>
-            <Text style={styles.cardHeaderValue}>{data.submittalTitle}</Text>
-          </View>
+        <View style={{ marginBottom: 4, borderBottomWidth: 1, borderBottomColor: dividerColor, paddingTop: 1, paddingBottom: 7 }}>
+          <Text style={{ fontSize: 11.5, fontWeight: 700, marginBottom: 1 }}>
+            PROJECT: <Text style={{ fontWeight: 500 }}>{data.project}</Text>
+          </Text>
+          <Text style={{ fontSize: 10.8, color: '#334155' }}>{data.contactAddress.split('\n')[0] || '—'}</Text>
         </View>
-
-        {showNarrative ? (
-          data.contentSections.map((sec, idx) => (
-            <View key={`${sec.label}-${idx}`} style={styles.questionCard}>
-              <View style={styles.questionHeader}>
-                <Text style={[styles.questionHeaderText, { color: primary }]}>{sec.label}</Text>
-              </View>
-              <Text style={styles.questionBody}>{sec.body}</Text>
+        {isChangeOrder ? (
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 9, borderBottomWidth: 1, borderBottomColor: dividerColor, paddingBottom: 5 }}>
+            <View style={{ width: '49%' }}>
+              <Text style={{ fontSize: 12, fontWeight: 800, marginBottom: 2 }}>CONTRACTOR:</Text>
+              {contractorDisplayName ? <Text style={{ fontSize: 11 }}>{contractorDisplayName}</Text> : null}
+              {contractorDisplayRole ? <Text style={{ fontSize: 11 }}>{contractorDisplayRole}</Text> : null}
+              {contractorDisplayEmail ? <Text style={{ fontSize: 11, color: '#334155' }}>{contractorDisplayEmail}</Text> : null}
+              {contractorDisplayPhone ? <Text style={{ fontSize: 11, color: '#334155' }}>{contractorDisplayPhone}</Text> : null}
             </View>
-          ))
+            <View style={{ width: '49%' }}>
+              <Text style={{ fontSize: 12, fontWeight: 800, marginBottom: 2 }}>ARCHITECT/ENGINEER:</Text>
+              {architectDisplayName ? <Text style={{ fontSize: 11 }}>{architectDisplayName}</Text> : null}
+              {architectDisplayRole ? <Text style={{ fontSize: 11 }}>{architectDisplayRole}</Text> : null}
+              {architectDisplayEmail ? <Text style={{ fontSize: 11, color: '#334155' }}>{architectDisplayEmail}</Text> : null}
+              {architectDisplayPhone ? <Text style={{ fontSize: 11, color: '#334155' }}>{architectDisplayPhone}</Text> : null}
+            </View>
+          </View>
         ) : (
-          <View style={styles.questionCard}>
-            <View style={styles.questionHeader}>
-              <Text style={[styles.questionHeaderText, { color: primary }]}>QUESTION / ISSUE</Text>
-            </View>
-            <Text style={styles.questionBody}>{data.questionIssue}</Text>
+          <View style={{ width: '49%', marginBottom: 9, borderBottomWidth: 1, borderBottomColor: dividerColor, paddingBottom: 5 }}>
+            <Text style={{ fontSize: 12, fontWeight: 800, marginBottom: 2 }}>CONTRACTOR:</Text>
+            {contractorDisplayName ? <Text style={{ fontSize: 11 }}>{contractorDisplayName}</Text> : null}
+            {contractorDisplayRole ? <Text style={{ fontSize: 11 }}>{contractorDisplayRole}</Text> : null}
+            {contractorDisplayEmail ? <Text style={{ fontSize: 11, color: '#334155' }}>{contractorDisplayEmail}</Text> : null}
+            {contractorDisplayPhone ? <Text style={{ fontSize: 11, color: '#334155' }}>{contractorDisplayPhone}</Text> : null}
           </View>
         )}
 
-        {showImpact ? (
-          <View style={styles.impactCard}>
-            <View style={styles.impactHeader}>
-              <Text style={styles.impactHeaderText}>IMPACT</Text>
-            </View>
-            {data.impactRows.map((row, idx) => (
-              <View
-                key={`${row.label}-${idx}`}
-                style={
-                  idx === data.impactRows.length - 1
-                    ? [styles.impactRow, styles.impactRowLast]
-                    : styles.impactRow
-                }
-              >
-                <Text style={[styles.impactRowLabel, { color: primary }]}>{row.label}</Text>
-                <Text style={styles.impactRowValue}>{row.value}</Text>
+        <View
+          style={{
+            flexDirection: 'row',
+            borderWidth: 1,
+            borderColor: '#c9d5e8',
+            borderRadius: 2,
+            overflow: 'hidden',
+            marginTop: BASE_SPACE * 2,
+            marginBottom: BASE_SPACE * 1.5,
+          }}
+        >
+          <View style={{ width: 58, backgroundColor: '#2d5fa8', paddingVertical: 7, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: '#fff', fontSize: 11, fontWeight: 700 }}>Title</Text>
+          </View>
+          <View style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 9 }}>
+            <Text style={{ fontSize: 15.5, fontWeight: 500 }}>{data.title || '—'}</Text>
+          </View>
+        </View>
+
+        {isChangeOrder ? (
+          <Section marginBottom={BASE_SPACE * 1.3}>
+            <SectionHeading title={descriptionHeading} />
+            <Text style={{ fontSize: 11.3, lineHeight: 1.42, marginBottom: 10 }}>
+              {fallbackNarrative}
+            </Text>
+
+            <SectionHeading title={reasonHeading} marginTop={BASE_SPACE * 1.6} />
+            <Text style={{ fontSize: 11.3, lineHeight: 1.4, marginTop: BASE_SPACE * 0.5, marginBottom: BASE_SPACE * 1.6 }}>
+              {data.contentSections.find((s) => s.label.toLowerCase().includes('reason'))?.body ||
+                data.title ||
+                '—'}
+            </Text>
+          </Section>
+        ) : (
+          <>
+            {narrativeSections.length > 0 ? (
+              narrativeSections.map((section, idx) => (
+                <View key={`section-${idx}`} style={{ marginBottom: 8, borderBottomWidth: 1, borderBottomColor: '#edf2fb', paddingBottom: 5 }}>
+                  <Text style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 3 }}>
+                    {section.label}
+                  </Text>
+                  <Text style={{ fontSize: 10.8, lineHeight: 1.5, color: '#1e293b' }}>{section.body}</Text>
+                </View>
+              ))
+            ) : (
+              <View style={{ marginBottom: 8 }}>
+                <Text style={{ fontSize: 13, fontWeight: 800, marginBottom: 3 }}>{descriptionHeading}</Text>
+                <Text style={{ fontSize: 11, lineHeight: 1.45 }}>{fallbackNarrative}</Text>
               </View>
+            )}
+            {isSubmittal && data.specSection && data.specSection !== '—' ? (
+              <View style={{ marginBottom: 8 }}>
+                <Text style={{ fontSize: 13, fontWeight: 800, marginBottom: 3 }}>SPECIFICATION / COMPLIANCE</Text>
+                <Text style={{ fontSize: 11, lineHeight: 1.45 }}>{data.specSection}</Text>
+              </View>
+            ) : null}
+          </>
+        )}
+
+        {isChangeOrder ? (
+          <Section marginBottom={BASE_SPACE * 1.6}>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <View style={{ width: '48%' }}>
+              <SectionHeading title="SCOPE OF WORK" />
+              <View style={{ marginTop: BASE_SPACE * 0.5 }}>
+              {scopeBullets.slice(0, 6).map((line, idx) => (
+                <Text key={`scope-${idx}`} style={{ fontSize: 11.2, lineHeight: 1.42, marginBottom: 4 }}>
+                  {`- ${line}`}
+                </Text>
+              ))}
+              </View>
+              <SectionHeading title="COST BREAKDOWN" marginTop={8} />
+              <View style={{ marginTop: BASE_SPACE * 0.5, paddingVertical: 6 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                <Text style={{ fontSize: 11.3, fontWeight: 700 }}>Time Extension:</Text>
+                <Text style={{ marginLeft: 6, fontSize: 11 }}>{data.scheduleExtension || summarySchedule}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={{ fontSize: 11.3, fontWeight: 700 }}>New Completion Date:</Text>
+                <Text style={{ marginLeft: 6, fontSize: 11 }}>{data.newCompletionDate || data.actionNeededBy || '—'}</Text>
+              </View>
+              </View>
+            </View>
+            <View style={{ width: '52%' }}>
+              <SectionHeading title="COST BREAKDOWN" />
+              <View style={{ borderWidth: 1, borderColor: '#b8c7de', marginTop: BASE_SPACE * 0.5, marginBottom: BASE_SPACE * 1.2 }}>
+                <View style={{ flexDirection: 'row', backgroundColor: '#eef3fb', borderBottomWidth: 1, borderBottomColor: '#d5deec' }}>
+                  <Text style={{ width: '42%', padding: 6, fontSize: 10, fontWeight: 700 }}>Item</Text>
+                  <Text style={{ width: '29%', padding: 6, fontSize: 10, fontWeight: 700 }}>Amount</Text>
+                  <Text style={{ width: '29%', padding: 6, fontSize: 10, fontWeight: 700 }}>Amount</Text>
+                </View>
+                {costItems.map((row, idx) => (
+                  <View
+                    key={`cost-${idx}`}
+                    style={{
+                      flexDirection: 'row',
+                      borderBottomWidth: idx === costItems.length - 1 ? 0 : 1,
+                      borderBottomColor: '#e5e7eb',
+                    }}
+                  >
+                    <Text style={{ width: '42%', padding: 6, fontSize: 10 }}>{row.item}</Text>
+                    <Text style={{ width: '29%', padding: 6, fontSize: 10 }}>
+                      {row.amount}
+                    </Text>
+                    <Text style={{ width: '29%', padding: 6, fontSize: 10, fontWeight: idx === costItems.length - 1 ? 700 : 500 }}>
+                      {row.amount}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+              <SectionHeading title="ASSUMPTIONS" marginTop={10} />
+              <View style={{ marginTop: BASE_SPACE * 0.5 }}>
+              {assumptionBullets.slice(0, 4).map((line, idx) => (
+                <Text key={`assump-${idx}`} style={{ fontSize: 11.2, lineHeight: 1.4, marginBottom: 4 }}>
+                  {`- ${line}`}
+                </Text>
+              ))}
+              </View>
+            </View>
+          </View>
+          </Section>
+        ) : null}
+
+        {!isChangeOrder && data.attachments.some((item) => item && item.trim() && item.trim() !== '—') ? (
+          <View style={{ marginBottom: 10 }}>
+            <Text style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 4 }}>ATTACHMENTS</Text>
+            {data.attachments.map((item, idx) => (
+              <Text key={`attachment-${idx}`} style={{ fontSize: 10.8, lineHeight: 1.45, color: '#1e293b' }}>
+                {`- ${item}`}
+              </Text>
             ))}
           </View>
         ) : null}
 
-        {showAttachments ? (
-          <>
-            <View style={styles.sectionHeaderLine}>
-                <Text style={[styles.sectionHeaderText, { color: primary }]}>ATTACHMENTS</Text>
-              <View style={[styles.sectionHeaderAccent, { backgroundColor: accent }]} />
-            </View>
-            <View style={styles.listCard}>
-              {data.attachments.map((item, idx) => (
-                <Text key={`${item}-${idx}`} style={styles.listItem}>
-                  {item}
-                </Text>
-              ))}
-            </View>
-          </>
-        ) : null}
-
-        {showLinked ? (
-          <>
-            <View style={styles.sectionHeaderLine}>
-              <Text style={[styles.sectionHeaderText, { color: primary }]}>LINKED DOCUMENTS</Text>
-              <View style={[styles.sectionHeaderAccent, { backgroundColor: accent }]} />
-            </View>
-            <View style={styles.listCard}>
-              {data.linkedDocuments.map((item, idx) => (
-                <Text key={`${item}-${idx}`} style={styles.listItem}>
-                  {item}
-                </Text>
-              ))}
-            </View>
-          </>
-        ) : null}
-
-        {showApproval ? (
-          <>
-            <View style={styles.sectionHeaderLine}>
-              <Text style={[styles.sectionHeaderText, { color: primary }]}>APPROVAL LOG</Text>
-              <View style={[styles.sectionHeaderAccent, { backgroundColor: accent }]} />
-            </View>
-            <View style={styles.table}>
-              <View style={[styles.tableHeader, { backgroundColor: primary }]}>
-                <Text style={[styles.tableHeaderCell, { width: '28%' }]}>Title</Text>
-                <Text style={[styles.tableHeaderCell, { width: '22%' }]}>Role</Text>
-                <Text style={[styles.tableHeaderCell, { width: '22%' }]}>Signature</Text>
-                <Text style={[styles.tableHeaderCell, { width: '28%' }]}>Date</Text>
+        {isChangeOrder ? (
+          <Section marginBottom={BASE_SPACE * 1.2}>
+            <SectionHeading title="SCHEDULE IMPACT" />
+            <View style={{ borderWidth: 1, borderColor: '#d5deec', marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#e5e7eb', backgroundColor: '#eef3fb', paddingVertical: 6, paddingHorizontal: 8 }}>
+                <Text style={{ width: '45%', fontSize: 10.4, fontWeight: 700 }}>Time Extension:</Text>
+                <Text style={{ width: '55%', fontSize: 10.4 }}>{data.scheduleExtension || summarySchedule}</Text>
               </View>
-              {data.approvalRows.map((row, idx) => (
-                <View key={`${row.title}-${idx}`} style={styles.tableRow}>
-                  <Text style={[styles.tableCell, { width: '28%' }]}>{row.title}</Text>
-                  <Text style={[styles.tableCell, { width: '22%' }]}>{row.role}</Text>
-                  <View style={styles.signatureCell}>
-                    {row.signatureUrl ? (
-                      <Image src={row.signatureUrl} style={styles.signatureImage} />
-                    ) : row.signatureName ? (
-                      <Text style={styles.signatureNameText}>{row.signatureName}</Text>
-                    ) : row.signature === 'rejected' ? (
-                      <Text style={styles.signatureNameText}> </Text>
-                    ) : (
-                      <Text
-                        style={
-                          row.signature === 'approved'
-                            ? styles.sigApproved
-                            : styles.sigPending
-                        }
-                      >
-                        {row.signature === 'approved' ? 'Approved' : 'Pending'}
-                      </Text>
-                    )}
-                  </View>
-                  <Text style={[styles.tableCell, { width: '28%' }]}>{row.date}</Text>
-                </View>
-              ))}
+              <View style={{ flexDirection: 'row', paddingVertical: 6, paddingHorizontal: 8 }}>
+                <Text style={{ width: '45%', fontSize: 10.4, fontWeight: 700 }}>New Completion Date:</Text>
+                <Text style={{ width: '55%', fontSize: 10.4 }}>{data.newCompletionDate || data.actionNeededBy || '—'}</Text>
+              </View>
             </View>
-          </>
+          </Section>
         ) : null}
 
-        <View style={styles.footerRoles}>
-          <Text style={styles.footerRoleItem}>☑ Owner</Text>
-          <Text style={styles.footerRoleItem}>☑ Structural Engineer</Text>
-          <Text style={styles.footerRoleItem}>☑ Architect</Text>
-          <Text style={styles.footerRoleItem}>☑ Contractor</Text>
+        <SectionHeading title="APPROVAL" marginTop={BASE_SPACE * 0.8} />
+        <View style={{ borderWidth: 1, borderColor: '#d5deec', borderRadius: 2, overflow: 'hidden', marginBottom: BASE_SPACE * 1.2 }}>
+          <View style={{ flexDirection: 'row', backgroundColor: '#f1f6fd', borderBottomWidth: 1, borderBottomColor: '#d5deec' }}>
+            <Text style={{ width: '33%', padding: 6, fontSize: 9.8, fontWeight: 700 }}>Company</Text>
+            <Text style={{ width: '22%', padding: 6, fontSize: 9.8, fontWeight: 700 }}>Role</Text>
+            <Text style={{ width: '25%', padding: 6, fontSize: 9.8, fontWeight: 700 }}>Signature</Text>
+            <Text style={{ width: '20%', padding: 6, fontSize: 9.8, fontWeight: 700 }}>Date</Text>
+          </View>
+          {approvalDisplayRows.map((row, idx) => (
+            <View key={`approval-${idx}`} style={{ flexDirection: 'row', minHeight: 28, borderBottomWidth: idx === approvalDisplayRows.length - 1 ? 0 : 1, borderBottomColor: '#eef2f7' }}>
+              <Text style={{ width: '33%', paddingVertical: 6, paddingHorizontal: 6, fontSize: 10 }}>{row.title}</Text>
+              <Text style={{ width: '22%', paddingVertical: 6, paddingHorizontal: 6, fontSize: 10 }}>{row.role}</Text>
+              <View style={{ width: '25%', paddingVertical: 6, paddingHorizontal: 6 }}>
+                {row.signatureUrl ? <Image src={row.signatureUrl} style={{ width: 68, height: 15, objectFit: 'contain' }} /> : <Text style={{ fontSize: 10 }}>{row.signature === 'approved' ? 'Approved' : row.signature === 'rejected' ? 'Rejected' : 'Pending'}</Text>}
+              </View>
+              <Text style={{ width: '20%', paddingVertical: 6, paddingHorizontal: 6, fontSize: 10 }}>{row.date}</Text>
+            </View>
+          ))}
         </View>
-        <Text style={styles.footer}>{data.footerLine}</Text>
+        <View
+          fixed
+          style={{
+            position: 'absolute',
+            left: 34,
+            right: 34,
+            bottom: 16,
+            borderTopWidth: 1,
+            borderTopColor: '#e4e9f4',
+            paddingTop: 4,
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+          }}
+        >
+          <Text style={{ fontSize: 8.5, color: '#64748b' }}>{`Generated ${data.reportDate}`}</Text>
+          <Text
+            style={{ fontSize: 8.5, color: '#64748b' }}
+            render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`}
+          />
+        </View>
+        <View style={{ height: BASE_SPACE * 2 }} />
       </Page>
     </Document>
   )
+
 }
 

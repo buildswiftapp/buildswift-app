@@ -38,6 +38,41 @@ export async function GET(req: Request) {
     session.status === 'complete' &&
     (session.payment_status === 'paid' || session.payment_status === 'no_payment_required')
 
+  if (paid) {
+    const subscriptionId =
+      typeof session.subscription === 'string' ? session.subscription : session.subscription?.id || null
+    let stripePriceId: string | null = null
+    let currentPeriodEnd: string | null = null
+
+    if (subscriptionId) {
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId)
+      stripePriceId = subscription.items.data[0]?.price?.id ?? null
+      const subscriptionPeriodEnd = (subscription as any).current_period_end as number | null | undefined
+      currentPeriodEnd = subscriptionPeriodEnd
+        ? new Date(subscriptionPeriodEnd * 1000).toISOString()
+        : null
+    }
+
+    const resolvedTier =
+      stripePriceId === process.env.STRIPE_PRICE_ENTERPRISE_MONTHLY
+        ? 'enterprise'
+        : stripePriceId === process.env.STRIPE_PRICE_PROFESSIONAL_MONTHLY
+          ? 'professional'
+          : 'free'
+
+    await (supabase.from('accounts' as any) as any)
+      .update({
+        stripe_customer_id: sessionCustomer,
+        stripe_subscription_id: subscriptionId,
+        stripe_price_id: stripePriceId,
+        subscription_tier: resolvedTier,
+        billing_status: 'active',
+        current_period_end: currentPeriodEnd,
+        cancel_at: null,
+      })
+      .eq('id', auth.accountId)
+  }
+
   return ok({
     status: session.status,
     payment_status: session.payment_status,

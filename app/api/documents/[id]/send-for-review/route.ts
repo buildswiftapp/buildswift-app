@@ -3,11 +3,11 @@ import { badRequest, ok, serverError, unauthorized } from '@/lib/server/api-resp
 import { getAuthContext } from '@/lib/server/auth'
 import { findDocumentById } from '@/lib/server/document-store'
 import { writeAuditLog } from '@/lib/server/audit'
+import { assertCanUseProFeature } from '@/lib/server/billing'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 import { enforceRateLimit } from '@/lib/server/rate-limit'
 import {
-  isDocumentReviewFinal,
   isReviewCycleTerminal,
   resolveReviewTokenExpiresAtMs,
   reviewLinkExpiresAtMs,
@@ -175,6 +175,14 @@ export async function POST(req: Request, { params }: Params) {
   const supabase = await createSupabaseServerClient()
   if (!supabase) return serverError('Supabase is not configured')
   const privilegedDb = createSupabaseAdminClient() ?? supabase
+  if (payload.data.reviewers.length > 1) {
+    const proGate = await assertCanUseProFeature(
+      privilegedDb as any,
+      auth.accountId,
+      'multi-reviewer approvals'
+    )
+    if (!proGate.ok) return badRequest(proGate.reason)
+  }
 
   const { data: document, error: docError } = await findDocumentById({
     supabase,
@@ -188,10 +196,6 @@ export async function POST(req: Request, { params }: Params) {
   const reviewBaseUrl = getReviewBaseUrl(req)
 
   if (payload.data.resend) {
-    if (isDocumentReviewFinal(document)) {
-      return badRequest('This document is already approved or rejected. Review links cannot be resent.')
-    }
-
     const resendLimiter = enforceRateLimit({
       key: `review-resend:${auth.accountId}:${id}:${auth.user.id}`,
       limit: 20,
@@ -296,6 +300,7 @@ export async function POST(req: Request, { params }: Params) {
         accountId: auth.accountId,
         actorType: 'user',
         actorUserId: auth.user.id,
+        actorEmail: auth.user.email ?? null,
         eventType: 'document.review_link_resent',
         documentId: id,
         projectId: document.project_id,
@@ -317,10 +322,6 @@ export async function POST(req: Request, { params }: Params) {
         review_url: _review_url,
       })),
     })
-  }
-
-  if (isDocumentReviewFinal(document)) {
-    return badRequest('This document is already approved or rejected. Review links are disabled.')
   }
 
   const { data: projectRow, error: projectError } = await supabase
@@ -510,6 +511,7 @@ export async function POST(req: Request, { params }: Params) {
     accountId: auth.accountId,
     actorType: 'user',
     actorUserId: auth.user.id,
+    actorEmail: auth.user.email ?? null,
     eventType: 'document.sent_for_review',
     documentId: id,
     projectId: document.project_id,

@@ -17,9 +17,9 @@ async function run() {
   })
 
   checks.push({
-    name: 'AI endpoint validates payload',
+    name: 'Improve RFI AI validates payload',
     run: () =>
-      call('/api/ai/generate', {
+      call('/api/ai/improve-rfi', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({}),
@@ -28,9 +28,20 @@ async function run() {
   })
 
   checks.push({
-    name: 'Missing scope AI validates payload',
+    name: 'Improve submittal AI validates payload',
     run: () =>
-      call('/api/ai/missing-scope', {
+      call('/api/ai/improve-submittal', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      }),
+    expect: (r) => r.status === 400 || r.status === 401,
+  })
+
+  checks.push({
+    name: 'Analyze change order AI validates payload',
+    run: () =>
+      call('/api/ai/analyze-change-order', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({}),

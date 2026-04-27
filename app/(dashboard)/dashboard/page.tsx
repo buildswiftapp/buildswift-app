@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useEffect, useState } from 'react'
 import {
   FolderKanban,
   FileText,
@@ -14,6 +15,7 @@ import {
   FilePen,
 } from 'lucide-react'
 import { useApp } from '@/lib/app-context'
+import { apiFetch } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -21,7 +23,35 @@ import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 
 export default function DashboardPage() {
-  const { projects, documents, company } = useApp()
+  const { projects, documents } = useApp()
+  const [billingSummary, setBillingSummary] = useState<{
+    tier: string
+    documents_used: number
+    documents_limit: number
+    ai_generations_used: number
+    ai_generations_limit: number
+  } | null>(null)
+
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      try {
+        const summary = await apiFetch<{
+          tier: string
+          documents_used: number
+          documents_limit: number
+          ai_generations_used: number
+          ai_generations_limit: number
+        }>('/api/billing/summary')
+        if (active) setBillingSummary(summary)
+      } catch {
+        if (active) setBillingSummary(null)
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [])
 
   const activeProjects = projects.filter((p) => p.status === 'active')
   const pendingDocuments = documents.filter((d) => d.status === 'pending_review')
@@ -71,10 +101,14 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="flex flex-col">
-      <div className="flex-1 space-y-6 p-6">
+    <div className="app-page">
+      <div className="space-y-6">
+        <div>
+          <h1 className="app-section-title">Dashboard</h1>
+          <p className="app-section-subtitle">Overview of projects, documents, and review progress.</p>
+        </div>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card>
+          <Card className="app-surface">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Active Projects
@@ -89,7 +123,7 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="app-surface">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Total Documents
@@ -104,7 +138,7 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="app-surface">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Pending Reviews
@@ -119,7 +153,7 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="app-surface">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Drafts
@@ -136,7 +170,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-3">
-          <Card className="lg:col-span-2">
+          <Card className="app-surface lg:col-span-2">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>Recent Documents</CardTitle>
@@ -176,7 +210,7 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="app-surface">
             <CardHeader>
               <CardTitle>Documents by Type</CardTitle>
               <CardDescription>Breakdown of your documents</CardDescription>
@@ -218,7 +252,7 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        <Card>
+        <Card className="app-surface">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle>Active Projects</CardTitle>
@@ -261,11 +295,11 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {company && (
-          <Card>
+        {billingSummary && (
+          <Card className="app-surface">
             <CardHeader>
               <CardTitle>Usage Overview</CardTitle>
-              <CardDescription>Your current plan: {company.subscriptionTier}</CardDescription>
+              <CardDescription>Your current plan: {billingSummary.tier}</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid gap-6 md:grid-cols-2">
@@ -273,30 +307,46 @@ export default function DashboardPage() {
                   <div className="flex justify-between text-sm">
                     <span className="font-medium">Documents</span>
                     <span className="text-muted-foreground">
-                      {company.documentsUsed} / {company.documentsLimit}
+                      {billingSummary.documents_used} /{' '}
+                      {billingSummary.documents_limit < 0 ? 'Unlimited' : billingSummary.documents_limit}
                     </span>
                   </div>
                   <Progress
-                    value={(company.documentsUsed / company.documentsLimit) * 100}
+                    value={
+                      billingSummary.documents_limit > 0
+                        ? (billingSummary.documents_used / billingSummary.documents_limit) * 100
+                        : 0
+                    }
                     className="h-2"
                   />
                   <p className="text-xs text-muted-foreground">
-                    {company.documentsLimit - company.documentsUsed} documents remaining this month
+                    {billingSummary.documents_limit < 0
+                      ? 'Unlimited documents available on this plan'
+                      : `${Math.max(0, billingSummary.documents_limit - billingSummary.documents_used)} documents remaining this month`}
                   </p>
                 </div>
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="font-medium">AI Generations</span>
                     <span className="text-muted-foreground">
-                      {company.aiGenerationsUsed} / {company.aiGenerationsLimit}
+                      {billingSummary.ai_generations_used} /{' '}
+                      {billingSummary.ai_generations_limit < 0
+                        ? 'Unlimited'
+                        : billingSummary.ai_generations_limit}
                     </span>
                   </div>
                   <Progress
-                    value={(company.aiGenerationsUsed / company.aiGenerationsLimit) * 100}
+                    value={
+                      billingSummary.ai_generations_limit > 0
+                        ? (billingSummary.ai_generations_used / billingSummary.ai_generations_limit) * 100
+                        : 0
+                    }
                     className="h-2"
                   />
                   <p className="text-xs text-muted-foreground">
-                    {company.aiGenerationsLimit - company.aiGenerationsUsed} AI generations remaining
+                    {billingSummary.ai_generations_limit < 0
+                      ? 'Unlimited AI generations available on this plan'
+                      : `${Math.max(0, billingSummary.ai_generations_limit - billingSummary.ai_generations_used)} AI generations remaining`}
                   </p>
                 </div>
               </div>

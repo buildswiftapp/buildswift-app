@@ -36,18 +36,19 @@ export function AppHeader() {
   }
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-border bg-white px-6">
+    <header className="h-[74px] border-b border-border bg-white/95 px-6 backdrop-blur">
+      <div className="mx-auto flex h-full w-full max-w-[1760px] items-center justify-between">
       <Link href="/dashboard" className="flex items-center gap-2 py-1" aria-label="BuildSwift home">
         <Image
           src="/logo.png"
           alt=""
           width={220}
           height={52}
-          className="h-9 w-auto max-h-9 max-w-[120px] shrink-0 object-contain object-left sm:max-w-[140px]"
+          className="h-9 w-auto max-h-9 max-w-[132px] shrink-0 object-contain object-left sm:max-w-[146px]"
           priority
           aria-hidden
         />
-        <span className="text-xl font-bold">
+        <span className="text-[28px] font-semibold tracking-tight">
           <span className="text-primary">Build</span>
           <span className="text-primary">Swift</span>
         </span>
@@ -57,20 +58,20 @@ export function AppHeader() {
         {user && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="h-auto gap-3 px-3 py-2">
-                <Avatar className="h-9 w-9 bg-primary">
+              <Button variant="ghost" className="h-auto rounded-xl gap-3 px-3 py-2 hover:bg-muted">
+                <Avatar className="h-10 w-10 bg-primary">
                   <AvatarFallback className="bg-primary text-primary-foreground text-sm font-medium">
                     {getInitials(user.name)}
                   </AvatarFallback>
                 </Avatar>
                 <div className="hidden text-left sm:block">
-                  <p className="text-sm font-medium text-foreground">{user.name}</p>
+                  <p className="text-sm font-semibold text-foreground">{user.name}</p>
                   <p className="text-xs text-muted-foreground">{user.role === 'admin' ? 'Project Manager' : user.role}</p>
                 </div>
                 <ChevronDown className="h-4 w-4 text-muted-foreground" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuContent align="end" className="w-52 rounded-xl border-border">
               <DropdownMenuItem asChild>
                 <Link href="/settings">Account Settings</Link>
               </DropdownMenuItem>
@@ -84,6 +85,7 @@ export function AppHeader() {
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+      </div>
       </div>
     </header>
   )

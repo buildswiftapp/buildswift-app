@@ -234,11 +234,11 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
   }
 
   if (loading) {
-    return <main className="mx-auto max-w-3xl px-6 py-10 text-sm text-slate-600">Loading review request...</main>
+    return <main className="app-page max-w-3xl text-sm text-slate-600">Loading review request...</main>
   }
   if (error || !payload) {
     return (
-      <main className="mx-auto max-w-3xl px-6 py-10">
+      <main className="app-page max-w-3xl">
         <h1 className="text-2xl font-semibold text-slate-900">Unable to open review link</h1>
         <p className="mt-2 text-sm text-red-600">{error || 'Invalid review link'}</p>
       </main>
@@ -246,11 +246,11 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
   }
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
+    <main className="app-page max-w-3xl">
       <h1 className="text-2xl font-semibold text-slate-900">Document Review</h1>
       <p className="mt-1 text-sm text-slate-600">{payload.documentContent.projectName}</p>
 
-      <section className="relative mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <section className="app-surface relative mt-6 overflow-hidden">
         <div
           className="h-72 w-full bg-cover bg-center"
           style={{
@@ -270,7 +270,7 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
         </div>
       </section>
 
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5">
+      <section className="app-surface mt-6 p-5">
         <h2 className="text-lg font-semibold text-slate-900">{payload.documentContent.title}</h2>
         <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">
           {payload.documentContent.type.replace('_', ' ')}
@@ -281,7 +281,7 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
       </section>
 
       {payload.attachments && payload.attachments.length > 0 ? (
-        <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5">
+        <section className="app-surface mt-6 p-5">
           <h3 className="text-base font-semibold text-slate-900">Attachments</h3>
           <p className="mt-1 text-sm text-slate-600">
             Files included with this document. Download copies for your records.

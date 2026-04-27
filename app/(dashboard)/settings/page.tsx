@@ -74,6 +74,7 @@ async function authHeaders(): Promise<HeadersInit> {
 
 export default function SettingsPage() {
   const { user, company } = useApp()
+  const [subscriptionTier, setSubscriptionTier] = useState<string>('free')
   const [profileForm, setProfileForm] = useState({
     name: user?.name || '',
     email: user?.email || '',
@@ -425,9 +426,12 @@ export default function SettingsPage() {
   const colorPickerValue = parseBrandingPrimaryColor(branding.primary_color) || '#2C7DA0'
 
   return (
-    <div className="flex flex-col">
-      <div className="flex-1 p-6">
-        <div className="mx-auto max-w-4xl">
+    <div className="app-page">
+      <div className="mx-auto max-w-4xl space-y-6">
+        <div>
+          <h1 className="app-section-title">Settings</h1>
+          <p className="app-section-subtitle">Profile, company, and branding preferences.</p>
+        </div>
           <Tabs defaultValue="profile" className="space-y-6">
             <TabsList>
               <TabsTrigger value="profile" className="gap-2">
@@ -445,7 +449,7 @@ export default function SettingsPage() {
             </TabsList>
 
             <TabsContent value="profile">
-              <Card>
+              <Card className="app-surface">
                 <CardHeader>
                   <CardTitle>Profile Settings</CardTitle>
                   <CardDescription>Manage your personal information</CardDescription>
@@ -485,7 +489,7 @@ export default function SettingsPage() {
             </TabsContent>
 
             <TabsContent value="company">
-              <Card>
+              <Card className="app-surface">
                 <CardHeader>
                   <CardTitle>Company Settings</CardTitle>
                   <CardDescription>Manage your company information</CardDescription>
@@ -510,9 +514,8 @@ export default function SettingsPage() {
                         <FieldLabel>Subscription Plan</FieldLabel>
                         <Input
                           value={
-                            company?.subscriptionTier
-                              ? company.subscriptionTier.charAt(0).toUpperCase() +
-                                company.subscriptionTier.slice(1)
+                            subscriptionTier
+                              ? subscriptionTier.charAt(0).toUpperCase() + subscriptionTier.slice(1)
                               : ''
                           }
                           disabled
@@ -533,7 +536,7 @@ export default function SettingsPage() {
             </TabsContent>
 
             <TabsContent value="branding">
-              <Card>
+              <Card className="app-surface">
                 <CardHeader>
                   <CardTitle>Branding</CardTitle>
                   <CardDescription>
@@ -547,10 +550,10 @@ export default function SettingsPage() {
                   ) : (
                     <>
                       <div
-                        className="overflow-hidden rounded-lg border border-slate-200 shadow-sm"
+                        className="overflow-hidden rounded-lg border border-border shadow-sm"
                         style={{ borderTopColor: previewPrimary, borderTopWidth: 4 }}
                       >
-                        <div className="flex items-center gap-3 bg-slate-50 px-4 py-3">
+                        <div className="flex items-center gap-3 bg-muted px-4 py-3">
                           {branding.logo_url ? (
                             // External storage URL; next/image would require host allowlist.
                             // eslint-disable-next-line @next/next/no-img-element
@@ -560,10 +563,10 @@ export default function SettingsPage() {
                               className="h-10 max-w-[200px] object-contain"
                             />
                           ) : (
-                            <div className="h-10 w-24 rounded bg-slate-200" />
+                            <div className="h-10 w-24 rounded bg-[#d9dde8]" />
                           )}
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-slate-900">
+                            <p className="truncate text-sm font-semibold text-foreground">
                               {branding.company_name?.trim() || 'Company name'}
                             </p>
                             <p className="text-xs text-muted-foreground">PDF header preview</p>
@@ -639,7 +642,6 @@ export default function SettingsPage() {
             </TabsContent>
           </Tabs>
         </div>
-      </div>
       <Dialog open={cropOpen} onOpenChange={(open) => (!open ? closeCropDialog() : setCropOpen(true))}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>

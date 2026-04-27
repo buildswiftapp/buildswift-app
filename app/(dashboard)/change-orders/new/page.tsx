@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft,
-  Sparkles,
   Upload,
   X,
   FileText,
@@ -30,10 +29,9 @@ import {
   ReviewerManagementSection,
   type ReviewInviteSendPayload,
 } from '@/app/components/reviewer-management-section'
-import { MissingScopeEditorSection } from '@/app/components/missing-scope-editor-section'
-import { docTypeToMissingScopeType, setMissingScopeSeedIfMissing } from '@/lib/missing-scope-client'
+import { MissingScopeEditorSection } from '../../../components/missing-scope-editor-section'
+import { docTypeToMissingScopeType } from '@/lib/missing-scope-client'
 import { apiFetch } from '@/lib/api'
-import { scheduleImpactValueToInputText } from '@/lib/document-html'
 
 const PAGE_BG = '#f1f5f9'
 const NAVY = '#0f172a'
@@ -70,8 +68,6 @@ type ApiProject = {
   address: string | null
   created_at: string
 }
-
-type AiGenerateResponse = { generatedContent: string }
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -132,26 +128,20 @@ function NewChangeOrderContent() {
 
   const [formData, setFormData] = useState({
     projectId: '',
-    changeOrderNumber: 'CO-005',
-    title: 'Additional Electrical Outlets – Levels 2 & 3',
-    date: '2025-04-24',
-    description:
-      "Per client request, add (12) duplex electrical outlets to Levels 2 and 3. Locations to be coordinated on-site with owner's representative. Includes materials, labor, and testing.",
+    changeOrderNumber: '',
+    title: '',
+    date: '',
+    description: '',
     reason: 'owner_request',
-    costImpact: '8750.00',
+    costImpact: '',
     scheduleNoImpact: false,
-    scheduleImpactText: scheduleImpactValueToInputText('+5'),
-    notes: 'Please review and approve. Work to begin upon approval.',
+    scheduleImpactText: '',
+    notes: '',
   })
 
-  const [attachments, setAttachments] = useState<LocalAttachment[]>([
-    { id: '1', name: 'Electrical_Layout_Level2.pdf', size: '245 KB', url: '#' },
-    { id: '2', name: 'Electrical_Layout_Level3.pdf', size: '198 KB', url: '#' },
-    { id: '3', name: 'Site_Photo_Outlet_Location.jpg', size: '1.2 MB', url: '#' },
-  ])
+  const [attachments, setAttachments] = useState<LocalAttachment[]>([])
 
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isGeneratingDescription, setIsGeneratingDescription] = useState(false)
   const [reviewConfig, setReviewConfig] = useState<{
     reviewers: string[]
     expires_in_days: 3 | 7 | 14
@@ -246,36 +236,6 @@ function NewChangeOrderContent() {
     }
 
     toast.error('File content is not available for download yet')
-  }
-
-  const handleGenerateDescription = async () => {
-    const trimmedDescription = formData.description.trim()
-    if (!trimmedDescription) {
-      toast.error('Enter an initial description before generating with AI')
-      return
-    }
-    setMissingScopeSeedIfMissing(docTypeToMissingScopeType('change_order'), trimmedDescription)
-    setIsGeneratingDescription(true)
-    try {
-      const data = await apiFetch<AiGenerateResponse>('/api/ai/generate', {
-        method: 'POST',
-        json: {
-          documentType: 'ChangeOrder',
-          description: trimmedDescription,
-        },
-      })
-      const generated = data.generatedContent?.trim()
-      if (!generated) {
-        toast.error('AI generation temporarily unavailable. Please try again.')
-        return
-      }
-      setFormData((prev) => ({ ...prev, description: generated }))
-      toast.success('Description generated')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'AI generation temporarily unavailable. Please try again.')
-    } finally {
-      setIsGeneratingDescription(false)
-    }
   }
 
   const validateForm = () => {
@@ -485,23 +445,16 @@ function NewChangeOrderContent() {
               </div>
 
               <div className="mb-3 flex items-center justify-between gap-3">
-                <span className={capLabelRow}>Description of change</span>
-                <button
-                  type="button"
-                  onClick={() => void handleGenerateDescription()}
-                  disabled={isGeneratingDescription}
-                  className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-[#0f172a] transition-colors hover:text-[#334155] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb]/25 focus-visible:ring-offset-2"
-                >
-                  <Sparkles className="h-4 w-4 text-[#ca8a04]" strokeWidth={2} aria-hidden />
-                  AI Generate Description
-                </button>
+                <span className={capLabelRow}>
+                  Description of change <span className="text-destructive">*</span>
+                </span>
               </div>
               <MissingScopeEditorSection
                 variant="document-description"
                 documentApiType={docTypeToMissingScopeType('change_order')}
                 value={formData.description}
                 onChange={(v) => setFormData((prev) => ({ ...prev, description: v }))}
-                isGeneratingDescription={isGeneratingDescription}
+                aiNotes={formData.notes}
                 rows={8}
                 placeholder="Describe the requested change, affected area, and intended outcome..."
               />

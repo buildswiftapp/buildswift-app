@@ -5,7 +5,6 @@ import type {
   Document,
   Review,
   Notification,
-  SubscriptionPlan,
   ActivityLog,
 } from './types'
 
@@ -22,11 +21,11 @@ export const mockUser: User = {
 export const mockCompany: Company = {
   id: 'company-1',
   name: 'BuildCo Construction',
-  subscriptionTier: 'professional',
-  documentsUsed: 127,
-  documentsLimit: 500,
-  aiGenerationsUsed: 45,
-  aiGenerationsLimit: 100,
+  subscriptionTier: 'free',
+  documentsUsed: 0,
+  documentsLimit: 25,
+  aiGenerationsUsed: 0,
+  aiGenerationsLimit: 10,
   createdAt: '2024-01-01T00:00:00Z',
 }
 
@@ -364,62 +363,6 @@ export const mockActivityLog: ActivityLog[] = [
     action: 'revision_requested',
     details: 'Requested revision on "Exterior Paint System"',
     createdAt: '2024-03-19T11:00:00Z',
-  },
-]
-
-export const subscriptionPlans: SubscriptionPlan[] = [
-  {
-    id: 'plan-free',
-    name: 'Free',
-    tier: 'free',
-    price: 0,
-    documentsLimit: 25,
-    aiGenerationsLimit: 10,
-    features: [
-      'Up to 25 documents',
-      '10 AI generations per month',
-      '1 project',
-      'Basic templates',
-      'Email support',
-    ],
-  },
-  {
-    id: 'plan-professional',
-    name: 'Professional',
-    tier: 'professional',
-    price: 29,
-    documentsLimit: 500,
-    aiGenerationsLimit: 100,
-    features: [
-      'Up to 500 documents',
-      '100 AI generations per month',
-      'Unlimited projects',
-      'Advanced templates',
-      'Priority support',
-      'Custom branding',
-      'Team collaboration',
-      'Document versioning',
-    ],
-  },
-  {
-    id: 'plan-enterprise',
-    name: 'Enterprise',
-    tier: 'enterprise',
-    price: 49,
-    documentsLimit: -1,
-    aiGenerationsLimit: -1,
-    features: [
-      'Unlimited documents',
-      'Unlimited AI generations',
-      'Unlimited projects',
-      'Custom templates',
-      'Dedicated support',
-      'SSO integration',
-      'Advanced analytics',
-      'API access',
-      'Custom integrations',
-      'SLA guarantee',
-    ],
   },
 ]
 

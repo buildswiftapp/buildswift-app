@@ -81,20 +81,30 @@ export const reviewSubmitSchema = z.object({
   signature_image: z.string().min(1).max(2_000_000).optional(),
 })
 
-export const aiGenerateSchema = z.object({
-  documentType: z.enum(['RFI', 'ChangeOrder', 'Submittal']),
-  description: z.string().trim().min(1).max(6000),
-  additionalSystemPrompt: z.string().trim().min(1).max(6000).optional(),
+const aiDescriptionInputSchema = z.string().trim().min(10).max(6000)
+const aiOptionalNotesSchema = z.preprocess(
+  (value) => (typeof value === 'string' ? value : undefined),
+  z.string().trim().min(1).max(6000).optional()
+)
+
+export const improveRfiSchema = z.object({
+  description: aiDescriptionInputSchema,
+  notes: aiOptionalNotesSchema,
 })
 
-/** POST /api/ai/missing-scope */
-export const missingScopeAiSchema = z.object({
-  type: z.enum(['RFI', 'Submittal', 'Change Order']),
-  content: z.string().trim().min(1).max(150_000),
-  initialDescription: z.preprocess(
-    (value) => (typeof value === 'string' ? value : undefined),
-    z.string().trim().min(1).max(6000).optional()
-  ),
+export const improveSubmittalSchema = z.object({
+  description: aiDescriptionInputSchema,
+  notes: aiOptionalNotesSchema,
+})
+
+export const analyzeChangeOrderSchema = z.object({
+  description: aiDescriptionInputSchema,
+  notes: aiOptionalNotesSchema,
+})
+
+/** POST /api/documents/:id/activity — user-visible comment on document timeline */
+export const documentActivityCommentSchema = z.object({
+  body: z.string().trim().min(1).max(5000),
 })
 
 export const accountBrandingUpsertSchema = z.object({

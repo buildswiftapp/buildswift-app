@@ -57,12 +57,11 @@ export default function TeamPage() {
   }
 
   return (
-    <div className="flex flex-col">
-      <div className="flex-1 space-y-6 p-6">
+    <div className="app-page space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Team Members</h2>
-            <p className="text-sm text-muted-foreground">Manage your team members</p>
+            <h2 className="app-section-title text-2xl">Team Members</h2>
+            <p className="app-section-subtitle">Manage your team members</p>
           </div>
           <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
             <DialogTrigger asChild>
@@ -111,7 +110,7 @@ export default function TeamPage() {
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredMembers.map((member) => (
-            <Card key={member.id} className="group">
+            <Card key={member.id} className="app-surface group">
               <CardContent className="pt-6">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-4">
@@ -130,7 +129,7 @@ export default function TeamPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted"
                       >
                         <MoreHorizontal className="h-4 w-4" />
                       </Button>
@@ -158,7 +157,6 @@ export default function TeamPage() {
           ))}
         </div>
 
-      </div>
     </div>
   )
 }

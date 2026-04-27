@@ -83,17 +83,17 @@ const emptyForm = {
 
 function projectCardStatusBadge(project: Project) {
   const pill =
-    'inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium leading-none'
+    'inline-flex items-center rounded-full border border-border px-2.5 py-1 text-[11px] font-semibold leading-none'
   if (project.isArchived) {
-    return <span className={`${pill} bg-slate-100 text-slate-600`}>Archived</span>
+    return <span className={`${pill} bg-muted text-[#64748b]`}>Archived</span>
   }
   if (project.status === 'active') {
     return <span className={`${pill} bg-[#d1fae5] text-[#065f46]`}>Active</span>
   }
   if (project.status === 'on_hold') {
-    return <span className={`${pill} bg-slate-100 text-slate-600`}>On Hold</span>
+    return <span className={`${pill} bg-muted text-[#64748b]`}>On Hold</span>
   }
-  return <span className={`${pill} bg-slate-100 text-slate-700`}>Completed</span>
+  return <span className={`${pill} bg-muted text-[#475569]`}>Completed</span>
 }
 
 export default function ProjectsPage() {
@@ -111,20 +111,33 @@ export default function ProjectsPage() {
   useEffect(() => {
     const loadProjects = async () => {
       try {
-        const data = await apiFetch<{
-          projects: Array<{
-            id: string
-            name: string
-            description: string | null
-            address: string | null
-            client_owner_name: string | null
-            status: 'active' | 'archived' | 'deleted'
-            created_at: string
-            updated_at: string
-          }>
-        }>('/api/projects')
+        const [projectsData, documentsData] = await Promise.all([
+          apiFetch<{
+            projects: Array<{
+              id: string
+              name: string
+              description: string | null
+              address: string | null
+              client_owner_name: string | null
+              status: 'active' | 'archived' | 'deleted'
+              created_at: string
+              updated_at: string
+            }>
+          }>('/api/projects'),
+          apiFetch<{
+            documents: Array<{
+              id: string
+              project_id: string
+            }>
+          }>('/api/documents'),
+        ])
+        const documentCountByProjectId = new Map<string, number>()
+        for (const doc of documentsData.documents) {
+          const current = documentCountByProjectId.get(doc.project_id) ?? 0
+          documentCountByProjectId.set(doc.project_id, current + 1)
+        }
         setProjects(
-          data.projects
+          projectsData.projects
             .filter((p) => p.status !== 'deleted')
             .map((p) => ({
               id: p.id,
@@ -137,7 +150,7 @@ export default function ProjectsPage() {
               clientName: p.client_owner_name ?? undefined,
               startDate: p.created_at,
               endDate: undefined,
-              documentsCount: 0,
+              documentsCount: documentCountByProjectId.get(p.id) ?? 0,
               teamMembers: [],
               createdAt: p.created_at,
               updatedAt: p.updated_at,
@@ -334,12 +347,11 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="flex flex-col">
-      <div className="flex-1 space-y-6 p-6">
+    <div className="app-page space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Projects</h1>
-            <p className="text-sm text-slate-500">Manage and track your construction projects</p>
+            <h1 className="app-section-title text-2xl">Projects</h1>
+            <p className="app-section-subtitle">Manage and track your construction projects</p>
           </div>
           <Button type="button" onClick={() => setDrawerOpen(true)} className="shrink-0 gap-2 self-start">
             <Plus className="h-4 w-4" />
@@ -348,21 +360,21 @@ export default function ProjectsPage() {
         </div>
 
         {!isLoadingProjects && projects.length > 0 ? (
-          <div className="rounded-lg border border-slate-200/90 bg-slate-50 px-3 py-2.5 sm:px-4 sm:py-3">
+          <div className="app-surface bg-muted px-3 py-2.5 sm:px-4 sm:py-3">
             <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:gap-3">
               <div className="relative min-w-0 flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   placeholder="Search projects..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-9 border-slate-200 bg-white pl-9 shadow-xs"
+                  className="h-10 pl-9"
                 />
               </div>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger size="sm" className="w-full sm:w-44 sm:shrink-0">
                   <span className="flex min-w-0 flex-1 items-center gap-2">
-                    <Filter className="h-4 w-4 shrink-0 text-slate-500" />
+                    <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <SelectValue placeholder="All Status" />
                   </span>
                 </SelectTrigger>
@@ -399,8 +411,8 @@ export default function ProjectsPage() {
             </EmptyContent>
           </Empty>
         ) : filteredProjects.length === 0 ? (
-          <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50/50 px-6 py-12 text-center">
-            <p className="text-sm font-medium text-slate-800">No projects match your filters</p>
+          <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-muted/45 px-6 py-12 text-center">
+            <p className="text-sm font-medium text-foreground">No projects match your filters</p>
             <p className="max-w-sm text-sm text-muted-foreground">
               Try adjusting your search or status filter.
             </p>
@@ -424,12 +436,12 @@ export default function ProjectsPage() {
               return (
                 <Card
                   key={project.id}
-                  className="group min-w-0 gap-0 overflow-hidden rounded-xl border border-slate-200 bg-white py-0 shadow-sm transition-shadow duration-200 hover:shadow-md"
+                  className="app-surface group min-w-0 gap-0 overflow-hidden py-0 transition-shadow duration-200 hover:shadow-md"
                 >
                   <div className="px-5 pb-5 pt-5 sm:px-6 sm:pb-5 sm:pt-6">
                     <div className="flex gap-3">
                       <div
-                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-100"
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-muted"
                         aria-hidden
                       >
                         <Building2 className="h-5 w-5 text-[#0f172a]" strokeWidth={1.75} />
@@ -445,7 +457,7 @@ export default function ProjectsPage() {
                                 {project.name}
                               </span>
                             </Link>
-                            <p className="truncate text-[13px] leading-normal text-slate-600">
+                            <p className="truncate text-[13px] leading-normal text-muted-foreground">
                               {project.clientName?.trim() ? project.clientName : '—'}
                             </p>
                           </div>
@@ -454,7 +466,7 @@ export default function ProjectsPage() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="-mr-1 -mt-0.5 h-8 w-8 shrink-0 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                                className="-mr-1 -mt-0.5 h-8 w-8 shrink-0 text-muted-foreground hover:bg-muted hover:text-foreground"
                                 aria-label="Project actions"
                               >
                                 <MoreVertical className="h-4 w-4" strokeWidth={2} />
@@ -493,19 +505,19 @@ export default function ProjectsPage() {
 
                     <p
                       className={`mt-3.5 text-[13px] leading-relaxed ${
-                        hasDesc ? 'text-slate-600' : 'text-slate-400'
+                        hasDesc ? 'text-muted-foreground' : 'text-[#94a3b8]'
                       } line-clamp-1`}
                     >
                       {hasDesc ? project.description : '—'}
                     </p>
 
                     <div className="mt-4 space-y-2.5">
-                      <div className="flex items-center gap-2 text-[13px] font-normal text-slate-500">
-                        <Calendar className="h-3.5 w-3.5 shrink-0 text-slate-500" strokeWidth={2} />
+                      <div className="flex items-center gap-2 text-[13px] font-normal text-muted-foreground">
+                        <Calendar className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
                         <span>Started {formatDate(project.startDate)}</span>
                       </div>
-                      <div className="flex items-center gap-2 text-[13px] font-normal text-slate-500">
-                        <FileText className="h-3.5 w-3.5 shrink-0 text-slate-500" strokeWidth={2} />
+                      <div className="flex items-center gap-2 text-[13px] font-normal text-muted-foreground">
+                        <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
                         <span>
                           {project.documentsCount}{' '}
                           {project.documentsCount === 1 ? 'document' : 'documents'}
@@ -519,7 +531,6 @@ export default function ProjectsPage() {
             })}
           </div>
         )}
-      </div>
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>

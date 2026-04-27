@@ -113,10 +113,9 @@ export default function HelpPage() {
   )
 
   return (
-    <div className="flex flex-col">
-      <div className="flex-1 space-y-8 p-6">
+    <div className="app-page space-y-8">
         <div className="mx-auto max-w-2xl text-center">
-          <h1 className="text-3xl font-bold">How can we help you?</h1>
+          <h1 className="app-section-title">How can we help you?</h1>
           <p className="mt-2 text-muted-foreground">
             Search our help center or browse categories below
           </p>
@@ -132,12 +131,12 @@ export default function HelpPage() {
         </div>
 
         <div>
-          <h2 className="mb-4 text-lg font-semibold">Browse by Category</h2>
+          <h2 className="mb-4 text-lg font-semibold text-foreground">Browse by Category</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {helpCategories.map((category) => (
               <Card
                 key={category.title}
-                className="cursor-pointer transition-shadow hover:shadow-md"
+                className="app-surface cursor-pointer transition-shadow hover:shadow-md"
               >
                 <CardContent className="flex items-start gap-4 pt-6">
                   <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
@@ -158,7 +157,7 @@ export default function HelpPage() {
           </div>
         </div>
 
-        <Card>
+        <Card className="app-surface">
           <CardHeader>
             <CardTitle>Frequently Asked Questions</CardTitle>
             <CardDescription>
@@ -186,7 +185,6 @@ export default function HelpPage() {
           </CardContent>
         </Card>
 
-      </div>
     </div>
   )
 }

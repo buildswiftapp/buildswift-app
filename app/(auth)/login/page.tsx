@@ -69,7 +69,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
+    <div className="app-shell flex min-h-screen flex-col items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="mb-8 flex justify-center">
           <Image
@@ -82,7 +82,7 @@ export default function LoginPage() {
           />
         </div>
 
-        <Card>
+        <Card className="app-surface">
           <CardHeader className="text-center">
             <CardTitle>Welcome back</CardTitle>
             <CardDescription>
