@@ -213,8 +213,7 @@ export default function ProjectDetailPage({
 
   if (!project) {
     return (
-      <div className="flex flex-col">
-        <div className="flex-1 p-6">
+      <div className="app-page">
           <Empty>
             <EmptyHeader>
               <EmptyTitle>Project not found</EmptyTitle>
@@ -228,7 +227,6 @@ export default function ProjectDetailPage({
               </Button>
             </EmptyContent>
           </Empty>
-        </div>
       </div>
     )
   }
@@ -400,12 +398,12 @@ export default function ProjectDetailPage({
   }
 
   return (
-    <div className="flex flex-col">
-      <div className="flex-1 space-y-6 p-6">
+    <div className="app-page space-y-6">
+      <div className="space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold">{project.name}</h1>
+              <h1 className="app-section-title text-2xl">{project.name}</h1>
               {getStatusBadge(project.status)}
             </div>
             <p className="mt-2 max-w-2xl text-muted-foreground">
@@ -446,7 +444,7 @@ export default function ProjectDetailPage({
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {projectMetricCards.map(({ key, label, value, Icon, iconClassName }) => (
-            <Card key={key}>
+            <Card key={key} className="app-surface">
               <CardContent className="flex min-h-[110px] items-stretch gap-4 px-5 py-5">
                 <div
                   className={`flex aspect-square h-full min-h-[56px] shrink-0 items-center justify-center rounded-lg ${iconClassName}`}

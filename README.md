@@ -6,7 +6,7 @@ This project now includes a backend MVP stack built on:
 
 - Next.js Route Handlers (`app/api/*`)
 - Supabase Auth + Postgres
-- OpenAI for AI generation and missing-scope checks
+- OpenAI for AI-assisted description improvements and scope analysis
 - Stripe webhook processing for billing status synchronization
 
 ### 1) Database
@@ -41,8 +41,9 @@ Core endpoints implemented:
   - `POST /api/review/:token/decision`
   - `POST /api/review/requests/:requestId/override`
 - AI:
-  - `POST /api/ai/generate-description`
-  - `POST /api/ai/check-missing-scope`
+  - `POST /api/ai/improve-rfi`
+  - `POST /api/ai/improve-submittal`
+  - `POST /api/ai/analyze-change-order`
 - Billing:
   - `POST /api/billing/webhook`
   - `GET /api/billing/status`
@@ -55,7 +56,7 @@ Key dashboard pages are wired to these APIs for create/list/edit flows:
 
 - Project creation/list/update/delete
 - Document creation/list/edit/delete
-- AI generate + missing-scope checks
+- Type-specific AI improve/analyze actions for descriptions
 - Send-for-review from document details
 
 ### 5) Smoke Testing

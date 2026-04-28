@@ -3,6 +3,10 @@ import { getAuthContext } from '@/lib/server/auth'
 import { syncDocumentAttachments } from '@/lib/server/attachments'
 import { insertDocument, listDocuments } from '@/lib/server/document-store'
 import { writeAuditLog } from '@/lib/server/audit'
+import {
+  assertCanCreateDocument,
+  incrementMonthlyDocumentUsage,
+} from '@/lib/server/billing'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 import { createDocumentSchema } from '@/lib/server/validators'
@@ -56,6 +60,9 @@ export async function POST(req: Request) {
     .maybeSingle()
   if (projectError) return serverError(projectError.message)
   if (!projectRow) return badRequest('Project not found or access denied')
+
+  const permission = await assertCanCreateDocument(supabase as any, auth.accountId)
+  if (!permission.ok) return badRequest(permission.reason)
 
   const { data: doc, error } = await insertDocument({
     supabase,
@@ -111,11 +118,14 @@ export async function POST(req: Request) {
   })
   if (attachmentError) return serverError(attachmentError.message)
 
+  await incrementMonthlyDocumentUsage(supabase as any, auth.accountId)
+
   await writeAuditLog(
     {
       accountId: auth.accountId,
       actorType: 'user',
       actorUserId: auth.user.id,
+      actorEmail: auth.user.email ?? null,
       eventType: 'document.created',
       documentId: doc.id,
       projectId: doc.project_id,

@@ -4,39 +4,39 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: oklch(0.98 0.002 250);
-  --foreground: oklch(0.2 0.02 250);
+  --background: #f4f6fb;
+  --foreground: #111827;
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.2 0.02 250);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.2 0.02 250);
-  --primary: #2563eb;
+  --primary: #3f63f3;
   --primary-foreground: #ffffff;
-  --secondary: oklch(0.96 0.01 250);
-  --secondary-foreground: oklch(0.25 0.02 250);
-  --muted: oklch(0.95 0.005 250);
-  --muted-foreground: oklch(0.55 0.02 250);
-  --accent: oklch(0.93 0.02 250);
-  --accent-foreground: oklch(0.22 0.04 250);
+  --secondary: #f1f4fa;
+  --secondary-foreground: #1f2937;
+  --muted: #f7f8fc;
+  --muted-foreground: #6b7280;
+  --accent: #ebefff;
+  --accent-foreground: #24315e;
   --destructive: oklch(0.55 0.22 25);
   --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.91 0.005 250);
-  --input: oklch(0.91 0.005 250);
-  --ring: #2563eb;
+  --border: #e6e9f2;
+  --input: #e6e9f2;
+  --ring: #3f63f3;
   --chart-1: oklch(0.45 0.15 250);
   --chart-2: oklch(0.55 0.18 160);
   --chart-3: oklch(0.55 0.12 250);
   --chart-4: oklch(0.65 0.12 290);
   --chart-5: oklch(0.5 0.1 200);
-  --radius: 0.5rem;
-  --sidebar: oklch(0.2 0.02 250);
-  --sidebar-foreground: oklch(0.95 0 0);
-  --sidebar-primary: oklch(0.55 0.18 160);
+  --radius: 0.8rem;
+  --sidebar: #f5f6fb;
+  --sidebar-foreground: #3a4255;
+  --sidebar-primary: #3f63f3;
   --sidebar-primary-foreground: oklch(0.98 0 0);
-  --sidebar-accent: oklch(0.3 0.02 250);
-  --sidebar-accent-foreground: oklch(0.95 0 0);
-  --sidebar-border: oklch(0.3 0.02 250);
-  --sidebar-ring: oklch(0.55 0.18 160);
+  --sidebar-accent: #eceffc;
+  --sidebar-accent-foreground: #2d3b66;
+  --sidebar-border: #e7eaf3;
+  --sidebar-ring: #3f63f3;
   --warning: oklch(0.75 0.15 85);
   --warning-foreground: oklch(0.25 0.05 85);
   --success: oklch(0.55 0.18 160);
@@ -128,6 +128,28 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+@layer components {
+  .app-shell {
+    @apply min-h-screen bg-background;
+  }
+
+  .app-page {
+    @apply mx-auto w-full max-w-[1760px] px-6 py-6;
+  }
+
+  .app-surface {
+    @apply rounded-2xl border border-border bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)];
+  }
+
+  .app-section-title {
+    @apply text-[28px] leading-tight font-semibold tracking-tight text-[#111827];
+  }
+
+  .app-section-subtitle {
+    @apply mt-1 text-sm text-muted-foreground;
   }
 }

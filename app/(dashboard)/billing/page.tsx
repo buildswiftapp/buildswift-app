@@ -1,43 +1,111 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Check, CreditCard, Download } from 'lucide-react'
-import { useApp } from '@/lib/app-context'
 import { apiFetch } from '@/lib/api'
+import { BILLING_PLANS, type AppBillingTier } from '@/lib/billing-plans'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { toast } from 'sonner'
-import { subscriptionPlans } from '@/lib/mock-data'
 import { cn } from '@/lib/utils'
 
-const invoices = [
-  { id: 'INV-001', date: '2024-03-01', amount: 49, status: 'paid' },
-  { id: 'INV-002', date: '2024-02-01', amount: 49, status: 'paid' },
-  { id: 'INV-003', date: '2024-01-01', amount: 49, status: 'paid' },
-]
+type BillingSummary = {
+  tier: AppBillingTier
+  plan_name: string
+  billing_status: string
+  current_period_end: string | null
+  cancel_at: string | null
+  documents_used: number
+  documents_limit: number
+  ai_generations_used: number
+  ai_generations_limit: number
+}
+
+const toTierForCheckout = (tier: AppBillingTier): 'pro' | 'enterprise' => (tier === 'enterprise' ? 'enterprise' : 'pro')
 
 export default function BillingPage() {
-  const { company } = useApp()
   const searchParams = useSearchParams()
+  const [summary, setSummary] = useState<BillingSummary | null>(null)
+  const [loadingSummary, setLoadingSummary] = useState(true)
+  const [fetchingSummaryCount, setFetchingSummaryCount] = useState(0)
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null)
+  const [schedulingDowngrade, setSchedulingDowngrade] = useState(false)
+  const [cancelingDowngrade, setCancelingDowngrade] = useState(false)
   const [openingPortal, setOpeningPortal] = useState(false)
   const [checkoutNotice, setCheckoutNotice] = useState<{
     tone: 'success' | 'error' | 'info'
     message: string
   } | null>(null)
 
-  const currentPlan = subscriptionPlans.find((p) => p.tier === company?.subscriptionTier)
+  const currentPlan = BILLING_PLANS.find((p) => p.tier === summary?.tier)
+  const cancelAtLabel = useMemo(() => {
+    if (!summary?.cancel_at) return null
+    const d = new Date(summary.cancel_at)
+    if (Number.isNaN(d.getTime())) return null
+    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+  }, [summary?.cancel_at])
+
+  const currentPeriodEndLabel = useMemo(() => {
+    if (!summary?.current_period_end) return null
+    const d = new Date(summary.current_period_end)
+    if (Number.isNaN(d.getTime())) return null
+    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+  }, [summary?.current_period_end])
+
+  const withSummarySpinner = async <T,>(fn: () => Promise<T>): Promise<T> => {
+    setFetchingSummaryCount((c) => c + 1)
+    try {
+      return await fn()
+    } finally {
+      setFetchingSummaryCount((c) => Math.max(0, c - 1))
+    }
+  }
+
+  const loadBillingSummary = async () => {
+    return await withSummarySpinner(async () => {
+      const data = await apiFetch<BillingSummary>('/api/billing/summary')
+      setSummary(data)
+      return data
+    })
+  }
+
+  const refreshBillingSummaryWithRetry = async (attempts = 4, delayMs = 700) => {
+    return await withSummarySpinner(async () => {
+      for (let i = 0; i < attempts; i += 1) {
+        try {
+          const data = await apiFetch<BillingSummary>('/api/billing/summary')
+          setSummary(data)
+          if (data.tier !== 'free' || data.billing_status === 'active') return data
+        } catch {
+          // Keep retrying to absorb short webhook/db propagation delays.
+        }
+        if (i < attempts - 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, delayMs))
+        }
+      }
+      return null
+    })
+  }
+
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      try {
+        const data = await withSummarySpinner(() => apiFetch<BillingSummary>('/api/billing/summary'))
+        if (active) setSummary(data)
+      } catch (e) {
+        if (active) toast.error(e instanceof Error ? e.message : 'Failed to load billing summary')
+      } finally {
+        if (active) setLoadingSummary(false)
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -60,6 +128,7 @@ export default function BillingPage() {
           }>(`/api/billing/checkout-status?session_id=${encodeURIComponent(sessionId)}`)
           if (cancelled) return
           if (result.paid) {
+            await refreshBillingSummaryWithRetry()
             setCheckoutNotice({
               tone: 'success',
               message: 'Payment successful. Your subscription is active.',
@@ -121,16 +190,12 @@ export default function BillingPage() {
     }
   }
 
-  const handleUpgrade = async (tier: string, planId: string) => {
-    if (tier === 'free') {
-      await openPortal()
-      return
-    }
+  const handleUpgrade = async (tier: AppBillingTier, planId: string) => {
     try {
       setLoadingPlanId(planId)
       const { url } = await apiFetch<{ url: string }>('/api/billing/checkout', {
         method: 'POST',
-        json: { tier },
+        json: { tier: toTierForCheckout(tier) },
       })
       window.location.href = url
     } catch (e) {
@@ -140,13 +205,58 @@ export default function BillingPage() {
     }
   }
 
-  const handleDownloadInvoice = (invoiceId: string) => {
-    toast.success(`Downloading invoice ${invoiceId}...`)
+  const handleScheduleDowngrade = async (toTier: 'free' | 'professional' = 'free') => {
+    try {
+      setSchedulingDowngrade(true)
+      const result = await apiFetch<{ scheduled: boolean; message?: string }>('/api/billing/downgrade', {
+        method: 'POST',
+        json: { toTier },
+      })
+      await loadBillingSummary()
+      toast.success(result.message || 'Downgrade scheduled successfully.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Unable to schedule downgrade')
+    } finally {
+      setSchedulingDowngrade(false)
+    }
   }
 
+  const handleCancelScheduledDowngrade = async () => {
+    try {
+      setCancelingDowngrade(true)
+      const result = await apiFetch<{ canceled: boolean; message?: string }>(
+        '/api/billing/cancel-downgrade',
+        {
+          method: 'POST',
+          json: {},
+        }
+      )
+      await loadBillingSummary()
+      toast.success(result.message || 'Scheduled downgrade canceled.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Unable to cancel scheduled downgrade')
+    } finally {
+      setCancelingDowngrade(false)
+    }
+  }
+
+  const showSpinner = loadingSummary || fetchingSummaryCount > 0
+  const scheduledDowngradeTargetLabel = summary?.tier === 'enterprise' ? 'Professional' : 'Free'
+
   return (
-    <div className="flex flex-col">
-      <div className="flex-1 space-y-6 p-6">
+    <div className="app-page relative space-y-6">
+      {showSpinner ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/70 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-5 shadow-lg">
+            <div className="h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-slate-700" />
+            <p className="text-sm font-medium text-slate-600">Loading billing data…</p>
+          </div>
+        </div>
+      ) : null}
+      <div>
+        <h1 className="app-section-title">Billing</h1>
+        <p className="app-section-subtitle">Manage subscription, payment details, and invoices.</p>
+      </div>
         {checkoutNotice ? (
           <div
             className={cn(
@@ -159,17 +269,41 @@ export default function BillingPage() {
             {checkoutNotice.message}
           </div>
         ) : null}
-        <Card>
+        {summary?.tier !== 'free' && cancelAtLabel ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <p>
+              {`Plan: ${currentPlan?.name ?? 'Pro'} (changes on ${cancelAtLabel}). You keep full ${currentPlan?.name ?? 'Pro'} access until this date, then your account switches to ${scheduledDowngradeTargetLabel} automatically.`}
+            </p>
+            <div className="mt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleCancelScheduledDowngrade()}
+                disabled={cancelingDowngrade}
+              >
+                {cancelingDowngrade ? 'Canceling...' : `Keep ${currentPlan?.name ?? 'Pro'} Plan`}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+        {summary?.tier !== 'free' && !cancelAtLabel && currentPeriodEndLabel ? (
+          <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+            <p>
+              {`Plan: ${currentPlan?.name ?? 'Pro'} renews on ${currentPeriodEndLabel}. This is your current billing period expiration date.`}
+            </p>
+          </div>
+        ) : null}
+        <Card className="app-surface">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>Current Plan</CardTitle>
                 <CardDescription>
-                  You are currently on the {currentPlan?.name} plan
+                  {loadingSummary ? 'Loading plan details...' : `You are currently on the ${currentPlan?.name ?? 'Free'} plan`}
                 </CardDescription>
               </div>
-              <Badge className="bg-primary/10 text-primary text-lg px-4 py-1">
-                {currentPlan?.name}
+              <Badge className="bg-primary/10 text-primary text-base px-4 py-1.5">
+                {currentPlan?.name ?? 'Free'}
               </Badge>
             </div>
           </CardHeader>
@@ -179,44 +313,48 @@ export default function BillingPage() {
                 <div className="flex justify-between text-sm">
                   <span className="font-medium">Documents</span>
                   <span className="text-muted-foreground">
-                    {company?.documentsUsed} / {company?.documentsLimit}
+                    {summary ? `${summary.documents_used} / ${summary.documents_limit < 0 ? 'Unlimited' : summary.documents_limit}` : '—'}
                   </span>
                 </div>
                 <Progress
                   value={
-                    company
-                      ? (company.documentsUsed / company.documentsLimit) * 100
+                    summary && summary.documents_limit > 0
+                      ? (summary.documents_used / summary.documents_limit) * 100
                       : 0
                   }
                   className="h-2"
                 />
                 <p className="text-xs text-muted-foreground">
-                  {company
-                    ? company.documentsLimit - company.documentsUsed
-                    : 0}{' '}
-                  documents remaining this billing cycle
+                  {summary
+                    ? summary.documents_limit < 0
+                      ? 'Unlimited documents available on this plan'
+                      : `${Math.max(0, summary.documents_limit - summary.documents_used)} documents remaining this month`
+                    : '—'}
                 </p>
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="font-medium">AI Generations</span>
                   <span className="text-muted-foreground">
-                    {company?.aiGenerationsUsed} / {company?.aiGenerationsLimit}
+                    {summary
+                      ? `${summary.ai_generations_used} / ${summary.ai_generations_limit < 0 ? 'Unlimited' : summary.ai_generations_limit}`
+                      : '—'}
                   </span>
                 </div>
                 <Progress
                   value={
-                    company
-                      ? (company.aiGenerationsUsed / company.aiGenerationsLimit) * 100
+                    summary && summary.ai_generations_limit > 0
+                      ? (summary.ai_generations_used / summary.ai_generations_limit) * 100
                       : 0
                   }
                   className="h-2"
                 />
                 <p className="text-xs text-muted-foreground">
-                  {company
-                    ? company.aiGenerationsLimit - company.aiGenerationsUsed
-                    : 0}{' '}
-                  AI generations remaining
+                  {summary
+                    ? summary.ai_generations_limit < 0
+                      ? 'Unlimited AI generations available on this plan'
+                      : `${Math.max(0, summary.ai_generations_limit - summary.ai_generations_used)} AI generations remaining`
+                    : '—'}
                 </p>
               </div>
             </div>
@@ -224,25 +362,23 @@ export default function BillingPage() {
         </Card>
 
         <div>
-          <h2 className="mb-4 text-lg font-semibold">Available Plans</h2>
+          <h2 className="mb-4 text-lg font-semibold text-foreground">Available Plans</h2>
           <div className="grid gap-4 md:grid-cols-3">
-            {subscriptionPlans.map((plan) => {
-              const isCurrentPlan = plan.tier === company?.subscriptionTier
-              const isPopular = plan.tier === 'professional'
+            {BILLING_PLANS.map((plan) => {
+              const isCurrentPlan = plan.tier === summary?.tier
 
               return (
                 <Card
                   key={plan.id}
                   className={cn(
-                    'relative',
-                    isPopular && 'border-primary shadow-md',
-                    isCurrentPlan && 'bg-muted/50'
+                    'app-surface relative',
+                    isCurrentPlan && 'border-primary shadow-md bg-primary/5'
                   )}
                 >
-                  {isPopular && (
+                  {isCurrentPlan && (
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                       <Badge className="bg-primary text-primary-foreground">
-                        Most Popular
+                        Current Plan
                       </Badge>
                     </div>
                   )}
@@ -272,18 +408,34 @@ export default function BillingPage() {
                       <Button variant="outline" className="w-full" disabled>
                         Current Plan
                       </Button>
+                    ) : plan.tier === 'free' ? (
+                      <Button
+                        className="w-full"
+                        variant="outline"
+                        onClick={() => void handleScheduleDowngrade('free')}
+                        disabled={schedulingDowngrade}
+                      >
+                        {schedulingDowngrade ? 'Scheduling...' : 'Downgrade'}
+                      </Button>
+                    ) : plan.tier === 'professional' && summary?.tier === 'enterprise' ? (
+                      <Button
+                        className="w-full"
+                        variant="outline"
+                        onClick={() => void handleScheduleDowngrade('professional')}
+                        disabled={schedulingDowngrade}
+                      >
+                        {schedulingDowngrade ? 'Scheduling...' : 'Downgrade'}
+                      </Button>
                     ) : (
                       <Button
                         className="w-full"
-                        variant={isPopular ? 'default' : 'outline'}
+                        variant="outline"
                         onClick={() => void handleUpgrade(plan.tier, plan.id)}
                         disabled={loadingPlanId === plan.id}
                       >
                         {loadingPlanId === plan.id
                           ? 'Redirecting...'
-                          : plan.price === 0
-                            ? 'Downgrade in Stripe'
-                            : 'Upgrade'}
+                          : 'Upgrade'}
                       </Button>
                     )}
                   </CardFooter>
@@ -293,82 +445,7 @@ export default function BillingPage() {
           </div>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Payment Method</CardTitle>
-            <CardDescription>Manage your payment information</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-4 rounded-lg border p-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted">
-                <CreditCard className="h-6 w-6" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium">Visa ending in 4242</p>
-                <p className="text-sm text-muted-foreground">Expires 12/2025</p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void openPortal()}
-                disabled={openingPortal}
-              >
-                {openingPortal ? 'Opening...' : 'Update'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Billing History</CardTitle>
-            <CardDescription>View and download past invoices</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Invoice</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {invoices.map((invoice) => (
-                  <TableRow key={invoice.id}>
-                    <TableCell className="font-medium">{invoice.id}</TableCell>
-                    <TableCell>
-                      {new Date(invoice.date).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                      })}
-                    </TableCell>
-                    <TableCell>${invoice.amount}</TableCell>
-                    <TableCell>
-                      <Badge className="bg-emerald-100 text-emerald-800 capitalize">
-                        {invoice.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDownloadInvoice(invoice.id)}
-                      >
-                        <Download className="mr-2 h-4 w-4" />
-                        Download
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </div>
+        {/* Payment Method + Billing History removed per request */}
     </div>
   )
 }

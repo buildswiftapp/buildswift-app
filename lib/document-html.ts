@@ -25,7 +25,7 @@ function escapeRe(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function stripSimpleHtml(s: string) {
+export function stripSimpleHtml(s: string) {
   return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 }
 

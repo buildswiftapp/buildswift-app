@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   Download,
   Eye,
+  Plus,
   Save,
   Trash2,
   Upload,
@@ -40,19 +41,20 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { MissingScopeEditorSection } from '@/app/components/missing-scope-editor-section'
-import { docTypeToMissingScopeType, setMissingScopeSeedIfMissing } from '@/lib/missing-scope-client'
+import { MissingScopeEditorSection } from '../../../components/missing-scope-editor-section'
+import { docTypeToMissingScopeType } from '@/lib/missing-scope-client'
+import { DocumentActivityPanel } from '@/app/components/document-activity-panel'
 import { ReviewerManagementSection } from '@/app/components/reviewer-management-section'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { Attachment as DocAttachment } from '@/lib/types'
 
-const PAGE_BG = '#f1f5f9'
 const NAVY = '#0f172a'
-const capLabel = 'mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-[#64748b]'
-const capLabelRow = 'text-[11px] font-semibold uppercase tracking-[0.14em] text-[#64748b]'
+const capLabel = 'mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground'
+const capLabelRow = 'text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground'
 
 function formCardClassName(extra?: string) {
   return cn(
-    'rounded-xl border border-[#e2e8f0] bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.06)] sm:p-6 lg:p-7 xl:p-8',
+    'app-surface rounded-2xl bg-white p-5 sm:p-6 lg:p-7 xl:p-8',
     extra
   )
 }
@@ -78,12 +80,18 @@ type ApiDocument = {
   document_versions: ApiDocVersion[]
   attachments?: Array<{ id: string; file_name: string; size_bytes: number | null }>
 }
-type AiGenerateResponse = { generatedContent: string }
 
 interface LocalAttachment {
   id: string
   name: string
   size: string
+}
+
+interface CostItemDraft {
+  id: string
+  description: string
+  quantity: string
+  unitPrice: string
 }
 
 function formatBytes(bytes: number): string {
@@ -164,11 +172,12 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     notes: '',
   })
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
+  const [costItems, setCostItems] = useState<CostItemDraft[]>([])
 
   const [isSaving, setIsSaving] = useState(false)
-  const [isGeneratingDescription, setIsGeneratingDescription] = useState(false)
   const [openingPdfDetails, setOpeningPdfDetails] = useState(false)
   const [exportingPdf, setExportingPdf] = useState(false)
+  const [mainTab, setMainTab] = useState<'details' | 'activity'>('details')
 
   useEffect(() => {
     const load = async () => {
@@ -211,6 +220,18 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             notes: s.notes,
           })
           setAttachments(initialAttachments)
+          // Restore cost breakdown line items from metadata
+          const savedItems = Array.isArray(meta.costBreakdownItems) ? meta.costBreakdownItems : []
+          if (savedItems.length) {
+            setCostItems(
+              savedItems.map((item: Record<string, unknown>, i: number) => ({
+                id: `ci-loaded-${i}-${Date.now()}`,
+                description: String(item.description ?? ''),
+                quantity: String(item.quantity ?? '1'),
+                unitPrice: String(item.unitPrice ?? '0'),
+              }))
+            )
+          }
         }
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to load document')
@@ -230,9 +251,33 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
   const scheduleLabel = co.scheduleNoImpact
     ? 'No Impact'
     : co.scheduleImpactText.trim() || '—'
-  const costNumeric = parseMoneyInput(co.costImpact)
+  const normalizedCostItems = costItems.map((item) => {
+    const qty = Math.max(0, Number.parseFloat(item.quantity || '0') || 0)
+    const unit = parseMoneyInput(item.unitPrice)
+    return { ...item, qty, unit, lineTotal: qty * unit }
+  })
+  const costBreakdownTotal = normalizedCostItems.reduce((sum, row) => sum + row.lineTotal, 0)
+  const hasCostBreakdown = normalizedCostItems.some(
+    (row) => row.description.trim() || row.qty !== 0 || row.unit !== 0
+  )
+  const costNumeric = hasCostBreakdown ? costBreakdownTotal : parseMoneyInput(co.costImpact)
 
-  const hintClass = 'mt-1.5 text-xs text-[#64748b]'
+  useEffect(() => {
+    if (!hasCostBreakdown) return
+    const next = costBreakdownTotal ? formatUsd(costBreakdownTotal) : '0'
+    setCo((prev) => (prev.costImpact === next ? prev : { ...prev, costImpact: next }))
+  }, [costBreakdownTotal, hasCostBreakdown])
+
+  const addCostItem = () =>
+    setCostItems((prev) => [
+      ...prev,
+      { id: `ci-${Date.now()}-${Math.random().toString(16).slice(2)}`, description: '', quantity: '1', unitPrice: '0' },
+    ])
+  const removeCostItem = (id: string) => setCostItems((prev) => prev.filter((i) => i.id !== id))
+  const updateCostItem = (id: string, patch: Partial<CostItemDraft>) =>
+    setCostItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)))
+
+  const hintClass = 'mt-1.5 text-xs text-muted-foreground'
   const normalizedStatus =
     doc?.internal_status === 'in_review' || doc?.internal_status === 'pending_reviewer'
       ? 'pending_review'
@@ -377,6 +422,15 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       scheduleLabel,
       notes: co.notes,
     })
+    const costBreakdownRows = normalizedCostItems
+      .filter((r) => r.description.trim() || r.qty !== 0 || r.unit !== 0)
+      .map((r) => ({
+        description: r.description.trim() || '—',
+        quantity: r.qty,
+        unitPrice: r.unit,
+        total: r.lineTotal,
+      }))
+
     await savePatch({
       title: co.title,
       doc_number: co.changeOrderNumber,
@@ -384,6 +438,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       metadata: {
         reason: reasonLabel,
         proposedAmount: costNumeric,
+        costBreakdownItems: costBreakdownRows.length ? costBreakdownRows : undefined,
         changeOrderNumber: co.changeOrderNumber,
         changeOrderDate: co.date,
         scheduleImpact: scheduleLabel,
@@ -406,42 +461,6 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       router.push(`/documents?type=${docType}`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to delete')
-    }
-  }
-
-  const handleGenerateDescription = async () => {
-    const currentDescription =
-      docType === 'rfi' ? rfi.description : docType === 'submittal' ? sub.description : co.description
-    const trimmedDescription = currentDescription.trim()
-    if (!trimmedDescription) {
-      toast.error('Enter an initial description before generating with AI')
-      return
-    }
-    setMissingScopeSeedIfMissing(docTypeToMissingScopeType(docType), trimmedDescription)
-
-    setIsGeneratingDescription(true)
-    try {
-      const data = await apiFetch<AiGenerateResponse>('/api/ai/generate', {
-        method: 'POST',
-        json: {
-          documentType: docType === 'rfi' ? 'RFI' : docType === 'submittal' ? 'Submittal' : 'ChangeOrder',
-          description: trimmedDescription,
-        },
-      })
-      const generated = data.generatedContent?.trim()
-      if (!generated) {
-        toast.error('AI generation temporarily unavailable. Please try again.')
-        return
-      }
-
-      if (docType === 'rfi') setRfi((p) => ({ ...p, description: generated }))
-      else if (docType === 'submittal') setSub((p) => ({ ...p, description: generated }))
-      else setCo((p) => ({ ...p, description: generated }))
-      toast.success('Description generated')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'AI generation temporarily unavailable. Please try again.')
-    } finally {
-      setIsGeneratingDescription(false)
     }
   }
 
@@ -478,15 +497,12 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
   }
 
   return (
-    <div
-      className="min-h-full w-full px-3 py-6 sm:px-4 sm:py-7 lg:px-6 lg:py-8 xl:px-8 2xl:px-10"
-      style={{ backgroundColor: PAGE_BG }}
-    >
-      <div className="mx-auto w-full max-w-[min(100%,1920px)]">
+    <div className="app-page">
+      <div className="w-full">
         <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between lg:mb-10">
           <div className="min-w-0 max-w-3xl">
-            <h1 className="text-3xl font-bold tracking-tight text-[#0f172a]">{pageTitle}</h1>
-            <p className="mt-2 text-base leading-relaxed text-[#64748b]">
+            <h1 className="app-section-title">{pageTitle}</h1>
+            <p className="app-section-subtitle text-base leading-relaxed">
               Update your document using the same structured workflow as document creation.
             </p>
           </div>
@@ -494,16 +510,24 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             {finalStatusLabel ? (
               <span
                 className={cn(
-                  'inline-flex items-center rounded-md px-3 py-1 text-xs font-semibold',
-                  normalizedStatus === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                  'inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold',
+                  normalizedStatus === 'approved'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-rose-200 bg-rose-50 text-rose-700'
                 )}
               >
                 {finalStatusLabel}
               </span>
             ) : null}
+            {normalizedStatus === 'approved' ? (
+              <Button onClick={handleExportPdf} disabled={exportingPdf} className="shrink-0 gap-2 rounded-xl px-4">
+                <Download className="h-4 w-4" />
+                {exportingPdf ? 'Exporting...' : 'Export to PDF'}
+              </Button>
+            ) : null}
             <Button
               variant="outline"
-              className="shrink-0 gap-2 rounded-lg border-[#e2e8f0] bg-white px-4 text-[#0f172a] shadow-sm hover:bg-[#f8fafc]"
+              className="shrink-0 gap-2 rounded-xl bg-white px-4 text-foreground hover:bg-muted"
               asChild
             >
               <Link href={`/documents?type=${doc.doc_type}`}>
@@ -516,15 +540,36 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
 
         <div className="grid grid-cols-1 gap-6 md:gap-7 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
           <div className="min-w-0 space-y-6">
+            <Tabs
+              value={mainTab}
+              onValueChange={(v) => setMainTab(v as 'details' | 'activity')}
+              className="w-full min-w-0"
+            >
+              <TabsList className="mb-1 flex h-auto min-h-11 w-full flex-wrap gap-1 rounded-xl bg-muted p-1.5 text-foreground shadow-none">
+                <TabsTrigger
+                  value="details"
+                  className="rounded-lg px-4 py-2.5 text-sm font-semibold text-foreground shadow-none transition-all data-[state=active]:bg-white data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=inactive]:bg-transparent data-[state=inactive]:text-muted-foreground"
+                >
+                  Details
+                </TabsTrigger>
+                <TabsTrigger
+                  value="activity"
+                  className="rounded-lg px-4 py-2.5 text-sm font-semibold text-foreground shadow-none transition-all data-[state=active]:bg-white data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=inactive]:bg-transparent data-[state=inactive]:text-muted-foreground"
+                >
+                  Activity
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="details" className="mt-5 space-y-6 outline-none">
             <div className={formCardClassName()}>
               <div className="grid gap-5 sm:grid-cols-3">
                 <div className="min-w-0 sm:col-span-1">
                   <label className={capLabel}>Project</label>
-                  <div className="rounded-md border border-[#e2e8f0] bg-[#f8fafc] px-3 py-2 text-sm text-[#0f172a]">
+                  <div className="rounded-md border border-border bg-muted px-3 py-2 text-sm text-foreground">
                     {selectedProject?.name ?? '—'}
                   </div>
                   {selectedProject?.address ? (
-                    <p className="mt-1.5 text-xs text-[#94a3b8]">{selectedProject.address}</p>
+                    <p className="mt-1.5 text-xs text-muted-foreground">{selectedProject.address}</p>
                   ) : null}
                 </div>
                 <div>
@@ -591,18 +636,8 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                     : docType === 'change_order'
                       ? 'Description of Change'
                       : 'Description'}
+                  <span className="text-destructive"> *</span>
                 </span>
-                <button
-                  type="button"
-                  onClick={() => void handleGenerateDescription()}
-                  disabled={isGeneratingDescription}
-                  className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-[#0f172a] transition-colors hover:text-[#334155] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb]/25 focus-visible:ring-offset-2"
-                >
-                  <span className="text-[#ca8a04]" aria-hidden>
-                    ✨
-                  </span>
-                  AI Generate Description
-                </button>
               </div>
               <MissingScopeEditorSection
                 variant="document-description"
@@ -613,7 +648,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                   else if (docType === 'submittal') setSub((p) => ({ ...p, description: v }))
                   else setCo((p) => ({ ...p, description: v }))
                 }}
-                isGeneratingDescription={isGeneratingDescription}
+                aiNotes={docType === 'rfi' ? rfi.notes : docType === 'submittal' ? sub.notes : co.notes}
                 rows={8}
               />
               <p className={hintClass}>
@@ -624,7 +659,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
 
             {docType === 'submittal' ? (
               <div className={formCardClassName()}>
-                <h2 className="mb-5 text-lg font-semibold text-[#0f172a]">Submittal details</h2>
+                <h2 className="mb-5 text-lg font-semibold text-foreground">Submittal details</h2>
                 <div className="grid gap-5 sm:grid-cols-3">
                   <div>
                     <label className={capLabel}>Spec section</label>
@@ -653,7 +688,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
 
             {docType === 'change_order' ? (
               <div className={formCardClassName()}>
-                <h2 className="mb-5 text-lg font-semibold text-[#0f172a]">Change details</h2>
+                <h2 className="mb-5 text-lg font-semibold text-foreground">Change details</h2>
                 <div className="grid gap-5 sm:grid-cols-3">
                   <div>
                     <label className={capLabel}>Reason for change</label>
@@ -681,6 +716,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                         onChange={(e) => setCo((p) => ({ ...p, costImpact: e.target.value }))}
                         className="pl-7 pr-14"
                         placeholder="8,750.00"
+                        readOnly={hasCostBreakdown}
                       />
                       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
                         USD
@@ -692,7 +728,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                     <div className="flex min-h-10 items-center gap-3">
                       <label
                         htmlFor="co-schedule-no-impact"
-                        className="flex shrink-0 cursor-pointer items-center gap-2 text-sm whitespace-nowrap text-[#0f172a]"
+                        className="flex shrink-0 cursor-pointer items-center gap-2 text-sm whitespace-nowrap text-foreground"
                       >
                         <Checkbox
                           checked={co.scheduleNoImpact}
@@ -717,9 +753,92 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
               </div>
             ) : null}
 
+            {docType === 'change_order' ? (
+              <div className={formCardClassName()}>
+                <div className="mb-5 flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-semibold text-foreground">Cost Breakdown</h2>
+                    <p className="text-sm text-muted-foreground">Update line items for this change order</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="shrink-0 gap-2"
+                    onClick={addCostItem}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add Item
+                  </Button>
+                </div>
+
+                <div className="space-y-3">
+                  {normalizedCostItems.map((row) => (
+                    <div key={row.id} className="rounded-lg border border-border bg-background p-4">
+                      <div className="flex items-center gap-3">
+                        <Input
+                          value={row.description}
+                          onChange={(e) => updateCostItem(row.id, { description: e.target.value })}
+                          placeholder="Description"
+                          className="flex-1"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeCostItem(row.id)}
+                          className="rounded-md p-2 text-destructive transition-colors hover:bg-destructive/10"
+                          aria-label="Remove cost item"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <div>
+                          <label className={capLabel}>Quantity</label>
+                          <Input
+                            inputMode="decimal"
+                            value={row.quantity}
+                            onChange={(e) => updateCostItem(row.id, { quantity: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className={capLabel}>Unit Price ($)</label>
+                          <Input
+                            inputMode="decimal"
+                            value={row.unitPrice}
+                            onChange={(e) => updateCostItem(row.id, { unitPrice: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className={capLabel}>Total</label>
+                          <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground">
+                            {row.lineTotal ? `$${formatUsd(row.lineTotal)}` : '$0'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  {normalizedCostItems.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-border bg-muted/40 p-6 text-center text-sm text-muted-foreground">
+                      No items yet. Click{' '}
+                      <span className="font-semibold text-foreground">Add Item</span> to create your first line item.
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 rounded-lg bg-muted/60 px-4 py-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-foreground">Total Cost</p>
+                    <p className="text-lg font-bold text-[#f97316]">
+                      {costBreakdownTotal ? `$${formatUsd(costBreakdownTotal)}` : '$0'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             <div className={formCardClassName()}>
               <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-[#0f172a]">Supporting documents</h2>
+                <h2 className="text-lg font-semibold text-foreground">Supporting documents</h2>
               </div>
               <div
                 role="button"
@@ -737,13 +856,13 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                 }}
                 onDrop={onDrop}
                 className={cn(
-                  'mb-4 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#cbd5e1] bg-[#f8fafc] p-10 transition-colors hover:border-[#94a3b8] hover:bg-[#f1f5f9]'
+                  'mb-4 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border bg-muted/55 p-10 transition-colors hover:border-muted-foreground/60 hover:bg-muted'
                 )}
               >
-                <Upload className="mb-3 h-10 w-10 text-[#94a3b8]" strokeWidth={1.25} />
-                <p className="text-center text-sm font-medium text-[#334155]">
+                <Upload className="mb-3 h-10 w-10 text-muted-foreground" strokeWidth={1.25} />
+                <p className="text-center text-sm font-medium text-foreground/80">
                   Drag and drop files or{' '}
-                  <span className="font-semibold text-[#0f172a] underline decoration-[#cbd5e1] underline-offset-2">
+                  <span className="font-semibold text-foreground underline decoration-border underline-offset-2">
                     browse files
                   </span>{' '}
                   from your computer
@@ -761,16 +880,16 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                 {attachments.map((file) => (
                   <div
                     key={file.id}
-                    className="flex items-center justify-between rounded-lg border border-[#e2e8f0] bg-[#f1f5f9] px-4 py-3"
+                    className="flex items-center justify-between rounded-lg border border-border bg-muted/50 px-4 py-3"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-[#0f172a]">{file.name}</p>
-                      <p className="text-xs text-[#64748b]">{file.size}</p>
+                      <p className="truncate text-sm font-semibold text-foreground">{file.name}</p>
+                      <p className="text-xs text-muted-foreground">{file.size}</p>
                     </div>
                     <button
                       type="button"
                       onClick={() => removeAttachment(file.id)}
-                      className="rounded-md p-1.5 text-[#ef4444] transition-colors hover:bg-red-50"
+                      className="rounded-md p-1.5 text-destructive transition-colors hover:bg-destructive/10"
                       aria-label={`Remove ${file.name}`}
                     >
                       <X className="h-4 w-4" />
@@ -794,8 +913,8 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
               />
             </div>
 
-            <div className="flex flex-col gap-3 border-t border-[#e2e8f0] pt-6 sm:flex-row sm:items-center sm:justify-end">
-              <Button variant="outline" onClick={handleDelete} className="gap-2 text-red-700 hover:bg-red-50">
+            <div className="flex flex-col gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-end">
+              <Button variant="outline" onClick={handleDelete} className="gap-2 text-destructive hover:bg-destructive/10">
                 <Trash2 className="h-4 w-4" />
                 Delete
               </Button>
@@ -804,6 +923,12 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                 {isSaving ? 'Saving...' : 'Save'}
               </Button>
             </div>
+              </TabsContent>
+
+              <TabsContent value="activity" className="mt-4 outline-none">
+                <DocumentActivityPanel documentId={id} />
+              </TabsContent>
+            </Tabs>
           </div>
 
           <aside className="w-full min-w-0 space-y-6 lg:sticky lg:top-6 lg:self-start">
@@ -824,15 +949,15 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                 </div>
 
                 <div className={formCardClassName()}>
-                  <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">Categorization</h3>
+                  <h3 className="mb-5 text-lg font-semibold text-foreground">Categorization</h3>
                   <div className="space-y-4">
                     <div>
                       <label className={capLabel}>Reason</label>
-                      <p className="text-sm font-medium text-[#0f172a]">{reasonLabel}</p>
+                      <p className="text-sm font-medium text-foreground">{reasonLabel}</p>
                     </div>
-                    <div className="border-t border-[#e2e8f0] pt-4">
+                    <div className="border-t border-border pt-4">
                       <label className={capLabel}>Schedule impact</label>
-                      <p className="text-sm font-medium text-[#0f172a]">{scheduleLabel}</p>
+                      <p className="text-sm font-medium text-foreground">{scheduleLabel}</p>
                     </div>
                   </div>
                 </div>
@@ -852,11 +977,11 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             )}
 
             <div className={formCardClassName()}>
-              <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">Summary</h3>
+              <h3 className="mb-5 text-lg font-semibold text-foreground">Summary</h3>
               <div className="space-y-4">
                 <div>
                   <p className="text-xs text-muted-foreground">Review status</p>
-                  <p className="text-sm font-semibold text-[#0f172a]">
+                  <p className="text-sm font-semibold text-foreground">
                     {finalStatusLabel ??
                       (normalizedStatus === 'pending_review'
                         ? 'Sent'
@@ -867,20 +992,20 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Project</p>
-                  <p className="text-sm font-semibold text-[#0f172a]">{selectedProject?.name ?? '—'}</p>
+                  <p className="text-sm font-semibold text-foreground">{selectedProject?.name ?? '—'}</p>
                   <p className="text-xs text-muted-foreground">{selectedProject?.address ?? ''}</p>
                 </div>
-                <div className="border-t border-slate-100 pt-4">
+                <div className="border-t border-border pt-4">
                   <p className="text-xs text-muted-foreground">
                     {docType === 'change_order' ? 'Change Order #' : docType === 'rfi' ? 'RFI #' : 'Submittal #'}
                   </p>
-                  <p className="text-sm font-semibold text-[#0f172a]">
+                  <p className="text-sm font-semibold text-foreground">
                     {docType === 'change_order' ? co.changeOrderNumber : docType === 'rfi' ? rfi.number : sub.number}
                   </p>
                 </div>
-                <div className="border-t border-slate-100 pt-4">
+                <div className="border-t border-border pt-4">
                   <p className="text-xs text-muted-foreground">Title</p>
-                  <p className="text-sm font-semibold text-[#0f172a]">
+                  <p className="text-sm font-semibold text-foreground">
                     {docType === 'change_order'
                       ? co.title || '—'
                       : docType === 'rfi'
@@ -888,7 +1013,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                         : sub.title || '—'}
                   </p>
                 </div>
-                <div className="border-t border-slate-100 pt-4">
+                <div className="border-t border-border pt-4">
                   <p className="text-xs text-muted-foreground">PDF</p>
                   <div className="mt-2 flex flex-col gap-2">
                     <Button
@@ -901,24 +1026,13 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                       <Eye className="h-4 w-4" />
                       {openingPdfDetails ? 'Opening PDF...' : 'View PDF Details'}
                     </Button>
-                    {normalizedStatus === 'approved' ? (
-                      <Button
-                        type="button"
-                        onClick={handleExportPdf}
-                        disabled={exportingPdf}
-                        className="w-full justify-start gap-2"
-                      >
-                        <Download className="h-4 w-4" />
-                        {exportingPdf ? 'Exporting...' : 'Export to PDF'}
-                      </Button>
-                    ) : null}
                   </div>
                 </div>
                 {docType === 'change_order' ? (
                   <>
-                    <div className="border-t border-slate-100 pt-4">
+                    <div className="border-t border-border pt-4">
                       <p className="text-xs text-muted-foreground">Date</p>
-                      <p className="text-sm font-semibold text-[#0f172a]">
+                      <p className="text-sm font-semibold text-foreground">
                         {co.date
                           ? new Date(co.date + 'T12:00:00').toLocaleDateString('en-US', {
                               month: 'long',
@@ -928,33 +1042,23 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                           : '—'}
                       </p>
                     </div>
-                    <div className="border-t border-slate-100 pt-4">
+                    <div className="border-t border-border pt-4">
                       <p className="text-xs text-muted-foreground">Cost Impact</p>
-                      <p className="text-sm font-semibold text-[#0f172a]">
+                      <p className="text-sm font-semibold text-foreground">
                         {co.costImpact.trim() ? `$${formatUsd(parseMoneyInput(co.costImpact))}` : '—'}
                       </p>
                     </div>
-                    <div className="border-t border-slate-100 pt-4">
+                    <div className="border-t border-border pt-4">
                       <p className="text-xs text-muted-foreground">Schedule Impact</p>
-                      <p className="text-sm font-semibold text-[#0f172a]">{scheduleLabel}</p>
+                      <p className="text-sm font-semibold text-foreground">{scheduleLabel}</p>
                     </div>
                   </>
                 ) : null}
               </div>
             </div>
 
-            <div className={formCardClassName()}>
-              <h3 className="mb-3 text-lg font-semibold text-[#0f172a]">Linked Documents</h3>
-              <p className="mb-4 text-sm text-[#64748b]">
-                Create downstream change orders from this review outcome when needed.
-              </p>
-              <Button asChild variant="outline" className="w-full">
-                <Link href={`/change-orders/new?source_document_id=${id}`}>Create Change Order</Link>
-              </Button>
-            </div>
-
             {docType === 'change_order' ? (
-              <div className="relative overflow-hidden rounded-xl border border-[#e2e8f0] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+              <div className="app-surface relative overflow-hidden rounded-xl">
                 <div
                   className="aspect-[4/3] bg-cover bg-center bg-no-repeat"
                   style={{

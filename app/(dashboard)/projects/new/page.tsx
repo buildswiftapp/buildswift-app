@@ -62,20 +62,23 @@ export default function NewProjectPage() {
   }
 
   return (
-    <div className="flex flex-col">
-      <div className="flex-1 p-6">
-        <div className="mx-auto max-w-2xl">
+    <div className="app-page">
+      <div className="mx-auto max-w-2xl space-y-6">
+        <div>
+          <h1 className="app-section-title text-2xl">Create Project</h1>
+          <p className="app-section-subtitle">Add a new construction project to your portfolio.</p>
+        </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => router.back()}
-            className="mb-6"
+            className="rounded-xl"
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>
 
-          <Card>
+          <Card className="app-surface">
             <CardHeader>
               <CardTitle>Create New Project</CardTitle>
               <CardDescription>
@@ -195,7 +198,6 @@ export default function NewProjectPage() {
               </form>
             </CardContent>
           </Card>
-        </div>
       </div>
     </div>
   )

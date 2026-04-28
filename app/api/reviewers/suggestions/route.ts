@@ -22,10 +22,9 @@ export async function GET(req: Request) {
   if (!auth) return unauthorized()
 
   const { searchParams } = new URL(req.url)
-  const safe = sanitizeIlikeFragment(searchParams.get('q') ?? '')
-  if (!safe) {
-    return ok({ emails: [] as string[] })
-  }
+  const qRaw = searchParams.get('q') ?? ''
+  const safe = sanitizeIlikeFragment(qRaw)
+  const hasQuery = Boolean(safe)
 
   const supabase = await createSupabaseServerClient()
   if (!supabase) return serverError('Supabase is not configured')
@@ -44,26 +43,29 @@ export async function GET(req: Request) {
     return ok({ emails: [] as string[] })
   }
 
-  const pattern = `%${safe}%`
+  const pattern = hasQuery ? `%${safe}%` : null
   const seen = new Set<string>()
+  const ordered: string[] = []
 
   for (const batch of chunk(cycleIds, BATCH)) {
-    const { data: rows, error: reqError } = await supabase
-      .from('review_requests')
-      .select('reviewer_email')
-      .in('review_cycle_id', batch)
-      .ilike('reviewer_email', pattern)
-      .limit(80)
+    const base = supabase.from('review_requests').select('reviewer_email').in('review_cycle_id', batch)
+    const query = hasQuery ? base.ilike('reviewer_email', pattern as string) : base
+    const { data: rows, error: reqError } = await query.limit(hasQuery ? 80 : 200)
 
     if (reqError) return serverError(reqError.message)
     for (const row of rows ?? []) {
       const e = row.reviewer_email?.toLowerCase().trim()
-      if (e) seen.add(e)
+      if (e && !seen.has(e)) {
+        seen.add(e)
+        ordered.push(e)
+      }
       if (seen.size >= MAX_RESULTS * 2) break
     }
     if (seen.size >= MAX_RESULTS * 2) break
   }
 
-  const emails = Array.from(seen).sort((a, b) => a.localeCompare(b)).slice(0, MAX_RESULTS)
+  const emails = hasQuery
+    ? Array.from(seen).sort((a, b) => a.localeCompare(b)).slice(0, MAX_RESULTS)
+    : ordered.slice(0, MAX_RESULTS)
   return ok({ emails })
 }

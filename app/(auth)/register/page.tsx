@@ -97,7 +97,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
+    <div className="app-shell flex min-h-screen flex-col items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="mb-8 flex justify-center">
           <Image
@@ -110,7 +110,7 @@ export default function RegisterPage() {
           />
         </div>
 
-        <Card>
+        <Card className="app-surface">
           <CardHeader className="text-center">
             <CardTitle>Create an account</CardTitle>
             <CardDescription>

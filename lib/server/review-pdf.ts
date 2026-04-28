@@ -1,4 +1,5 @@
 import { readFileSync } from 'fs'
+import { createHash } from 'crypto'
 import React from 'react'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { extractH3Block, strongField } from '@/lib/document-html'
@@ -40,6 +41,7 @@ type ReviewPdfInput = {
   brandingPrimaryColor?: string | null
   /** Resolved data URI for React-PDF Image (empty to skip). */
   brandingLogoDataUri?: string | null
+  metadata?: Record<string, unknown>
 }
 
 type ReviewDocumentJson = {
@@ -115,12 +117,39 @@ function isListOrLogSectionHeading(heading: string) {
 
 type PdfNarrativeSection = { label: string; body: string }
 
+function canonicalNarrativeLabel(rawHeading: string, docType: string): string {
+  const heading = rawHeading.trim().toLowerCase()
+  if (!heading) return ''
+  if (heading === 'reason for change') return 'REASON FOR CHANGE ORDER'
+  if (heading === 'description of change') return 'QUESTION / ISSUE'
+  if (
+    heading === 'question' ||
+    heading === 'questions / descriptions' ||
+    heading === 'questions/descriptions' ||
+    heading === 'description / context' ||
+    heading === 'question / issue'
+  ) {
+    return 'QUESTION / ISSUE'
+  }
+  if (
+    heading === "contractor's proposed interpretation" ||
+    heading === 'contractor proposed interpretation'
+  ) {
+    return "CONTRACTOR'S PROPOSED INTERPRETATION"
+  }
+  // For change orders, treat generic notes as the proposed interpretation block.
+  if (docType === 'change_order' && heading === 'notes') {
+    return "CONTRACTOR'S PROPOSED INTERPRETATION"
+  }
+  return rawHeading.replace(/\s+/g, ' ').toUpperCase()
+}
+
 /** One card per <h3> block (and similar), excluding title/list/approval sections. */
 function narrativeSectionsFromParsed(
   sections: Array<{ heading: string; body: string }>,
   docType: string
 ): PdfNarrativeSection[] {
-  const out: PdfNarrativeSection[] = []
+  const merged = new Map<string, string>()
   for (const s of sections) {
     const heading = s.heading.trim()
     if (!heading || DOC_TITLE_HEADING.test(heading)) continue
@@ -133,12 +162,12 @@ function narrativeSectionsFromParsed(
     }
     const body = (s.body || '').trim()
     if (!body || body === '-') continue
-    out.push({
-      label: heading.replace(/\s+/g, ' ').toUpperCase(),
-      body,
-    })
+    const label = canonicalNarrativeLabel(heading, docType)
+    if (!label) continue
+    const existing = merged.get(label)
+    merged.set(label, existing ? `${existing}\n\n${body}` : body)
   }
-  return out
+  return Array.from(merged.entries()).map(([label, body]) => ({ label, body }))
 }
 
 function formatDisplayDate(raw: string | null | undefined) {
@@ -160,6 +189,60 @@ function buildChangeOrderImpactRows(html: string): Array<{ label: string; value:
   if (cost) rows.push({ label: 'Cost Impact', value: cost })
   if (scope) rows.push({ label: 'Scope Impact', value: scope })
   return rows
+}
+
+function buildGenericImpactRows(html: string): Array<{ label: string; value: string }> {
+  const rows: Array<{ label: string; value: string }> = []
+  const schedule = extractH3Block(html, 'Schedule Impact').trim()
+  const cost = extractH3Block(html, 'Cost Impact').trim()
+  const scope = extractH3Block(html, 'Scope Impact').trim()
+  if (schedule) rows.push({ label: 'Schedule Impact', value: schedule })
+  if (cost) rows.push({ label: 'Cost Impact', value: cost })
+  if (scope) rows.push({ label: 'Scope Impact', value: scope })
+  return rows
+}
+
+function normalizeRfiNarrativeSections(
+  sections: PdfNarrativeSection[],
+  title: string
+): PdfNarrativeSection[] {
+  const byLabel = new Map<string, string>()
+  for (const section of sections) {
+    const existing = byLabel.get(section.label)
+    byLabel.set(section.label, existing ? `${existing}\n\n${section.body}` : section.body)
+  }
+
+  const reasonFromSections =
+    byLabel.get('REASON FOR CHANGE') || byLabel.get('REASON FOR CHANGE ORDER') || ''
+  const question =
+    byLabel.get('QUESTION / ISSUE') ||
+    byLabel.get('QUESTIONS / DESCRIPTIONS') ||
+    byLabel.get('DESCRIPTION / CONTEXT') ||
+    ''
+  const proposed =
+    byLabel.get("CONTRACTOR'S PROPOSED INTERPRETATION") ||
+    byLabel.get('NOTES') ||
+    ''
+
+  const out: PdfNarrativeSection[] = []
+  // Keep non-change-order PDFs free from change-order-only headings.
+  if (reasonFromSections) out.push({ label: 'REASON FOR CHANGE', body: reasonFromSections })
+  if (question) out.push({ label: 'QUESTION / ISSUE', body: question })
+  if (proposed) {
+    out.push({
+      label: "CONTRACTOR'S PROPOSED INTERPRETATION",
+      body: proposed,
+    })
+  }
+
+  if (out.length === 0 && title.trim()) {
+    out.push({
+      label: 'DESCRIPTION',
+      body: title.trim(),
+    })
+  }
+  if (out.length === 0) return sections
+  return out
 }
 
 const DEFAULT_LOGO_PATHS = [
@@ -367,9 +450,54 @@ export async function generateReviewPdfBuffer(input: ReviewPdfInput): Promise<Bu
   const contractDateDisplay =
     input.docType === 'rfi' ? formatDisplayDate(input.contractDate) : ''
 
-  const contentSections = narrativeSectionsFromParsed(docJson.sections, input.docType)
+  const parsedSections = narrativeSectionsFromParsed(docJson.sections, input.docType)
+  const contentSections =
+    input.docType === 'rfi' ? normalizeRfiNarrativeSections(parsedSections, input.title) : parsedSections
   const impactRows =
-    input.docType === 'change_order' ? buildChangeOrderImpactRows(input.descriptionHtml) : []
+    input.docType === 'change_order'
+      ? buildChangeOrderImpactRows(input.descriptionHtml)
+      : buildGenericImpactRows(input.descriptionHtml)
+
+  const metadataAssumptions = (() => {
+    const raw = (input as any).metadata?.assumptions
+    if (Array.isArray(raw)) return raw.map((v) => String(v).trim()).filter(Boolean)
+    if (typeof raw === 'string') return raw.split('\n').map((v) => v.trim()).filter(Boolean)
+    return [] as string[]
+  })()
+
+  const metadataCostItems = (() => {
+    const fmtUsd = (n: number) =>
+      `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+    // New format: saved by the Cost Breakdown section ({description, quantity, unitPrice, total})
+    const newRaw = (input as any).metadata?.costBreakdownItems
+    if (Array.isArray(newRaw) && newRaw.length) {
+      return newRaw
+        .map((row) => {
+          const desc = String((row as any)?.description ?? '').trim()
+          const qty = Number((row as any)?.quantity ?? 0)
+          const unit = Number((row as any)?.unitPrice ?? 0)
+          const total = Number.isFinite(Number((row as any)?.total)) ? Number((row as any)?.total) : qty * unit
+          return {
+            item: qty !== 1 ? `${desc} (×${qty})` : desc,
+            amount: Number.isFinite(total) && total ? fmtUsd(total) : '',
+          }
+        })
+        .filter((row) => row.item && row.amount)
+    }
+
+    // Legacy format: {item, amount}
+    const raw = (input as any).metadata?.costBreakdown
+    if (Array.isArray(raw)) {
+      return raw
+        .map((row) => ({
+          item: String((row as any)?.item ?? '').trim(),
+          amount: String((row as any)?.amount ?? '').trim(),
+        }))
+        .filter((row) => row.item && row.amount)
+    }
+    return [] as Array<{ item: string; amount: string }>
+  })()
 
   const defaultThemePrimary = '#1f3768'
   const defaultThemeAccent = '#c37a29'
@@ -388,25 +516,21 @@ export async function generateReviewPdfBuffer(input: ReviewPdfInput): Promise<Bu
     const color = parseBrandingPrimaryColor(input.brandingPrimaryColor ?? '')
     const logo = (input.brandingLogoDataUri ?? '').trim()
     const hasAnything = Boolean(company || color || logo)
-    if (!hasAnything) {
-      brand = ''
-      brandSub = ''
-      logoDataUri = ''
-      themePrimary = '#475569'
-      themeAccent = '#94a3b8'
-      badgeBackground = '#64748b'
-    } else {
-      brand = company
-      brandSub = ''
-      logoDataUri = logo
-      themePrimary = color || '#475569'
-      themeAccent = color ? brandingAccentFromPrimary(color) : '#94a3b8'
-      badgeBackground = color ? brandingAccentFromPrimary(color) : defaultBadgeBg
+    if (hasAnything) {
+      if (company) brand = company
+      if (logo) logoDataUri = logo
+      themePrimary = color || defaultThemePrimary
+      themeAccent = color ? brandingAccentFromPrimary(color) : defaultThemeAccent
+      // badgeBackground intentionally stays as defaultBadgeBg (amber) regardless of primary colour —
+      // the number badge always uses the warm accent as shown in the standard form.
       footerLine = company
         ? `Generated by ${company} — BuildSwift`
         : 'Generated by BuildSwift - AI-Assisted Construction Documentation'
     }
+    // When no branding is configured at all, keep the BuildSwift defaults unchanged.
   }
+
+  const submittedByDisplay = (submittedBy || '').trim() || '—'
 
   const viewModel: ReviewPdfViewModel = {
     docType: input.docType,
@@ -434,7 +558,7 @@ export async function generateReviewPdfBuffer(input: ReviewPdfInput): Promise<Bu
     reportDate: primaryDate || fmtDate(docJson.header.generatedAt),
     actionNeededBy: actionNeededByResolved,
     contractDateDisplay,
-    submittedBy: submittedBy || '—',
+    submittedBy: submittedByDisplay,
     rfiNo,
     specSection: specSection || '—',
     priority: formatPriorityLabel(input.priority) || '—',
@@ -447,11 +571,39 @@ export async function generateReviewPdfBuffer(input: ReviewPdfInput): Promise<Bu
     impactRows,
     attachments,
     linkedDocuments,
+    costItems: metadataCostItems.length ? metadataCostItems : undefined,
+    assumptions: metadataAssumptions.length ? metadataAssumptions : undefined,
+    contractorName: ((input as any).metadata?.contractorName as string) || undefined,
+    contractorRole: ((input as any).metadata?.contractorRole as string) || undefined,
+    contractorPhone: ((input as any).metadata?.contractorPhone as string) || undefined,
+    contractorEmail: ((input as any).metadata?.contractorEmail as string) || undefined,
+    architectName: ((input as any).metadata?.architectName as string) || undefined,
+    architectRole: ((input as any).metadata?.architectRole as string) || undefined,
+    architectPhone: ((input as any).metadata?.architectPhone as string) || undefined,
+    architectEmail: ((input as any).metadata?.architectEmail as string) || undefined,
+    scheduleExtension: ((input as any).metadata?.scheduleExtension as string) || undefined,
+    newCompletionDate: ((input as any).metadata?.newCompletionDate as string) || undefined,
     approvalRows,
     facts: docJson.facts,
     sections: docJson.sections,
     rawContent: docJson.fullText || '-',
   }
+
+  const debugFingerprintInput = JSON.stringify({
+    docType: viewModel.docType,
+    reviewNumber: viewModel.reviewNumber,
+    reviewStatus: viewModel.reviewStatus,
+    project: viewModel.project,
+    reportDate: viewModel.reportDate,
+    contractDateDisplay: viewModel.contractDateDisplay,
+    sectionLabels: viewModel.contentSections.map((s) => s.label),
+    impactLabels: viewModel.impactRows.map((r) => r.label),
+    approvalCount: viewModel.approvalRows.length,
+  })
+  const debugHash = createHash('sha256').update(debugFingerprintInput).digest('hex').slice(0, 12)
+  const debugTime = new Date().toISOString()
+  viewModel.debugInfo = `debug render=${debugTime} hash=${debugHash}`
+
   return await renderToBuffer(React.createElement(ReviewPdfDocument, { data: viewModel }) as any)
 }
 

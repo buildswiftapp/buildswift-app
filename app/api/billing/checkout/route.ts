@@ -11,15 +11,16 @@ export async function POST(req: Request) {
   if (!auth.accountId) return badRequest('Account context is unavailable.')
 
   const body = (await req.json().catch(() => ({}))) as { tier?: string }
-  if (body.tier !== 'professional' && body.tier !== 'enterprise') {
-    return badRequest('tier must be professional or enterprise')
+  const requestedTier = body.tier === 'pro' ? 'professional' : body.tier
+  if (requestedTier !== 'professional' && requestedTier !== 'enterprise') {
+    return badRequest('tier must be professional/pro or enterprise')
   }
 
   const stripe = getStripeClient()
   if (!stripe) return serverError('Stripe is not configured')
 
-  const priceId = getPriceIdForTier(body.tier)
-  if (!priceId) return badRequest(`Missing Stripe price id for ${body.tier}`)
+  const priceId = getPriceIdForTier(requestedTier)
+  if (!priceId) return badRequest(`Missing Stripe price id for ${requestedTier}`)
 
   const supabase = createSupabaseAdminClient() ?? (await createSupabaseServerClient())
   if (!supabase) return serverError('Supabase is not configured')
@@ -42,7 +43,7 @@ export async function POST(req: Request) {
     const customer = await stripe.customers.create({
       email: auth.user.email || undefined,
       name: typeof account.name === 'string' ? account.name : undefined,
-      metadata: { account_id: auth.accountId, user_id: auth.user.id },
+    metadata: { account_id: auth.accountId, user_id: auth.user.id },
     })
     customerId = customer.id
     await (supabase.from('accounts' as any) as any)
@@ -58,7 +59,7 @@ export async function POST(req: Request) {
     success_url: `${appUrl}/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${appUrl}/billing?checkout=cancelled`,
     allow_promotion_codes: true,
-    metadata: { account_id: auth.accountId, tier: body.tier },
+    metadata: { account_id: auth.accountId, user_id: auth.user.id, tier: requestedTier },
   })
   await writeAuditLog(
     {
@@ -68,7 +69,7 @@ export async function POST(req: Request) {
       actorEmail: auth.user.email ?? null,
       eventType: 'billing.checkout_session_created',
       eventData: {
-        tier: body.tier,
+        tier: requestedTier,
         stripe_customer_id: customerId,
         stripe_session_id: session.id,
         stripe_price_id: priceId,
