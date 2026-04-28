@@ -42,6 +42,7 @@ export function ReviewerManagementSection({
   const [expiresInDays, setExpiresInDays] = useState<3 | 7 | 14>(7)
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
+  const [sending, setSending] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const isCreate = layout === 'create'
 
@@ -106,6 +107,7 @@ export function ReviewerManagementSection({
     }
 
     try {
+      setSending(true)
       if (onSend) {
         await onSend({
           reviewers: ccReviewers,
@@ -117,6 +119,8 @@ export function ReviewerManagementSection({
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to send reviewers')
+    } finally {
+      setSending(false)
     }
   }
 
@@ -284,11 +288,11 @@ export function ReviewerManagementSection({
             <Button
               type="button"
               onClick={() => void handleSend()}
-              disabled={ccReviewers.length === 0}
+              disabled={ccReviewers.length === 0 || sending}
               className="h-12 w-full bg-[#2563eb] hover:bg-[#1d4ed8]"
             >
-              <Send className="mr-2 h-4 w-4" />
-              Send
+              <Send className={cn('mr-2 h-4 w-4', sending && 'animate-spin')} />
+              {sending ? 'Sending…' : 'Send'}
             </Button>
           </div>
         ) : null}
