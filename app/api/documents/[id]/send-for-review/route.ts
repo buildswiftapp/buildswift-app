@@ -356,11 +356,10 @@ export async function POST(req: Request, { params }: Params) {
         )
       }
 
-      const { data: projectRowResend, error: projectErrorResend } = await supabase
+      const { data: projectRowResend, error: projectErrorResend } = await privilegedDb
         .from('projects')
         .select('name')
         .eq('id', document.project_id)
-        .eq('account_id', auth.accountId)
         .maybeSingle()
       if (projectErrorResend) return serverError(projectErrorResend.message)
       const projectNameResend = projectRowResend?.name || 'Untitled Project'
@@ -464,11 +463,10 @@ export async function POST(req: Request, { params }: Params) {
       })
     }
 
-    const { data: projectRow, error: projectError } = await supabase
+    const { data: projectRow, error: projectError } = await privilegedDb
       .from('projects')
       .select('name')
       .eq('id', document.project_id)
-      .eq('account_id', auth.accountId)
       .maybeSingle()
     if (projectError) return serverError(projectError.message)
     const projectName = projectRow?.name || 'Untitled Project'

@@ -6,15 +6,10 @@ import {
   FolderKanban,
   FileText,
   Clock,
-  CheckCircle,
-  AlertCircle,
-  ArrowRight,
-  TrendingUp,
   FileQuestion,
   FileCheck,
   FilePen,
 } from 'lucide-react'
-import { useApp } from '@/lib/app-context'
 import { apiFetch } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -22,8 +17,29 @@ import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 
+type DashboardProject = {
+  id: string
+  name: string
+  description?: string | null
+  address?: string | null
+  status: 'active' | 'completed' | 'on_hold' | string
+  updated_at?: string | null
+  created_at?: string | null
+}
+
+type DashboardDocument = {
+  id: string
+  project_id: string
+  doc_type: 'rfi' | 'submittal' | 'change_order' | string
+  title: string
+  internal_status: string
+  updated_at: string
+}
+
 export default function DashboardPage() {
-  const { projects, documents } = useApp()
+  const [projects, setProjects] = useState<DashboardProject[]>([])
+  const [documents, setDocuments] = useState<DashboardDocument[]>([])
+  const [loadingData, setLoadingData] = useState(true)
   const [billingSummary, setBillingSummary] = useState<{
     tier: string
     documents_used: number
@@ -36,6 +52,16 @@ export default function DashboardPage() {
     let active = true
     void (async () => {
       try {
+        setLoadingData(true)
+        const [projectsRes, documentsRes] = await Promise.all([
+          apiFetch<{ projects: DashboardProject[] }>('/api/projects'),
+          apiFetch<{ documents: DashboardDocument[] }>('/api/documents'),
+        ])
+        if (active) {
+          setProjects(projectsRes.projects ?? [])
+          setDocuments(documentsRes.documents ?? [])
+        }
+
         const summary = await apiFetch<{
           tier: string
           documents_used: number
@@ -45,7 +71,13 @@ export default function DashboardPage() {
         }>('/api/billing/summary')
         if (active) setBillingSummary(summary)
       } catch {
-        if (active) setBillingSummary(null)
+        if (active) {
+          setProjects([])
+          setDocuments([])
+          setBillingSummary(null)
+        }
+      } finally {
+        if (active) setLoadingData(false)
       }
     })()
     return () => {
@@ -53,17 +85,48 @@ export default function DashboardPage() {
     }
   }, [])
 
-  const activeProjects = projects.filter((p) => p.status === 'active')
-  const pendingDocuments = documents.filter((d) => d.status === 'pending_review')
-  const draftDocuments = documents.filter((d) => d.status === 'draft')
-
-  const documentsByType = {
-    rfi: documents.filter((d) => d.type === 'rfi').length,
-    submittal: documents.filter((d) => d.type === 'submittal').length,
-    change_order: documents.filter((d) => d.type === 'change_order').length,
+  const normalizeStatus = (internalStatus: string) => {
+    const s = (internalStatus ?? '').trim().toLowerCase()
+    if (s === 'in_review' || s === 'pending_reviewer') return 'pending_review'
+    if (s === 'revising') return 'revision_requested'
+    if (s === 'approved' || s === 'rejected' || s === 'draft') return s
+    return 'draft'
   }
 
-  const recentDocuments = [...documents]
+  const uiDocuments = documents.map((d) => ({
+    id: d.id,
+    projectId: d.project_id,
+    type: d.doc_type,
+    title: d.title,
+    status: normalizeStatus(d.internal_status),
+    updatedAt: d.updated_at,
+  }))
+
+  const docsByProjectId = uiDocuments.reduce<Record<string, number>>((acc, d) => {
+    acc[d.projectId] = (acc[d.projectId] ?? 0) + 1
+    return acc
+  }, {})
+
+  const uiProjects = projects.map((p) => ({
+    id: p.id,
+    name: p.name,
+    description: p.description ?? '',
+    status: p.status,
+    documentsCount: docsByProjectId[p.id] ?? 0,
+    updatedAt: p.updated_at ?? p.created_at ?? new Date().toISOString(),
+  }))
+
+  const activeProjects = uiProjects.filter((p) => p.status === 'active')
+  const pendingDocuments = uiDocuments.filter((d) => d.status === 'pending_review')
+  const draftDocuments = uiDocuments.filter((d) => d.status === 'draft')
+
+  const documentsByType = {
+    rfi: uiDocuments.filter((d) => d.type === 'rfi').length,
+    submittal: uiDocuments.filter((d) => d.type === 'submittal').length,
+    change_order: uiDocuments.filter((d) => d.type === 'change_order').length,
+  }
+
+  const recentDocuments = [...uiDocuments]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, 5)
 
@@ -116,9 +179,9 @@ export default function DashboardPage() {
               <FolderKanban className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{activeProjects.length}</div>
+              <div className="text-2xl font-bold">{loadingData ? '—' : activeProjects.length}</div>
               <p className="text-xs text-muted-foreground">
-                {projects.length} total projects
+                {loadingData ? 'Loading…' : `${uiProjects.length} total projects`}
               </p>
             </CardContent>
           </Card>
@@ -131,7 +194,7 @@ export default function DashboardPage() {
               <FileText className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{documents.length}</div>
+              <div className="text-2xl font-bold">{loadingData ? '—' : uiDocuments.length}</div>
               <p className="text-xs text-muted-foreground">
                 Across all projects
               </p>
@@ -146,7 +209,7 @@ export default function DashboardPage() {
               <Clock className="h-4 w-4 text-slate-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{pendingDocuments.length}</div>
+              <div className="text-2xl font-bold">{loadingData ? '—' : pendingDocuments.length}</div>
               <p className="text-xs text-muted-foreground">
                 Awaiting approval
               </p>
@@ -158,10 +221,10 @@ export default function DashboardPage() {
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 Drafts
               </CardTitle>
-              <AlertCircle className="h-4 w-4 text-muted-foreground" />
+              <FileText className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{draftDocuments.length}</div>
+              <div className="text-2xl font-bold">{loadingData ? '—' : draftDocuments.length}</div>
               <p className="text-xs text-muted-foreground">
                 In progress
               </p>
@@ -176,17 +239,18 @@ export default function DashboardPage() {
                 <CardTitle>Recent Documents</CardTitle>
                 <CardDescription>Latest activity across your projects</CardDescription>
               </div>
-              <Button variant="outline" size="sm" asChild>
-                <Link href="/documents">
-                  View All
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Link>
-              </Button>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {recentDocuments.map((doc) => {
-                  const project = projects.find((p) => p.id === doc.projectId)
+                {loadingData ? (
+                  <div className="rounded-lg border p-4 text-sm text-muted-foreground">Loading recent documents…</div>
+                ) : recentDocuments.length === 0 ? (
+                  <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                    No documents yet.
+                  </div>
+                ) : (
+                  recentDocuments.map((doc) => {
+                    const project = uiProjects.find((p) => p.id === doc.projectId)
                   return (
                     <Link
                       key={doc.id}
@@ -205,7 +269,8 @@ export default function DashboardPage() {
                       {getStatusBadge(doc.status)}
                     </Link>
                   )
-                })}
+                  })
+                )}
               </div>
             </CardContent>
           </Card>
@@ -222,9 +287,12 @@ export default function DashboardPage() {
                     <FileQuestion className="h-4 w-4 text-primary" />
                     <span className="text-sm font-medium">RFIs</span>
                   </div>
-                  <span className="text-sm text-muted-foreground">{documentsByType.rfi}</span>
+                  <span className="text-sm text-muted-foreground">{loadingData ? '—' : documentsByType.rfi}</span>
                 </div>
-                <Progress value={(documentsByType.rfi / documents.length) * 100} className="h-2" />
+                <Progress
+                  value={uiDocuments.length > 0 ? (documentsByType.rfi / uiDocuments.length) * 100 : 0}
+                  className="h-2"
+                />
               </div>
 
               <div className="space-y-3">
@@ -233,9 +301,12 @@ export default function DashboardPage() {
                     <FileCheck className="h-4 w-4 text-accent" />
                     <span className="text-sm font-medium">Submittals</span>
                   </div>
-                  <span className="text-sm text-muted-foreground">{documentsByType.submittal}</span>
+                  <span className="text-sm text-muted-foreground">{loadingData ? '—' : documentsByType.submittal}</span>
                 </div>
-                <Progress value={(documentsByType.submittal / documents.length) * 100} className="h-2" />
+                <Progress
+                  value={uiDocuments.length > 0 ? (documentsByType.submittal / uiDocuments.length) * 100 : 0}
+                  className="h-2"
+                />
               </div>
 
               <div className="space-y-3">
@@ -244,9 +315,12 @@ export default function DashboardPage() {
                     <FilePen className="h-4 w-4 text-chart-3" />
                     <span className="text-sm font-medium">Change Orders</span>
                   </div>
-                  <span className="text-sm text-muted-foreground">{documentsByType.change_order}</span>
+                  <span className="text-sm text-muted-foreground">{loadingData ? '—' : documentsByType.change_order}</span>
                 </div>
-                <Progress value={(documentsByType.change_order / documents.length) * 100} className="h-2" />
+                <Progress
+                  value={uiDocuments.length > 0 ? (documentsByType.change_order / uiDocuments.length) * 100 : 0}
+                  className="h-2"
+                />
               </div>
             </CardContent>
           </Card>
@@ -258,16 +332,19 @@ export default function DashboardPage() {
               <CardTitle>Active Projects</CardTitle>
               <CardDescription>Your ongoing construction projects</CardDescription>
             </div>
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/projects">
-                View All
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {activeProjects.slice(0, 3).map((project) => (
+              {loadingData ? (
+                <div className="rounded-lg border p-4 text-sm text-muted-foreground">
+                  Loading active projects…
+                </div>
+              ) : activeProjects.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                  No active projects yet.
+                </div>
+              ) : (
+                activeProjects.slice(0, 3).map((project) => (
                 <Link
                   key={project.id}
                   href={`/projects/${project.id}`}
@@ -290,7 +367,8 @@ export default function DashboardPage() {
                     </Badge>
                   </div>
                 </Link>
-              ))}
+                ))
+              )}
             </div>
           </CardContent>
         </Card>

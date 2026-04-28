@@ -66,6 +66,44 @@ export async function POST(req: Request) {
     await (supabase.from('accounts' as any) as any).update(updates).eq('id', accountId)
   }
 
+  const toIsoFromUnix = (unixSeconds: number | null | undefined) => {
+    if (typeof unixSeconds !== 'number' || !Number.isFinite(unixSeconds)) return null
+    return new Date(unixSeconds * 1000).toISOString()
+  }
+
+  const resolveInvoiceSubscriptionState = async (invoice: Stripe.Invoice) => {
+    const invoiceSubscription =
+      typeof (invoice as any).subscription === 'string'
+        ? ((invoice as any).subscription as string)
+        : null
+    if (invoiceSubscription) {
+      try {
+        const subscription = await stripe.subscriptions.retrieve(invoiceSubscription)
+        const priceId = subscription.items.data[0]?.price?.id ?? null
+        return {
+          currentPeriodEnd: toIsoFromUnix(subscription.current_period_end),
+          cancelAt: toIsoFromUnix(subscription.cancel_at),
+          subscriptionId: subscription.id,
+          priceId,
+          tier: resolveTierFromPrice(priceId),
+          status: subscription.status,
+        }
+      } catch {
+        // Fall back to invoice line period end if subscription lookup fails.
+      }
+    }
+
+    const invoiceLinePeriodEnd = invoice.lines.data[0]?.period?.end
+    return {
+      currentPeriodEnd: toIsoFromUnix(invoiceLinePeriodEnd),
+      cancelAt: null,
+      subscriptionId: invoiceSubscription,
+      priceId: null,
+      tier: null,
+      status: null,
+    }
+  }
+
   const resolveTierFromPrice = (priceId: string | null) => {
     if (priceId === process.env.STRIPE_PRICE_ENTERPRISE_MONTHLY) return 'enterprise'
     if (priceId === process.env.STRIPE_PRICE_PROFESSIONAL_MONTHLY) return 'professional'
@@ -168,25 +206,25 @@ export async function POST(req: Request) {
     if (event.type === 'invoice.paid') {
       const invoice = event.data.object as Stripe.Invoice
       const customerId = typeof invoice.customer === 'string' ? invoice.customer : null
-      const line = invoice.lines.data[0]
-      const periodEndUnix = line?.period?.end
-      const currentPeriodEnd =
-        typeof periodEndUnix === 'number' && Number.isFinite(periodEndUnix)
-          ? new Date(periodEndUnix * 1000).toISOString()
-          : null
+      const { currentPeriodEnd, cancelAt, subscriptionId, priceId, tier, status } =
+        await resolveInvoiceSubscriptionState(invoice)
       if (customerId) {
         await updateByCustomer(customerId, {
-          billing_status: 'active',
+          stripe_subscription_id: subscriptionId,
+          stripe_price_id: priceId,
+          subscription_tier: tier,
+          billing_status: status ?? 'active',
           current_period_end: currentPeriodEnd,
-          cancel_at: null,
+          cancel_at: cancelAt,
         })
         await logBilling(customerId, 'billing.invoice_paid', {
           stripe_invoice_id: invoice.id,
-          stripe_subscription_id:
-            typeof (invoice as any).subscription === 'string'
-              ? ((invoice as any).subscription as string)
-              : null,
+          stripe_subscription_id: subscriptionId,
+          stripe_price_id: priceId,
+          subscription_tier: tier,
           current_period_end: currentPeriodEnd,
+          cancel_at: cancelAt,
+          status: status ?? 'active',
           amount_paid: invoice.amount_paid,
         })
       }

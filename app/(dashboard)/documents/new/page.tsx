@@ -88,6 +88,9 @@ function NewDocumentContent() {
     date: new Date().toISOString().slice(0, 10),
     dueDate: '',
     description: '',
+    scheduleImpact: '',
+    costImpact: '',
+    scopeImpact: '',
     specSection: '',
     manufacturer: '',
     productName: '',
@@ -235,6 +238,13 @@ function NewDocumentContent() {
           metadata: {
             rfiDate: formData.type === 'rfi' ? formData.date : undefined,
             submittalDate: formData.type === 'submittal' ? formData.date : undefined,
+            actionNeededBy: formData.dueDate ? formData.dueDate : undefined,
+            scheduleImpact:
+              formData.type === 'rfi' ? (formData.scheduleImpact.trim() || undefined) : undefined,
+            costImpact:
+              formData.type === 'rfi' ? (formData.costImpact.trim() || undefined) : undefined,
+            scopeImpact:
+              formData.type === 'rfi' ? (formData.scopeImpact.trim() || undefined) : undefined,
             specSection: formData.type === 'submittal' ? formData.specSection : undefined,
             manufacturer: formData.type === 'submittal' ? formData.manufacturer : undefined,
             productName: formData.type === 'submittal' ? formData.productName : undefined,
@@ -449,6 +459,38 @@ function NewDocumentContent() {
                     <Input
                       value={formData.productName}
                       onChange={(e) => setFormData((p) => ({ ...p, productName: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {formData.type === 'rfi' && (
+              <div className={formCardClassName()}>
+                <h2 className="mb-5 text-lg font-semibold text-[#0f172a]">Impact</h2>
+                <div className="grid gap-5 sm:grid-cols-3">
+                  <div>
+                    <label className={capLabel}>Schedule impact</label>
+                    <Input
+                      value={formData.scheduleImpact}
+                      onChange={(e) => setFormData((p) => ({ ...p, scheduleImpact: e.target.value }))}
+                      placeholder="e.g., + 3 days"
+                    />
+                  </div>
+                  <div>
+                    <label className={capLabel}>Cost impact</label>
+                    <Input
+                      value={formData.costImpact}
+                      onChange={(e) => setFormData((p) => ({ ...p, costImpact: e.target.value }))}
+                      placeholder="e.g., $2,500"
+                    />
+                  </div>
+                  <div>
+                    <label className={capLabel}>Scope impact</label>
+                    <Input
+                      value={formData.scopeImpact}
+                      onChange={(e) => setFormData((p) => ({ ...p, scopeImpact: e.target.value }))}
+                      placeholder="e.g., Additional conduit routing"
                     />
                   </div>
                 </div>

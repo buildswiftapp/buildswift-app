@@ -120,3 +120,17 @@ export const accountBrandingUpsertSchema = z.object({
     }),
   clear_logo: z.boolean().optional(),
 })
+
+export const updateProfileSchema = z.object({
+  full_name: z.string().trim().min(1).max(200),
+  email: z.string().trim().toLowerCase().email().max(320),
+  company_name: z.string().trim().min(1).max(200),
+})
+
+export const updateCompanySchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  industry: z.string().trim().max(200).optional().nullable(),
+  website: z.string().trim().max(500).optional().nullable(),
+  phone: z.string().trim().max(60).optional().nullable(),
+  address: z.string().trim().max(500).optional().nullable(),
+})

@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Building2, Palette, RotateCcw, RotateCw, User, ZoomIn, ZoomOut } from 'lucide-react'
-import { useApp } from '@/lib/app-context'
 import { apiFetch } from '@/lib/api'
 import { parseBrandingPrimaryColor } from '@/lib/branding-utils'
 import { createSupabaseBrowserClient } from '@/lib/supabase/client'
@@ -73,14 +72,23 @@ async function authHeaders(): Promise<HeadersInit> {
 }
 
 export default function SettingsPage() {
-  const { user, company } = useApp()
   const [subscriptionTier, setSubscriptionTier] = useState<string>('free')
   const [profileForm, setProfileForm] = useState({
-    name: user?.name || '',
-    email: user?.email || '',
+    full_name: '',
+    email: '',
+    company_name: '',
+    role: '',
   })
+  const [profileLoading, setProfileLoading] = useState(false)
+
+  const [companyLoading, setCompanyLoading] = useState(false)
+  const [companySaving, setCompanySaving] = useState(false)
   const [companyForm, setCompanyForm] = useState({
-    name: company?.name || '',
+    name: '',
+    industry: '',
+    website: '',
+    phone: '',
+    address: '',
   })
 
   const [brandingLoading, setBrandingLoading] = useState(true)
@@ -123,6 +131,51 @@ export default function SettingsPage() {
   useEffect(() => {
     void loadBranding()
   }, [loadBranding])
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        setProfileLoading(true)
+        const res = await apiFetch<{
+          profile: { full_name: string; email: string; company_name: string; role: string }
+        }>('/api/settings/profile')
+        setProfileForm({
+          full_name: res.profile.full_name ?? '',
+          email: res.profile.email ?? '',
+          company_name: res.profile.company_name ?? '',
+          role: res.profile.role ?? '',
+        })
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Could not load profile settings')
+      } finally {
+        setProfileLoading(false)
+      }
+    }
+    void loadProfile()
+  }, [])
+
+  useEffect(() => {
+    const loadCompany = async () => {
+      try {
+        setCompanyLoading(true)
+        const res = await apiFetch<{
+          company: { name: string; industry: string | null; website: string | null; phone: string | null; address: string | null }
+        }>('/api/settings/company')
+        setCompanyForm({
+          name: res.company.name ?? '',
+          industry: res.company.industry ?? '',
+          website: res.company.website ?? '',
+          phone: res.company.phone ?? '',
+          address: res.company.address ?? '',
+        })
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Could not load company settings')
+      } finally {
+        setCompanyLoading(false)
+      }
+    }
+    void loadCompany()
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -276,12 +329,41 @@ export default function SettingsPage() {
     setBranding((prev) => ({ ...prev, logo_url: freshLogoUrl }))
   }, [])
 
-  const handleSaveProfile = () => {
-    toast.success('Profile updated successfully')
+  const handleSaveProfile = async () => {
+    try {
+      await apiFetch('/api/settings/profile', {
+        method: 'PUT',
+        json: {
+          full_name: profileForm.full_name,
+          email: profileForm.email,
+          company_name: profileForm.company_name,
+        },
+      })
+      toast.success('Profile updated successfully')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update profile')
+    }
   }
 
-  const handleSaveCompany = () => {
-    toast.success('Company settings updated')
+  const handleSaveCompany = async () => {
+    try {
+      setCompanySaving(true)
+      await apiFetch('/api/settings/company', {
+        method: 'PUT',
+        json: {
+          name: companyForm.name,
+          industry: companyForm.industry?.trim() || null,
+          website: companyForm.website?.trim() || null,
+          phone: companyForm.phone?.trim() || null,
+          address: companyForm.address?.trim() || null,
+        },
+      })
+      toast.success('Company settings updated')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update company settings')
+    } finally {
+      setCompanySaving(false)
+    }
   }
 
   const handleSaveBranding = async () => {
@@ -455,6 +537,25 @@ export default function SettingsPage() {
                   <CardDescription>Manage your personal information</CardDescription>
                 </CardHeader>
                 <CardContent>
+                  <div className="mb-6 flex items-center gap-4">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-sm font-semibold text-foreground">
+                      {(profileForm.full_name || profileForm.email || 'U')
+                        .trim()
+                        .slice(0, 1)
+                        .toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-foreground">
+                        {profileForm.full_name || '—'}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">{profileForm.email || '—'}</p>
+                      {profileForm.role ? (
+                        <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          {profileForm.role}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
                   <form
                     onSubmit={(e) => {
                       e.preventDefault()
@@ -466,8 +567,9 @@ export default function SettingsPage() {
                         <FieldLabel htmlFor="profile-name">Full Name</FieldLabel>
                         <Input
                           id="profile-name"
-                          value={profileForm.name}
-                          onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                          value={profileForm.full_name}
+                          onChange={(e) => setProfileForm({ ...profileForm, full_name: e.target.value })}
+                          disabled={profileLoading}
                         />
                       </Field>
                       <Field>
@@ -477,7 +579,21 @@ export default function SettingsPage() {
                           type="email"
                           value={profileForm.email}
                           onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
+                          disabled={profileLoading}
                         />
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="profile-company">Company</FieldLabel>
+                        <Input
+                          id="profile-company"
+                          value={profileForm.company_name}
+                          onChange={(e) => setProfileForm({ ...profileForm, company_name: e.target.value })}
+                          disabled={profileLoading}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="profile-role">Role</FieldLabel>
+                        <Input id="profile-role" value={profileForm.role} disabled />
                       </Field>
                     </FieldGroup>
                     <div className="mt-6">
@@ -495,10 +611,22 @@ export default function SettingsPage() {
                   <CardDescription>Manage your company information</CardDescription>
                 </CardHeader>
                 <CardContent>
+                  <div className="mb-6 flex items-center gap-4">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted text-foreground">
+                      <Building2 className="h-6 w-6" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-foreground">{companyForm.name || '—'}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {companyForm.industry || 'Organization details'}
+                      </p>
+                    </div>
+                  </div>
+
                   <form
                     onSubmit={(e) => {
                       e.preventDefault()
-                      handleSaveCompany()
+                      void handleSaveCompany()
                     }}
                   >
                     <FieldGroup>
@@ -507,28 +635,52 @@ export default function SettingsPage() {
                         <Input
                           id="company-name"
                           value={companyForm.name}
-                          onChange={(e) => setCompanyForm({ ...companyForm, name: e.target.value })}
+                          onChange={(e) => setCompanyForm((p) => ({ ...p, name: e.target.value }))}
+                          disabled={companyLoading || companySaving}
                         />
                       </Field>
                       <Field>
-                        <FieldLabel>Subscription Plan</FieldLabel>
+                        <FieldLabel htmlFor="company-industry">Industry</FieldLabel>
                         <Input
-                          value={
-                            subscriptionTier
-                              ? subscriptionTier.charAt(0).toUpperCase() + subscriptionTier.slice(1)
-                              : ''
-                          }
-                          disabled
+                          id="company-industry"
+                          value={companyForm.industry}
+                          onChange={(e) => setCompanyForm((p) => ({ ...p, industry: e.target.value }))}
+                          disabled={companyLoading || companySaving}
                         />
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          <a href="/billing" className="text-primary hover:underline">
-                            Manage your subscription
-                          </a>
-                        </p>
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="company-website">Website</FieldLabel>
+                        <Input
+                          id="company-website"
+                          value={companyForm.website}
+                          onChange={(e) => setCompanyForm((p) => ({ ...p, website: e.target.value }))}
+                          disabled={companyLoading || companySaving}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="company-phone">Phone</FieldLabel>
+                        <Input
+                          id="company-phone"
+                          value={companyForm.phone}
+                          onChange={(e) => setCompanyForm((p) => ({ ...p, phone: e.target.value }))}
+                          disabled={companyLoading || companySaving}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="company-address">Address</FieldLabel>
+                        <Input
+                          id="company-address"
+                          value={companyForm.address}
+                          onChange={(e) => setCompanyForm((p) => ({ ...p, address: e.target.value }))}
+                          disabled={companyLoading || companySaving}
+                        />
                       </Field>
                     </FieldGroup>
+
                     <div className="mt-6">
-                      <Button type="submit">Save Changes</Button>
+                      <Button type="submit" disabled={companyLoading || companySaving}>
+                        {companySaving ? 'Saving...' : 'Save Changes'}
+                      </Button>
                     </div>
                   </form>
                 </CardContent>

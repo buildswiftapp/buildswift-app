@@ -51,8 +51,8 @@ export async function POST(req: Request) {
   })
   if (uploadError) return serverError(uploadError.message)
 
-  const { data: publicData } = admin.storage.from(bucket).getPublicUrl(storagePath)
-  const publicUrl = publicData.publicUrl || storagePath
+  const { data: signed } = await admin.storage.from(bucket).createSignedUrl(storagePath, 60 * 60)
+  const signedUrl = signed?.signedUrl || null
 
   const supabase = admin ?? (await createSupabaseServerClient())
   if (!supabase) return serverError('Supabase is not configured')
@@ -64,11 +64,11 @@ export async function POST(req: Request) {
     accountId: auth.accountId,
     company_name: existing.data?.company_name ?? null,
     primary_color: existing.data?.primary_color ?? null,
-    logo_url: publicUrl,
+    logo_url: storagePath,
   })
   if (error) return serverError(error.message)
 
-  return ok({ logo_url: data?.logo_url ?? publicUrl })
+  return ok({ logo_url: (signedUrl ? `${signedUrl}${signedUrl.includes('?') ? '&' : '?'}v=${Date.now()}` : null) })
 }
 
 export async function DELETE(req: Request) {

@@ -493,7 +493,7 @@ function DocumentsContent() {
                             {doc.title}
                           </Link>
                           <p className="truncate text-xs text-muted-foreground">
-                            <span className="text-sm font-normal uppercase tracking-wide text-foreground">
+                            <span className="font-normal uppercase tracking-wide text-muted-foreground">
                               {doc.doc_type.replace('_', ' ')}
                             </span>
                             <span className="mx-1">•</span>

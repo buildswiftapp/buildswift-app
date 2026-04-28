@@ -41,7 +41,26 @@ function isProTier(tier: string) {
 }
 
 function isActiveProBilling(state: BillingState) {
-  return isProTier(state.subscriptionTier) && ACTIVE_PRO_STATUSES.has(state.billingStatus)
+  if (!isProTier(state.subscriptionTier)) return false
+  if (!ACTIVE_PRO_STATUSES.has(state.billingStatus)) return false
+  if (!state.currentPeriodEnd) return true
+  const periodEndMs = Date.parse(state.currentPeriodEnd)
+  if (Number.isNaN(periodEndMs)) return true
+  return periodEndMs > Date.now()
+}
+
+function shouldDowngradeExpiredAccount(state: BillingState) {
+  if (!isProTier(state.subscriptionTier)) return false
+  if (!state.currentPeriodEnd) return false
+  const periodEndMs = Date.parse(state.currentPeriodEnd)
+  if (Number.isNaN(periodEndMs) || periodEndMs > Date.now()) return false
+
+  if (state.cancelAt) {
+    const cancelAtMs = Date.parse(state.cancelAt)
+    if (!Number.isNaN(cancelAtMs) && cancelAtMs <= Date.now()) return true
+  }
+
+  return !ACTIVE_PRO_STATUSES.has(state.billingStatus)
 }
 
 async function countCurrentMonthDocumentsFallback(
@@ -52,8 +71,9 @@ async function countCurrentMonthDocumentsFallback(
   const tables = ['rfi_documents', 'submittal_documents', 'change_order_documents']
   let total = 0
   for (const table of tables) {
-    const { count, error } = await supabase
-      .from(table)
+    // Some Supabase client typings in this repo expose `select(columns)` only.
+    // Cast to `any` so we can use the runtime-supported `(columns, options)` overload.
+    const { count, error } = await (supabase.from(table) as any)
       .select('id', { count: 'exact', head: true })
       .eq('account_id', accountId)
       .gte('created_at', startIso)
@@ -71,7 +91,7 @@ export async function getAccountBillingState(supabase: SupabaseLike, accountId: 
     .eq('id', accountId)
     .maybeSingle()
   if (error) throw new Error(error.message)
-  return {
+  const state = {
     subscriptionTier:
       typeof data?.subscription_tier === 'string' && data.subscription_tier.trim()
         ? data.subscription_tier
@@ -86,6 +106,18 @@ export async function getAccountBillingState(supabase: SupabaseLike, accountId: 
         : null,
     cancelAt: typeof data?.cancel_at === 'string' && data.cancel_at.trim() ? data.cancel_at : null,
   }
+
+  if (shouldDowngradeExpiredAccount(state)) {
+    await downgradeAccountToFree(supabase, accountId)
+    return {
+      subscriptionTier: 'free',
+      billingStatus: 'canceled',
+      currentPeriodEnd: null,
+      cancelAt: null,
+    }
+  }
+
+  return state
 }
 
 export async function getMonthlyDocumentUsage(

@@ -30,6 +30,7 @@ export default function BillingPage() {
   const searchParams = useSearchParams()
   const [summary, setSummary] = useState<BillingSummary | null>(null)
   const [loadingSummary, setLoadingSummary] = useState(true)
+  const [fetchingSummaryCount, setFetchingSummaryCount] = useState(0)
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null)
   const [schedulingDowngrade, setSchedulingDowngrade] = useState(false)
   const [cancelingDowngrade, setCancelingDowngrade] = useState(false)
@@ -47,17 +48,53 @@ export default function BillingPage() {
     return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
   }, [summary?.cancel_at])
 
+  const currentPeriodEndLabel = useMemo(() => {
+    if (!summary?.current_period_end) return null
+    const d = new Date(summary.current_period_end)
+    if (Number.isNaN(d.getTime())) return null
+    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+  }, [summary?.current_period_end])
+
+  const withSummarySpinner = async <T,>(fn: () => Promise<T>): Promise<T> => {
+    setFetchingSummaryCount((c) => c + 1)
+    try {
+      return await fn()
+    } finally {
+      setFetchingSummaryCount((c) => Math.max(0, c - 1))
+    }
+  }
+
   const loadBillingSummary = async () => {
-    const data = await apiFetch<BillingSummary>('/api/billing/summary')
-    setSummary(data)
-    return data
+    return await withSummarySpinner(async () => {
+      const data = await apiFetch<BillingSummary>('/api/billing/summary')
+      setSummary(data)
+      return data
+    })
+  }
+
+  const refreshBillingSummaryWithRetry = async (attempts = 4, delayMs = 700) => {
+    return await withSummarySpinner(async () => {
+      for (let i = 0; i < attempts; i += 1) {
+        try {
+          const data = await apiFetch<BillingSummary>('/api/billing/summary')
+          setSummary(data)
+          if (data.tier !== 'free' || data.billing_status === 'active') return data
+        } catch {
+          // Keep retrying to absorb short webhook/db propagation delays.
+        }
+        if (i < attempts - 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, delayMs))
+        }
+      }
+      return null
+    })
   }
 
   useEffect(() => {
     let active = true
     void (async () => {
       try {
-        const data = await apiFetch<BillingSummary>('/api/billing/summary')
+        const data = await withSummarySpinner(() => apiFetch<BillingSummary>('/api/billing/summary'))
         if (active) setSummary(data)
       } catch (e) {
         if (active) toast.error(e instanceof Error ? e.message : 'Failed to load billing summary')
@@ -91,6 +128,7 @@ export default function BillingPage() {
           }>(`/api/billing/checkout-status?session_id=${encodeURIComponent(sessionId)}`)
           if (cancelled) return
           if (result.paid) {
+            await refreshBillingSummaryWithRetry()
             setCheckoutNotice({
               tone: 'success',
               message: 'Payment successful. Your subscription is active.',
@@ -167,12 +205,12 @@ export default function BillingPage() {
     }
   }
 
-  const handleScheduleDowngrade = async () => {
+  const handleScheduleDowngrade = async (toTier: 'free' | 'professional' = 'free') => {
     try {
       setSchedulingDowngrade(true)
       const result = await apiFetch<{ scheduled: boolean; message?: string }>('/api/billing/downgrade', {
         method: 'POST',
-        json: {},
+        json: { toTier },
       })
       await loadBillingSummary()
       toast.success(result.message || 'Downgrade scheduled successfully.')
@@ -202,8 +240,19 @@ export default function BillingPage() {
     }
   }
 
+  const showSpinner = loadingSummary || fetchingSummaryCount > 0
+  const scheduledDowngradeTargetLabel = summary?.tier === 'enterprise' ? 'Professional' : 'Free'
+
   return (
-    <div className="app-page space-y-6">
+    <div className="app-page relative space-y-6">
+      {showSpinner ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/70 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-5 shadow-lg">
+            <div className="h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-slate-700" />
+            <p className="text-sm font-medium text-slate-600">Loading billing data…</p>
+          </div>
+        </div>
+      ) : null}
       <div>
         <h1 className="app-section-title">Billing</h1>
         <p className="app-section-subtitle">Manage subscription, payment details, and invoices.</p>
@@ -223,7 +272,7 @@ export default function BillingPage() {
         {summary?.tier !== 'free' && cancelAtLabel ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             <p>
-              {`Plan: ${currentPlan?.name ?? 'Pro'} (cancels on ${cancelAtLabel}). You keep full Pro access until this date, then your account reverts to Free automatically.`}
+              {`Plan: ${currentPlan?.name ?? 'Pro'} (changes on ${cancelAtLabel}). You keep full ${currentPlan?.name ?? 'Pro'} access until this date, then your account switches to ${scheduledDowngradeTargetLabel} automatically.`}
             </p>
             <div className="mt-2">
               <Button
@@ -232,9 +281,16 @@ export default function BillingPage() {
                 onClick={() => void handleCancelScheduledDowngrade()}
                 disabled={cancelingDowngrade}
               >
-                {cancelingDowngrade ? 'Keeping Pro...' : 'Keep Pro Plan'}
+                {cancelingDowngrade ? 'Canceling...' : `Keep ${currentPlan?.name ?? 'Pro'} Plan`}
               </Button>
             </div>
+          </div>
+        ) : null}
+        {summary?.tier !== 'free' && !cancelAtLabel && currentPeriodEndLabel ? (
+          <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+            <p>
+              {`Plan: ${currentPlan?.name ?? 'Pro'} renews on ${currentPeriodEndLabel}. This is your current billing period expiration date.`}
+            </p>
           </div>
         ) : null}
         <Card className="app-surface">
@@ -356,7 +412,16 @@ export default function BillingPage() {
                       <Button
                         className="w-full"
                         variant="outline"
-                        onClick={() => void handleScheduleDowngrade()}
+                        onClick={() => void handleScheduleDowngrade('free')}
+                        disabled={schedulingDowngrade}
+                      >
+                        {schedulingDowngrade ? 'Scheduling...' : 'Downgrade'}
+                      </Button>
+                    ) : plan.tier === 'professional' && summary?.tier === 'enterprise' ? (
+                      <Button
+                        className="w-full"
+                        variant="outline"
+                        onClick={() => void handleScheduleDowngrade('professional')}
                         disabled={schedulingDowngrade}
                       >
                         {schedulingDowngrade ? 'Scheduling...' : 'Downgrade'}
@@ -380,49 +445,7 @@ export default function BillingPage() {
           </div>
         </div>
 
-        <Card className="app-surface">
-          <CardHeader>
-            <CardTitle>Payment Method</CardTitle>
-            <CardDescription>Manage your payment information</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-4 rounded-xl border border-border p-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted">
-                <CreditCard className="h-6 w-6" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium">Manage payment method in Stripe</p>
-                <p className="text-sm text-muted-foreground">Open the billing portal to update cards and invoices</p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void openPortal()}
-                disabled={openingPortal}
-              >
-                {openingPortal ? 'Opening...' : 'Update'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="app-surface">
-          <CardHeader>
-            <CardTitle>Billing History</CardTitle>
-            <CardDescription>View invoices directly in Stripe Billing Portal</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between rounded-xl border border-border p-4">
-              <p className="text-sm text-muted-foreground">
-                Invoices and receipts are available in Stripe portal.
-              </p>
-              <Button variant="outline" size="sm" onClick={() => void openPortal()} disabled={openingPortal}>
-                <Download className="mr-2 h-4 w-4" />
-                {openingPortal ? 'Opening...' : 'Open Invoices'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Payment Method + Billing History removed per request */}
     </div>
   )
 }

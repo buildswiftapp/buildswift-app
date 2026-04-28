@@ -21,12 +21,21 @@ export async function GET(req: Request) {
   const { data, error } = await getAccountBranding(supabase, auth.accountId)
   if (error) return serverError(error.message)
 
+  const bucket = process.env.BRANDING_LOGO_BUCKET || process.env.REVIEW_SIGNATURES_BUCKET || 'document-attachments'
+  const logoRef = data?.logo_url ?? null
+  let logoUrlOut: string | null = logoRef
+  if (logoRef && !logoRef.startsWith('http') && !logoRef.startsWith('data:')) {
+    const { data: signed } = await (supabase as any).storage.from(bucket).createSignedUrl(logoRef, 60 * 60)
+    const signedUrl = signed?.signedUrl || null
+    logoUrlOut = signedUrl ? `${signedUrl}${signedUrl.includes('?') ? '&' : '?'}v=${Date.now()}` : null
+  }
+
   return ok({
     branding: data
       ? {
           company_name: data.company_name,
           primary_color: data.primary_color,
-          logo_url: data.logo_url,
+          logo_url: logoUrlOut,
         }
       : {
           company_name: null,

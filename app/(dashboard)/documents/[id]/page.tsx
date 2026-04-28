@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   Download,
   Eye,
+  Plus,
   Save,
   Trash2,
   Upload,
@@ -84,6 +85,13 @@ interface LocalAttachment {
   id: string
   name: string
   size: string
+}
+
+interface CostItemDraft {
+  id: string
+  description: string
+  quantity: string
+  unitPrice: string
 }
 
 function formatBytes(bytes: number): string {
@@ -164,6 +172,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     notes: '',
   })
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
+  const [costItems, setCostItems] = useState<CostItemDraft[]>([])
 
   const [isSaving, setIsSaving] = useState(false)
   const [openingPdfDetails, setOpeningPdfDetails] = useState(false)
@@ -211,6 +220,18 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             notes: s.notes,
           })
           setAttachments(initialAttachments)
+          // Restore cost breakdown line items from metadata
+          const savedItems = Array.isArray(meta.costBreakdownItems) ? meta.costBreakdownItems : []
+          if (savedItems.length) {
+            setCostItems(
+              savedItems.map((item: Record<string, unknown>, i: number) => ({
+                id: `ci-loaded-${i}-${Date.now()}`,
+                description: String(item.description ?? ''),
+                quantity: String(item.quantity ?? '1'),
+                unitPrice: String(item.unitPrice ?? '0'),
+              }))
+            )
+          }
         }
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to load document')
@@ -230,7 +251,31 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
   const scheduleLabel = co.scheduleNoImpact
     ? 'No Impact'
     : co.scheduleImpactText.trim() || '—'
-  const costNumeric = parseMoneyInput(co.costImpact)
+  const normalizedCostItems = costItems.map((item) => {
+    const qty = Math.max(0, Number.parseFloat(item.quantity || '0') || 0)
+    const unit = parseMoneyInput(item.unitPrice)
+    return { ...item, qty, unit, lineTotal: qty * unit }
+  })
+  const costBreakdownTotal = normalizedCostItems.reduce((sum, row) => sum + row.lineTotal, 0)
+  const hasCostBreakdown = normalizedCostItems.some(
+    (row) => row.description.trim() || row.qty !== 0 || row.unit !== 0
+  )
+  const costNumeric = hasCostBreakdown ? costBreakdownTotal : parseMoneyInput(co.costImpact)
+
+  useEffect(() => {
+    if (!hasCostBreakdown) return
+    const next = costBreakdownTotal ? formatUsd(costBreakdownTotal) : '0'
+    setCo((prev) => (prev.costImpact === next ? prev : { ...prev, costImpact: next }))
+  }, [costBreakdownTotal, hasCostBreakdown])
+
+  const addCostItem = () =>
+    setCostItems((prev) => [
+      ...prev,
+      { id: `ci-${Date.now()}-${Math.random().toString(16).slice(2)}`, description: '', quantity: '1', unitPrice: '0' },
+    ])
+  const removeCostItem = (id: string) => setCostItems((prev) => prev.filter((i) => i.id !== id))
+  const updateCostItem = (id: string, patch: Partial<CostItemDraft>) =>
+    setCostItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)))
 
   const hintClass = 'mt-1.5 text-xs text-muted-foreground'
   const normalizedStatus =
@@ -377,6 +422,15 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       scheduleLabel,
       notes: co.notes,
     })
+    const costBreakdownRows = normalizedCostItems
+      .filter((r) => r.description.trim() || r.qty !== 0 || r.unit !== 0)
+      .map((r) => ({
+        description: r.description.trim() || '—',
+        quantity: r.qty,
+        unitPrice: r.unit,
+        total: r.lineTotal,
+      }))
+
     await savePatch({
       title: co.title,
       doc_number: co.changeOrderNumber,
@@ -384,6 +438,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       metadata: {
         reason: reasonLabel,
         proposedAmount: costNumeric,
+        costBreakdownItems: costBreakdownRows.length ? costBreakdownRows : undefined,
         changeOrderNumber: co.changeOrderNumber,
         changeOrderDate: co.date,
         scheduleImpact: scheduleLabel,
@@ -463,6 +518,12 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
               >
                 {finalStatusLabel}
               </span>
+            ) : null}
+            {normalizedStatus === 'approved' ? (
+              <Button onClick={handleExportPdf} disabled={exportingPdf} className="shrink-0 gap-2 rounded-xl px-4">
+                <Download className="h-4 w-4" />
+                {exportingPdf ? 'Exporting...' : 'Export to PDF'}
+              </Button>
             ) : null}
             <Button
               variant="outline"
@@ -655,6 +716,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                         onChange={(e) => setCo((p) => ({ ...p, costImpact: e.target.value }))}
                         className="pl-7 pr-14"
                         placeholder="8,750.00"
+                        readOnly={hasCostBreakdown}
                       />
                       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
                         USD
@@ -686,6 +748,89 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                         aria-label="Schedule impact description"
                       />
                     </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {docType === 'change_order' ? (
+              <div className={formCardClassName()}>
+                <div className="mb-5 flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-semibold text-foreground">Cost Breakdown</h2>
+                    <p className="text-sm text-muted-foreground">Update line items for this change order</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="shrink-0 gap-2"
+                    onClick={addCostItem}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add Item
+                  </Button>
+                </div>
+
+                <div className="space-y-3">
+                  {normalizedCostItems.map((row) => (
+                    <div key={row.id} className="rounded-lg border border-border bg-background p-4">
+                      <div className="flex items-center gap-3">
+                        <Input
+                          value={row.description}
+                          onChange={(e) => updateCostItem(row.id, { description: e.target.value })}
+                          placeholder="Description"
+                          className="flex-1"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeCostItem(row.id)}
+                          className="rounded-md p-2 text-destructive transition-colors hover:bg-destructive/10"
+                          aria-label="Remove cost item"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <div>
+                          <label className={capLabel}>Quantity</label>
+                          <Input
+                            inputMode="decimal"
+                            value={row.quantity}
+                            onChange={(e) => updateCostItem(row.id, { quantity: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className={capLabel}>Unit Price ($)</label>
+                          <Input
+                            inputMode="decimal"
+                            value={row.unitPrice}
+                            onChange={(e) => updateCostItem(row.id, { unitPrice: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className={capLabel}>Total</label>
+                          <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground">
+                            {row.lineTotal ? `$${formatUsd(row.lineTotal)}` : '$0'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  {normalizedCostItems.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-border bg-muted/40 p-6 text-center text-sm text-muted-foreground">
+                      No items yet. Click{' '}
+                      <span className="font-semibold text-foreground">Add Item</span> to create your first line item.
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 rounded-lg bg-muted/60 px-4 py-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-foreground">Total Cost</p>
+                    <p className="text-lg font-bold text-[#f97316]">
+                      {costBreakdownTotal ? `$${formatUsd(costBreakdownTotal)}` : '$0'}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -881,17 +1026,6 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                       <Eye className="h-4 w-4" />
                       {openingPdfDetails ? 'Opening PDF...' : 'View PDF Details'}
                     </Button>
-                    {normalizedStatus === 'approved' ? (
-                      <Button
-                        type="button"
-                        onClick={handleExportPdf}
-                        disabled={exportingPdf}
-                        className="w-full justify-start gap-2"
-                      >
-                        <Download className="h-4 w-4" />
-                        {exportingPdf ? 'Exporting...' : 'Export to PDF'}
-                      </Button>
-                    ) : null}
                   </div>
                 </div>
                 {docType === 'change_order' ? (
@@ -921,16 +1055,6 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                   </>
                 ) : null}
               </div>
-            </div>
-
-            <div className={formCardClassName()}>
-              <h3 className="mb-3 text-lg font-semibold text-foreground">Linked Documents</h3>
-              <p className="mb-4 text-sm text-muted-foreground">
-                Create downstream change orders from this review outcome when needed.
-              </p>
-              <Button asChild variant="outline" className="w-full">
-                <Link href={`/change-orders/new?source_document_id=${id}`}>Create Change Order</Link>
-              </Button>
             </div>
 
             {docType === 'change_order' ? (

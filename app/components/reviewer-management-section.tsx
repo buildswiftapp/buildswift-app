@@ -45,6 +45,26 @@ export function ReviewerManagementSection({
   const containerRef = useRef<HTMLDivElement>(null)
   const isCreate = layout === 'create'
 
+  const fetchSuggestions = useCallback(
+    async (q: string, signal: AbortSignal) => {
+      setSuggestionsLoading(true)
+      try {
+        const res = await apiFetch<{ emails: string[] }>(
+          '/api/reviewers/suggestions?q=' + encodeURIComponent(q),
+          { signal }
+        )
+        const filtered = (res.emails ?? []).filter((e) => !ccReviewers.includes(e.toLowerCase()))
+        if (!signal.aborted) setSuggestions(filtered)
+      } catch {
+        if (signal.aborted) return
+        setSuggestions([])
+      } finally {
+        setSuggestionsLoading(false)
+      }
+    },
+    [ccReviewers]
+  )
+
   const addReviewer = useCallback(() => {
     const email = ccInput.trim().toLowerCase()
     if (!email) return
@@ -109,37 +129,18 @@ export function ReviewerManagementSection({
 
   useEffect(() => {
     const q = ccInput.trim()
-    if (q.length < 1) {
-      setSuggestions([])
-      setSuggestionsLoading(false)
-      return
-    }
+    if (q.length < 1) return
 
     const ac = new AbortController()
     const t = window.setTimeout(() => {
-      void (async () => {
-        setSuggestionsLoading(true)
-        try {
-          const res = await apiFetch<{ emails: string[] }>(
-            '/api/reviewers/suggestions?q=' + encodeURIComponent(q),
-            { signal: ac.signal }
-          )
-          const filtered = (res.emails ?? []).filter((e) => !ccReviewers.includes(e.toLowerCase()))
-          if (!ac.signal.aborted) setSuggestions(filtered)
-        } catch {
-          if (ac.signal.aborted) return
-          setSuggestions([])
-        } finally {
-          setSuggestionsLoading(false)
-        }
-      })()
+      void fetchSuggestions(q, ac.signal)
     }, SUGGEST_DEBOUNCE_MS)
 
     return () => {
       window.clearTimeout(t)
       ac.abort()
     }
-  }, [ccInput, ccReviewers])
+  }, [ccInput, fetchSuggestions])
 
   useEffect(() => {
     function onDocMouseDown(e: MouseEvent) {
@@ -171,6 +172,11 @@ export function ReviewerManagementSection({
             <Input
               value={ccInput}
               onChange={(e) => setCcInput(e.target.value)}
+              onFocus={() => {
+                if (ccInput.trim().length > 0) return
+                const ac = new AbortController()
+                void fetchSuggestions('', ac.signal)
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault()

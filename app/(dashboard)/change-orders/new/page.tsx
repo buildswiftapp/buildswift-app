@@ -9,6 +9,7 @@ import {
   X,
   FileText,
   Save,
+  Plus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -60,6 +61,13 @@ interface LocalAttachment {
   size: string
   file?: File
   url?: string
+}
+
+type CostItemDraft = {
+  id: string
+  description: string
+  quantity: string
+  unitPrice: string
 }
 
 type ApiProject = {
@@ -136,10 +144,13 @@ function NewChangeOrderContent() {
     costImpact: '',
     scheduleNoImpact: false,
     scheduleImpactText: '',
+    priority: 'normal' as 'low' | 'normal' | 'urgent',
+    dueDate: '',
     notes: '',
   })
 
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
+  const [costItems, setCostItems] = useState<CostItemDraft[]>([])
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [reviewConfig, setReviewConfig] = useState<{
@@ -178,7 +189,49 @@ function NewChangeOrderContent() {
     ? 'No Impact'
     : formData.scheduleImpactText.trim() || '—'
 
-  const costNumeric = parseMoneyInput(formData.costImpact)
+  const normalizedCostItems = costItems.map((item) => {
+    const qty = Math.max(0, Number.parseFloat(item.quantity || '0') || 0)
+    const unit = parseMoneyInput(item.unitPrice)
+    return {
+      ...item,
+      qty,
+      unit,
+      lineTotal: qty * unit,
+    }
+  })
+  const costBreakdownTotal = normalizedCostItems.reduce((sum, row) => sum + row.lineTotal, 0)
+
+  const hasCostBreakdown =
+    normalizedCostItems.some(
+      (row) =>
+        row.description.trim() ||
+        (row.qty !== 0 || row.unit !== 0)
+    )
+
+  const costNumeric = hasCostBreakdown ? costBreakdownTotal : parseMoneyInput(formData.costImpact)
+
+  useEffect(() => {
+    if (!hasCostBreakdown) return
+    const next = costBreakdownTotal ? formatUsd(costBreakdownTotal) : '0'
+    setFormData((prev) => (prev.costImpact === next ? prev : { ...prev, costImpact: next }))
+  }, [costBreakdownTotal, hasCostBreakdown])
+
+  const addCostItem = () => {
+    setCostItems((prev) => [
+      ...prev,
+      {
+        id: `ci-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        description: '',
+        quantity: '1',
+        unitPrice: '0',
+      },
+    ])
+  }
+
+  const removeCostItem = (id: string) => setCostItems((prev) => prev.filter((i) => i.id !== id))
+
+  const updateCostItem = (id: string, patch: Partial<CostItemDraft>) =>
+    setCostItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)))
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -205,6 +258,10 @@ function NewChangeOrderContent() {
     }))
     setAttachments((prev) => [...prev, ...next])
   }, [])
+
+  // New Change Orders should never show placeholder "0 B" rows.
+  // Only attachments with an actual File selected in this session are considered valid.
+  const pendingUploadAttachments = attachments.filter((a) => Boolean(a.file))
 
   const removeAttachment = (id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id))
@@ -260,7 +317,7 @@ function NewChangeOrderContent() {
 
   const createDocument = async (asDraft: boolean) => {
     const uploaded = await uploadPendingAttachments({
-      attachments,
+      attachments: pendingUploadAttachments,
       accountIdHint: formData.projectId,
     })
     const docAttachments: DocAttachment[] = uploaded.map((a) => ({
@@ -283,6 +340,15 @@ function NewChangeOrderContent() {
       notes: formData.notes,
     })
 
+    const costBreakdownRows = normalizedCostItems
+      .filter((r) => r.description.trim() || r.qty !== 0 || r.unit !== 0)
+      .map((r) => ({
+        description: r.description.trim() || '—',
+        quantity: r.qty,
+        unitPrice: r.unit,
+        total: r.lineTotal,
+      }))
+
     const created = await apiFetch<{ document: { id: string } }>('/api/documents', {
       method: 'POST',
       json: {
@@ -295,9 +361,12 @@ function NewChangeOrderContent() {
         metadata: {
           reason: reasonLabel,
           proposedAmount: costNumeric,
+          costBreakdownItems: costBreakdownRows.length ? costBreakdownRows : undefined,
           changeOrderNumber: formData.changeOrderNumber,
           changeOrderDate: formData.date,
           scheduleImpact: scheduleLabel,
+          priority: formData.priority,
+          actionNeededBy: formData.dueDate || undefined,
           notes: formData.notes || undefined,
           attachments: docAttachments,
         },
@@ -493,6 +562,7 @@ function NewChangeOrderContent() {
                       onChange={(e) => setFormData((p) => ({ ...p, costImpact: e.target.value }))}
                       className="pl-7 pr-14"
                       placeholder="8,750.00"
+                      readOnly={hasCostBreakdown}
                     />
                     <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
                       USD
@@ -526,6 +596,87 @@ function NewChangeOrderContent() {
                       aria-label="Schedule impact description"
                     />
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <div className={formCardClassName()}>
+              <div className="mb-5 flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-[#0f172a]">Cost Breakdown</h2>
+                  <p className="text-sm text-[#64748b]">Update line items for this change order</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0 gap-2 rounded-lg border-[#e2e8f0] bg-white px-4 text-[#0f172a] shadow-sm hover:bg-[#f8fafc]"
+                  onClick={addCostItem}
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Item
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {normalizedCostItems.map((row) => (
+                  <div key={row.id} className="rounded-lg border border-[#e2e8f0] bg-white p-4">
+                    <div className="flex items-center gap-3">
+                      <Input
+                        value={row.description}
+                        onChange={(e) => updateCostItem(row.id, { description: e.target.value })}
+                        placeholder="Description"
+                        className="flex-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeCostItem(row.id)}
+                        className="rounded-md p-2 text-[#ef4444] transition-colors hover:bg-red-50"
+                        aria-label="Remove cost item"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div>
+                        <label className={capLabel}>Quantity</label>
+                        <Input
+                          inputMode="decimal"
+                          value={row.quantity}
+                          onChange={(e) => updateCostItem(row.id, { quantity: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className={capLabel}>Unit Price ($)</label>
+                        <Input
+                          inputMode="decimal"
+                          value={row.unitPrice}
+                          onChange={(e) => updateCostItem(row.id, { unitPrice: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className={capLabel}>Total</label>
+                        <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground">
+                          {row.lineTotal ? `$${formatUsd(row.lineTotal)}` : '$0'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                {normalizedCostItems.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-[#cbd5e1] bg-[#f8fafc] p-6 text-center text-sm text-[#64748b]">
+                    No items yet. Click <span className="font-semibold text-[#0f172a]">Add Item</span> to create your first line item.
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-4 rounded-lg bg-[#f1f5f9] px-4 py-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-[#0f172a]">Total Cost</p>
+                  <p className="text-lg font-bold text-[#f97316]">
+                    {costBreakdownTotal ? `$${formatUsd(costBreakdownTotal)}` : '$0'}
+                  </p>
                 </div>
               </div>
             </div>
@@ -574,7 +725,7 @@ function NewChangeOrderContent() {
                 accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
               />
               <div className="space-y-2">
-                {attachments.map((file) => (
+                {pendingUploadAttachments.map((file) => (
                   <div
                     key={file.id}
                     className="flex items-center justify-between rounded-lg border border-[#e2e8f0] bg-[#f1f5f9] px-4 py-3"
@@ -668,6 +819,37 @@ function NewChangeOrderContent() {
               </h3>
               <div className="space-y-4">
                 <div>
+                  <label className={capLabel}>Priority level</label>
+                  <div className="grid grid-cols-3 gap-3">
+                    {(['low', 'normal', 'urgent'] as const).map((level) => {
+                      const active = formData.priority === level
+                      return (
+                        <button
+                          key={level}
+                          type="button"
+                          onClick={() => setFormData((p) => ({ ...p, priority: level }))}
+                          className={cn(
+                            'h-10 rounded-xl border text-sm font-semibold transition-colors',
+                            active
+                              ? 'border-[#0f172a] bg-[#0f172a] text-white'
+                              : 'border-[#e2e8f0] bg-white text-[#334155] hover:bg-[#f8fafc]'
+                          )}
+                        >
+                          {level.charAt(0).toUpperCase() + level.slice(1)}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                <div className="border-t border-[#e2e8f0] pt-4">
+                  <label className={capLabel}>Due date</label>
+                  <Input
+                    type="date"
+                    value={formData.dueDate}
+                    onChange={(e) => setFormData((p) => ({ ...p, dueDate: e.target.value }))}
+                  />
+                </div>
+                <div>
                   <label className={capLabel}>Reason</label>
                   <p className="text-sm font-medium text-[#0f172a]">{reasonLabel}</p>
                 </div>
@@ -732,6 +914,26 @@ function NewChangeOrderContent() {
                   <p className="text-xs text-muted-foreground">Schedule Impact</p>
                   <p className="text-2xl font-bold tracking-tight" style={{ color: NAVY }}>
                     {scheduleLabel}
+                  </p>
+                </div>
+
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">Priority</p>
+                  <p className="text-sm font-semibold" style={{ color: NAVY }}>
+                    {formData.priority.charAt(0).toUpperCase() + formData.priority.slice(1)}
+                  </p>
+                </div>
+
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">Due Date</p>
+                  <p className="text-sm font-semibold" style={{ color: NAVY }}>
+                    {formData.dueDate
+                      ? new Date(formData.dueDate + 'T12:00:00').toLocaleDateString('en-US', {
+                          month: 'long',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })
+                      : '—'}
                   </p>
                 </div>
               </div>

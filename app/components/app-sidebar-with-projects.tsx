@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
 import {
   LayoutDashboard,
   FolderKanban,
@@ -12,15 +11,14 @@ import {
   Settings,
   CreditCard,
   HelpCircle,
-  ChevronLeft,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-const SIDEBAR_BG = '#f5f6fb'
+const SIDEBAR_BG = '#001437'
 const SIDEBAR_ACTIVE = '#3f63f3'
 
 const iconProps = {
-  className: 'h-5 w-5 shrink-0 text-[#6b7280]',
+  className: 'h-5 w-5 shrink-0 text-white/80',
   strokeWidth: 1.5,
 } as const
 
@@ -38,16 +36,13 @@ const bottomNavigation = [
   { name: 'Help', href: '/help', icon: HelpCircle },
 ]
 
-export function AppSidebarWithProjects() {
+type AppSidebarWithProjectsProps = {
+  collapsed: boolean
+}
+
+export function AppSidebarWithProjects({ collapsed }: AppSidebarWithProjectsProps) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const [collapsed, setCollapsed] = useState(false)
-
-  useEffect(() => {
-    if (pathname === '/documents/new' || pathname?.startsWith('/documents/new')) {
-      setCollapsed(true)
-    }
-  }, [pathname])
 
   const isActive = (item: (typeof navigation)[0]) => {
     if (item.query) {
@@ -59,7 +54,7 @@ export function AppSidebarWithProjects() {
 
   const row = (narrow: boolean, extra?: string) =>
     cn(
-      'flex items-center gap-3 rounded-xl py-2.5 text-sm font-medium text-[#3a4255] transition-colors duration-200',
+      'flex items-center gap-3 rounded-xl py-2.5 text-sm font-medium text-white/90 transition-colors duration-200',
       narrow ? 'justify-center px-2' : 'px-3',
       extra
     )
@@ -68,23 +63,10 @@ export function AppSidebarWithProjects() {
     <aside
       style={{ backgroundColor: SIDEBAR_BG }}
       className={cn(
-        'relative flex h-screen flex-col border-r border-sidebar-border text-sidebar-foreground transition-[width] duration-300 ease-out',
+        'flex h-screen flex-col border-r border-white/10 text-white transition-[width] duration-300 ease-out',
         collapsed ? 'w-[4.25rem]' : 'w-[15.5rem]'
       )}
     >
-      <button
-        type="button"
-        onClick={() => setCollapsed((prev) => !prev)}
-        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        className="absolute top-1/2 -right-3 z-20 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-white text-[#6b7280] shadow-sm transition-all hover:bg-muted hover:border-border hover:text-foreground hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-      >
-        <ChevronLeft
-          className={cn('h-4 w-4 transition-transform duration-200', collapsed && 'rotate-180')}
-          strokeWidth={1.8}
-        />
-      </button>
-
       <nav className="flex min-h-0 flex-col gap-1.5 overflow-y-auto px-2.5 pb-4 pt-5">
         {navigation.map((item) => {
           const active = isActive(item)
@@ -96,7 +78,7 @@ export function AppSidebarWithProjects() {
               <div
                 className={cn(
                   row(collapsed),
-                  active ? 'shadow-sm text-white' : 'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                  active ? 'shadow-sm text-white' : 'hover:bg-white/10 hover:text-white'
                 )}
                 style={active ? { backgroundColor: SIDEBAR_ACTIVE } : undefined}
               >
@@ -117,7 +99,7 @@ export function AppSidebarWithProjects() {
         })}
       </nav>
 
-      <div className="border-t border-sidebar-border px-2.5 pb-5 pt-4">
+      <div className="border-t border-white/10 px-2.5 pb-5 pt-4">
         <div className="flex flex-col gap-1">
           {bottomNavigation.map((item) => {
             const active = pathname === item.href
@@ -129,10 +111,10 @@ export function AppSidebarWithProjects() {
                 title={collapsed ? item.name : undefined}
                 className={cn(
                   row(collapsed, 'py-2.5'),
-                  active ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                  active ? 'bg-white/12 text-white' : 'hover:bg-white/10 hover:text-white'
                 )}
               >
-                <Icon {...iconProps} className={cn(iconProps.className, active && 'text-[#2d3b66]')} />
+                <Icon {...iconProps} className={cn(iconProps.className, active && 'text-white')} />
                 {!collapsed && <span className="truncate">{item.name}</span>}
               </Link>
             )

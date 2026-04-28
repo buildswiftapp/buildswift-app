@@ -14,7 +14,7 @@ export async function POST(req: Request) {
   if (!supabase) return serverError('Supabase is not configured')
 
   const { data: account, error } = await (supabase.from('accounts' as any) as any)
-    .select('stripe_subscription_id,cancel_at')
+    .select('stripe_subscription_id,stripe_customer_id,cancel_at,subscription_tier')
     .eq('id', auth.accountId)
     .maybeSingle()
   if (error) return serverError(error.message)
@@ -33,13 +33,33 @@ export async function POST(req: Request) {
       : null
   if (!subscriptionId) return badRequest('No active Stripe subscription found.')
 
+  const customerId =
+    typeof (account as any).stripe_customer_id === 'string' && String((account as any).stripe_customer_id).trim()
+      ? String((account as any).stripe_customer_id).trim()
+      : null
+
   const stripe = getStripeClient()
   if (!stripe) return serverError('Stripe is not configured')
 
   try {
-    const updated = await stripe.subscriptions.update(subscriptionId, {
-      cancel_at_period_end: false,
-    })
+    const currentTier =
+      typeof (account as any).subscription_tier === 'string'
+        ? String((account as any).subscription_tier).trim().toLowerCase()
+        : 'free'
+
+    // If Enterprise -> Professional was scheduled via a Stripe Subscription Schedule, release it.
+    if (currentTier === 'enterprise' && customerId) {
+      const schedules = await stripe.subscriptionSchedules.list({ customer: customerId, limit: 25 })
+      const scheduleForSub = schedules.data.find(
+        (s) => (typeof s.subscription === 'string' ? s.subscription : null) === subscriptionId
+      )
+      if (scheduleForSub && (scheduleForSub.status === 'active' || scheduleForSub.status === 'not_started')) {
+        await stripe.subscriptionSchedules.release(scheduleForSub.id)
+      }
+    }
+
+    // Always ensure any Pro->Free cancel_at_period_end flag is cleared too.
+    const updated = await stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: false })
     const currentPeriodEnd = updated.current_period_end
       ? new Date(updated.current_period_end * 1000).toISOString()
       : null
@@ -66,7 +86,10 @@ export async function POST(req: Request) {
 
     return ok({
       canceled: true,
-      message: 'Scheduled downgrade canceled. Your Pro plan will continue.',
+      message:
+        currentTier === 'enterprise'
+          ? 'Scheduled downgrade canceled. Your Enterprise plan will continue.'
+          : 'Scheduled downgrade canceled. Your Pro plan will continue.',
     })
   } catch (e) {
     return serverError(e instanceof Error ? e.message : 'Failed to cancel scheduled downgrade')
