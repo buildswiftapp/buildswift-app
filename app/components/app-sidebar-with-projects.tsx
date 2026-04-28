@@ -40,6 +40,24 @@ type AppSidebarWithProjectsProps = {
   collapsed: boolean
 }
 
+/** Isometric-style mark to pair with BUILDSWIFT / CONSTRUCTION (see brand lockup). */
+function BuildSwiftLogoMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 44 48" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden>
+      {/* Left block (narrow, angled) */}
+      <path fill="#cbd5e1" d="M3 21 L11 18.5 L11 34.5 L3 34.5 Z" />
+      {/* Center — tall front */}
+      <path fill="#f1f5f9" d="M12 9 L23.5 6 L23.5 35 L12 35 Z" />
+      {/* Center — side / depth */}
+      <path fill="#94a3b8" d="M23.5 6 L31 8.5 L31 35 L23.5 35 Z" />
+      {/* Right block (short) */}
+      <path fill="#64748b" d="M27.5 22.5 L35.5 20.5 L35.5 35 L27.5 35 Z" />
+      {/* Chevron ground / accent */}
+      <path fill="#e2e8f0" d="M1 38 L22 31 L43 38 L22 45 Z" opacity={0.9} />
+    </svg>
+  )
+}
+
 export function AppSidebarWithProjects({ collapsed }: AppSidebarWithProjectsProps) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -67,7 +85,36 @@ export function AppSidebarWithProjects({ collapsed }: AppSidebarWithProjectsProp
         collapsed ? 'w-[4.25rem]' : 'w-[15.5rem]'
       )}
     >
-      <nav className="flex min-h-0 flex-col gap-1.5 overflow-y-auto px-2.5 pb-4 pt-5">
+      <div className="px-2.5 pb-2 pt-4">
+        {!collapsed ? (
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-2.5 rounded-lg px-1 py-1 transition-opacity hover:opacity-95"
+            aria-label="BUILDSWIFT CONSTRUCTION — Home"
+          >
+            <BuildSwiftLogoMark className="h-11 w-11 shrink-0" />
+            <div className="min-w-0 select-none leading-[1.08]">
+              <div className="font-sans text-[13px] font-bold uppercase tracking-tight text-white">
+                BUILDSWIFT
+              </div>
+              <div className="mt-0.5 font-sans text-[8.5px] font-normal uppercase tracking-[0.26em] text-slate-400">
+                CONSTRUCTION
+              </div>
+            </div>
+          </Link>
+        ) : (
+          <Link
+            href="/dashboard"
+            title="BUILDSWIFT CONSTRUCTION"
+            className="flex justify-center py-1"
+            aria-label="BUILDSWIFT CONSTRUCTION — Home"
+          >
+            <BuildSwiftLogoMark className="h-9 w-9 shrink-0" />
+          </Link>
+        )}
+      </div>
+
+      <nav className="flex min-h-0 flex-col gap-1.5 overflow-y-auto px-2.5 pb-4 pt-2">
         {navigation.map((item) => {
           const active = isActive(item)
           const href = item.query ? `${item.href}?${item.query}` : item.href
