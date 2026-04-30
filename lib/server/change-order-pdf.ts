@@ -320,18 +320,18 @@ function buildCostBreakdownRowsPdf(
 }
 
 export async function generateChangeOrderPdfBuffer(input: ChangeOrderPdfInput): Promise<Buffer> {
-  // Change Order PDFs always use the standard BuildSwift header (no account/project branding).
+  // Change Order PDFs intentionally do not apply account/project branding.
   const companyName = 'BuildSwift Construction'
   const logoDataUri = resolveFallbackLogoDataUri()
 
-  const rawAddress = '123 Main Street\nAnytown, USA 12345'
+  const rawAddress = (input.contactAddress || '123 Main Street\nAnytown, USA 12345')
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean)
     .join('\n')
 
-  const phone = '(555) 123-4567'
-  const email = 'info@buildswift.com'
+  const phone = input.contactPhone || '(555) 123-4567'
+  const email = input.contactEmail || 'info@buildswift.com'
 
   const brand = companyName.split(/\s+/)[0]?.toUpperCase() || 'BUILDSWIFT'
   const brandSub = companyName.replace(new RegExp(`^${brand}\\s*`, 'i'), '').trim() || 'CONSTRUCTION'

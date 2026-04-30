@@ -1,6 +1,7 @@
 import React from 'react'
 import { Document, Image, Page, Text, View } from '@react-pdf/renderer'
 import { stripHtmlToPlainParagraphs } from '@/lib/document-html'
+import { PdfHeader } from '@/lib/server/pdf-header'
 
 export type ChangeOrderAttachmentRow = { fileName: string; fileType: string; notes: string }
 
@@ -196,140 +197,30 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
             padding: 7,
           }}
         >
-          {/* Top purple bars */}
-          <View style={{ flexDirection: 'row', marginBottom: 6 }}>
-            <View
-              style={{
-                flex: 1,
-                backgroundColor: PURPLE_DARK,
-                borderTopLeftRadius: 10,
-                borderBottomLeftRadius: 6,
-                height: 32,
-                justifyContent: 'center',
-                alignItems: 'center',
-                marginRight: 6,
-              }}
-            >
-              <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: 900, letterSpacing: 0.6, textTransform: 'uppercase' }}>
-                Change Order
-              </Text>
-            </View>
-            <View
-              style={{
-                width: 130,
-                backgroundColor: PURPLE_DARK,
-                borderTopRightRadius: 10,
-                borderBottomRightRadius: 6,
-                height: 32,
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}
-            >
-              <Text style={{ color: '#ffffff', fontSize: 6.2, fontWeight: 800, textTransform: 'uppercase' }}>Change Order #</Text>
-              <Text style={{ color: '#ffffff', fontSize: 10.2, fontWeight: 900, marginTop: 1 }}>{data.changeOrderNumber}</Text>
-            </View>
-          </View>
-
-          {/* Company header — aligns with Submittal / RFI PDF (neutral card, STATUS pill without inner frame) */}
-          <View
-            style={{
-              borderWidth: 1,
-              borderColor: BORDER,
-              borderRadius: 8,
-              paddingHorizontal: 10,
-              paddingVertical: 8,
-              marginBottom: SECTION_GAP,
-            }}
-          >
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 10 }}>
-                {data.logoDataUri ? (
-                  <Image src={data.logoDataUri} style={{ width: 50, height: 50, objectFit: 'contain' }} />
-                ) : null}
-                <View style={{ marginLeft: data.logoDataUri ? 10 : 0, flexShrink: 1 }}>
-                  <Text style={{ fontSize: 13, fontWeight: 900, color: PURPLE_DARK, letterSpacing: 0.25 }}>
-                    {(data.brand || 'COMPANY').toUpperCase()}
-                  </Text>
-                  {data.brandSub ? (
-                    <Text style={{ fontSize: 7.5, color: MUTED, letterSpacing: 2, marginTop: 1, fontWeight: 700 }}>
-                      {data.brandSub.toUpperCase()}
-                    </Text>
-                  ) : null}
-                </View>
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={{ fontSize: 6.2, fontWeight: 800, color: MUTED, textTransform: 'uppercase', marginBottom: 3 }}>
-                  STATUS
-                </Text>
-                <Text
-                  style={{
-                    fontSize: 7.8,
-                    fontWeight: 900,
-                    paddingVertical: 4,
-                    paddingHorizontal: 14,
-                    borderRadius: 10,
-                    textTransform: 'uppercase',
-                    ...statusStyle,
-                  }}
-                >
-                  {data.summaryStatus}
-                </Text>
-              </View>
-            </View>
-
-            {/* Two-column company / project block — Summit-style hierarchy (purple PROJECT label + bold navies) */}
-            <View style={{ marginTop: 8, flexDirection: 'row' }}>
-              <View style={{ flex: 1, paddingRight: 10 }}>
-                <Text style={{ fontSize: 10, fontWeight: 900, color: TEXT_DARK, marginBottom: 2 }}>
-                  {clampText(data.brand, 56)}
-                </Text>
-                {formatAddressLines(data.contactAddress).map((line, idx) => (
-                  <Text key={`c-${idx}`} style={{ fontSize: 8.4, color: TEXT_DARK, lineHeight: 1.25, fontWeight: 400 }}>
-                    {line}
-                  </Text>
-                ))}
-                <Text style={{ fontSize: 8.2, color: TEXT_DARK, marginTop: 3 }}>
-                  {data.contactPhone} {' | '} {data.contactEmail}
-                </Text>
-              </View>
-              <View style={{ width: 1, backgroundColor: BORDER }} />
-              <View style={{ flex: 1, paddingLeft: 10 }}>
-                <Text
-                  style={{
-                    fontSize: LABEL_FONT,
-                    color: PURPLE_DARK,
-                    textTransform: 'uppercase',
-                    marginBottom: 3,
-                    fontWeight: 900,
-                  }}
-                >
-                  PROJECT
-                </Text>
-                <Text style={{ fontSize: 10, fontWeight: 900, color: TEXT_DARK, marginBottom: 2 }}>
-                  {clampText(data.projectName, 48)}
-                </Text>
-                {formatAddressLines(data.projectAddress).map((line, idx) => (
-                  <Text
-                    key={`p-${idx}`}
-                    style={{
-                      fontSize: 8.6,
-                      color: TEXT_DARK,
-                      lineHeight: 1.25,
-                      marginTop: idx === 0 ? 1 : 0,
-                      fontWeight: 400,
-                    }}
-                  >
-                    {line}
-                  </Text>
-                ))}
-              </View>
-            </View>
-          </View>
+            <PdfHeader
+              themeColor={PURPLE_DARK}
+              titleLeft="CHANGE ORDER"
+              numberLabel="CHANGE ORDER #"
+              numberValue={data.changeOrderNumber}
+              logoDataUri={data.logoDataUri}
+              brand={data.brand || 'BuildSwift'}
+              brandSub={data.brandSub || null}
+              statusText={data.summaryStatus}
+              statusStyle={statusStyle as any}
+              contactAddress={data.contactAddress}
+              contactPhone={data.contactPhone}
+              contactEmail={data.contactEmail}
+              projectName={data.projectName}
+              projectAddress={data.projectAddress}
+              mutedColor={MUTED}
+              titleAccentColor={PURPLE_DARK}
+              borderColor={PURPLE_BORDER}
+            />
 
           {/* Date issued / due / from — aligns with Submittal PDF */}
           <View
             style={{
-              marginTop: 8,
+              marginTop: 0,
               marginBottom: SECTION_GAP,
               borderWidth: 1,
               borderColor: BORDER,
