@@ -116,7 +116,7 @@ export async function GET(_req: Request, { params }: Params) {
 
   const { data: cycleRequests } = await privilegedDb
     .from('review_requests')
-    .select('full_name,reviewer_email,decision,decided_at,decision_notes,signature_url,created_at')
+    .select('id,full_name,reviewer_email,decision,decided_at,decision_notes,signature_url,created_at')
     .eq('review_cycle_id', cycleRow.id)
     .order('created_at', { ascending: true })
 
@@ -243,8 +243,13 @@ export async function GET(_req: Request, { params }: Params) {
     typeof metadata.submittedBy === 'string' && metadata.submittedBy.trim() ? metadata.submittedBy.trim() : null
   const submittedBy = submittedByFromMeta || documentAuthorDisplay || null
 
+  // Reviewer-facing PDF should show ONLY this reviewer's activity (not submitter or other reviewers).
+  const viewerRequestId = typeof requestRow.id === 'string' ? requestRow.id : String(requestRow.id ?? '')
+  const viewerRequests = (cycleRequests ?? []).filter((r) => String((r as any).id ?? '') === viewerRequestId)
+  const requestsForLog = viewerRequests.length ? viewerRequests : (cycleRequests ?? [])
+
   const reviewerRows = await Promise.all(
-    (cycleRequests ?? []).map(async (row) => ({
+    requestsForLog.map(async (row) => ({
       reviewerEmail: typeof row.reviewer_email === 'string' && row.reviewer_email.trim() ? row.reviewer_email.trim() : null,
       title:
         (typeof row.full_name === 'string' && row.full_name.trim()) ||
@@ -347,10 +352,7 @@ export async function GET(_req: Request, { params }: Params) {
         ]
       : []
 
-  const approvalRows =
-    document.doc_type === 'submittal' || document.doc_type === 'rfi'
-      ? [...submissionRow, ...reviewerRows]
-      : reviewerRows
+  const approvalRows = reviewerRows
 
   const priority = typeof metadata.priority === 'string' ? metadata.priority : null
   const specSection =
@@ -530,6 +532,7 @@ export async function GET(_req: Request, { params }: Params) {
         contactAddress: accountContactAddress || process.env.REVIEW_PDF_CONTACT_ADDRESS || null,
         contactPhone: accountContactPhone || process.env.REVIEW_PDF_CONTACT_PHONE || null,
         contactEmail: process.env.REVIEW_PDF_CONTACT_EMAIL || null,
+        approvalRows: approvalRows.length ? approvalRows : undefined,
         reviewStatus,
       })
     : isChangeOrder
