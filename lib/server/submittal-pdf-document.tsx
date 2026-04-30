@@ -1,25 +1,25 @@
 import React from 'react'
 import { Document, Image, Page, Text, View } from '@react-pdf/renderer'
+import { stripHtmlToPlainParagraphs } from '@/lib/document-html'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-export type SubmittalApprovalRow = {
-  title: string
-  role: string
-  signature: 'approved' | 'rejected' | 'pending'
-  signatureName?: string | null
-  signatureUrl?: string | null
-  date: string
+export type SubmittalAttachmentRow = {
+  fileName: string
+  fileType: string
   notes: string
 }
 
-export type SubmittalLinkedDoc = {
-  id: string
-  title: string
+export type SubmittalApprovalRow = {
+  name: string
+  role: string
+  action: string
+  date: string
+  notes: string
+  signatureName?: string | null
+  signatureUrl?: string | null
 }
 
 export type SubmittalPdfViewModel = {
-  // Company header
+  // Branding / header
   logoDataUri: string
   brand: string
   brandSub: string
@@ -27,530 +27,505 @@ export type SubmittalPdfViewModel = {
   contactAddress: string
   contactPhone: string
   contactEmail: string
-  // Submittal metadata
+
+  // Header / project info
+  projectName: string
+  projectAddress: string
   submittalNumber: string
   status: string
-  projectName: string
-  projectNo: string
-  date: string
-  contractDate: string
-  submittedBy: string
-  priority: string
-  rfiNo: string
-  actionNeededBy: string
-  specSection: string
-  manufacturer: string
+  dateIssued: string
+  requiredReviewDate: string
+  to: string
+  from: string
+
+  // Summary
   submittalTitle: string
-  // Content sections
-  questionIssue: string
-  attachments: string[]
-  linkedDocuments: SubmittalLinkedDoc[]
-  // Approval
+  submittalType: string
+  priority: string
+
+  // Details
+  detailedDescription: string
+  manufacturerVendor: string
+  materialProductName: string
+  modelNumber: string
+  quantity: string
+
+  // Reference
+  specificationSections: string
+  drawingSheetNumbers: string
+  detailReferences: string
+  relatedRfiNumbers: string
+
+  // Attachments
+  attachments: SubmittalAttachmentRow[]
+
+  // Review / response
+  reviewStatus: string
+  reviewerComments: string
+  reviewedBy: string
+  reviewDate: string
+
+  // Impact
+  costImpact: string
+  scheduleImpact: string
+  impactDescription: string
+
+  // Tracking
+  finalStatus: string
   approvalRows: SubmittalApprovalRow[]
+
   // Footer
   footerNote: string
 }
 
-// ── Palette ───────────────────────────────────────────────────────────────────
+/* Summit-style submittal: dark green headers, yellow status pills, light grey dividers */
+const PAGE_BORDER = '#1d4d3f'
+const GREEN_DARK = '#1d4d3f'
+const GREEN_LABEL = '#2d6a4f'
+const BORDER = '#c5d1c9'
+const TEXT_DARK = '#1a1a1a'
+const TABLE_HEAD = '#e8f0ec'
+const PAGE_BG = '#ffffff'
+const STATUS_YELLOW = { backgroundColor: '#f2c94c', color: '#111827' }
+const BASE_FONT = 9.0
+const LABEL_FONT = 6.8
+const SECTION_GAP = 7
 
-const DARK = '#1a1a1a'
-const AMBER = '#e6a800'
-const SECTION_BORDER = '#dddddd'
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function statusBadgeStyle(status: string): { backgroundColor: string; color: string } {
-  const s = status.toUpperCase()
-  if (s === 'APPROVED') return { backgroundColor: '#2e7d32', color: '#ffffff' }
-  if (s === 'REJECTED') return { backgroundColor: '#c62828', color: '#ffffff' }
-  return { backgroundColor: AMBER, color: '#000000' }
+function statusPillLabel(raw: string) {
+  const s = (raw || '').toUpperCase()
+  if (s.includes('APPROVED AS NOTED')) return 'APPROVED AS NOTED'
+  if (s.includes('PENDING')) return 'PENDING REVIEW'
+  if (s.includes('APPROVED')) return 'APPROVED'
+  if (s.includes('REVISE')) return 'REVISE & RESUBMIT'
+  if (s.includes('REJECT')) return 'REJECTED'
+  return s || 'PENDING REVIEW'
 }
 
-function priorityTagStyle(priority: string): { backgroundColor: string; color: string } | null {
-  const p = (priority ?? '').trim().toLowerCase()
-  if (!p || p === '—') return null
-  if (p === 'urgent' || p === 'high') return { backgroundColor: '#d32f2f', color: '#ffffff' }
-  if (p === 'medium') return { backgroundColor: '#f59e0b', color: '#111111' }
-  if (p === 'low') return { backgroundColor: '#388e3c', color: '#ffffff' }
-  return { backgroundColor: '#64748b', color: '#ffffff' }
+function statusBadgeStyle(status: string): { backgroundColor: string; color: string; borderColor?: string } {
+  const s = (status || '').toUpperCase()
+  if (s.includes('APPROVED')) return { backgroundColor: '#2e7d32', color: '#ffffff' }
+  if (s.includes('REJECT')) return { backgroundColor: '#c62828', color: '#ffffff' }
+  return { ...(STATUS_YELLOW as any), borderColor: '#e7d49a' }
 }
 
-// Signature cell text + colour matching HTML .sig-approved / .sig-pending
-function sigStyle(sig: SubmittalApprovalRow['signature']): { text: string; color: string } {
-  if (sig === 'approved') return { text: 'APPROVED', color: '#0a6b0a' }
-  if (sig === 'rejected') return { text: 'REJECTED', color: '#c62828' }
-  return { text: 'Pending', color: '#c95d00' }
+function priorityStyle(raw: string) {
+  const p = (raw || '').toLowerCase()
+  if (p.includes('high') || p.includes('urgent')) return { color: '#dc2626' }
+  if (p.includes('low')) return { color: '#16a34a' }
+  return { color: TEXT_DARK }
 }
 
-function contactLines(address: string) {
-  return address.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+function splitLines(value: string): string[] {
+  return (value || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+function formatAddressLines(value: string): string[] {
+  const raw = (value || '').trim()
+  if (!raw) return []
+  const nl = splitLines(raw)
+  if (nl.length > 1) return nl
+  const parts = raw
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean)
+  if (parts.length >= 2) return [parts[0], parts.slice(1).join(', ')]
+  return [raw]
+}
 
-function SectionTitle({ title }: { title: string }) {
+function clampText(value: string, maxChars: number) {
+  const t = (value || '').trim()
+  if (t.length <= maxChars) return t
+  return t.slice(0, Math.max(0, maxChars - 1)).trimEnd() + '…'
+}
+
+function CardTitle({ title }: { title: string }) {
   return (
-    <View style={{ alignSelf: 'flex-start', marginBottom: 10 }}>
-      <Text
-        style={{
-          fontSize: 9.5,
-          fontWeight: 700,
-          textTransform: 'uppercase',
-          letterSpacing: 0.6,
-          color: '#111111',
-          paddingBottom: 3,
-        }}
-      >
-        {title}
-      </Text>
-      <View style={{ height: 2, backgroundColor: DARK }} />
-    </View>
+    <Text
+      style={{
+        fontSize: 9,
+        fontWeight: 900,
+        color: GREEN_DARK,
+        textTransform: 'uppercase',
+        letterSpacing: 0.35,
+        marginBottom: 5,
+      }}
+    >
+      {title}
+    </Text>
   )
 }
 
-function InfoCell({
-  label,
-  children,
-  flex = 1,
-}: {
-  label: string
-  children: React.ReactNode
-  flex?: number
-}) {
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <View style={{ flex, paddingHorizontal: 18, paddingVertical: 12 }}>
-      <Text
-        style={{
-          fontSize: 7,
-          fontWeight: 700,
-          textTransform: 'uppercase',
-          color: '#666666',
-          letterSpacing: 0.4,
-          marginBottom: 3,
-        }}
-      >
-        {label}
-      </Text>
+    <View style={{ borderWidth: 1, borderColor: BORDER, borderRadius: 8, backgroundColor: '#ffffff', padding: 7, marginBottom: SECTION_GAP }}>
+      <CardTitle title={title} />
       {children}
     </View>
   )
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
-
 export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) {
-  const statusStyle = statusBadgeStyle(data.status)
-  const pTagStyle = priorityTagStyle(data.priority)
-  const statusLabel =
-    data.status.charAt(0).toUpperCase() + data.status.slice(1).toLowerCase()
-
-  const pageWidth = 595.28
-  const pageHeight = (() => {
-    const base = 820
-    const approvalRows = Math.max(0, data.approvalRows?.length ?? 0)
-    const attachments = Math.max(0, data.attachments?.length ?? 0)
-    const linked = Math.max(0, data.linkedDocuments?.length ?? 0)
-    const questionLen = (data.questionIssue ?? '').trim().length
-    const extra =
-      approvalRows * 18 +
-      attachments * 14 +
-      linked * 14 +
-      Math.min(360, Math.ceil(questionLen / 180) * 16)
-    return Math.min(4200, Math.max(720, base + extra))
-  })()
+  const headerStatusStyle = statusBadgeStyle(data.status)
+  const summaryStatusStyle = statusBadgeStyle(data.status)
+  const pStyle = priorityStyle(data.priority)
+  const statusLabel = statusPillLabel(data.status)
 
   return (
     <Document>
       <Page
-        size={[pageWidth, pageHeight]}
-        style={{ fontFamily: 'Helvetica', fontSize: 10, color: DARK, backgroundColor: '#ffffff' }}
+        size="LETTER"
+        style={{
+          fontFamily: 'Helvetica',
+          fontSize: BASE_FONT,
+          color: TEXT_DARK,
+          backgroundColor: PAGE_BG,
+          padding: 10,
+        }}
       >
-        {/* ── HEADER (logo + contact block) ── */}
         <View
           style={{
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            paddingTop: 22,
-            paddingBottom: 12,
-            paddingHorizontal: 26,
-            borderBottomWidth: 2,
-            borderBottomColor: DARK,
+            flex: 1,
+            borderWidth: 2,
+            borderColor: PAGE_BORDER,
+            borderRadius: 4,
+            backgroundColor: '#ffffff',
+            padding: 8,
           }}
         >
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            {data.logoDataUri ? (
-              <Image src={data.logoDataUri} style={{ width: 54, height: 54 }} />
-            ) : null}
-            <View style={{ marginLeft: data.logoDataUri ? 10 : 0 }}>
+        {/* Top bar: single dark green strip + right ID badge (Summit reference) */}
+        <View style={{ flexDirection: 'row', alignItems: 'stretch', marginBottom: SECTION_GAP }}>
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: GREEN_DARK,
+              borderRadius: 6,
+              minHeight: 38,
+              justifyContent: 'center',
+              paddingHorizontal: 12,
+              marginRight: 8,
+            }}
+          >
+            <Text style={{ color: '#ffffff', textAlign: 'center', fontWeight: 900, fontSize: 15, letterSpacing: 1.2, textTransform: 'uppercase' }}>
+              SUBMITTAL
+            </Text>
+          </View>
+          <View
+            style={{
+              width: 108,
+              backgroundColor: GREEN_DARK,
+              borderRadius: 6,
+              minHeight: 38,
+              paddingVertical: 5,
+              paddingHorizontal: 8,
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ color: '#ffffff', fontSize: 6.5, textAlign: 'center', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 0.5 }}>
+              SUBMITTAL #
+            </Text>
+            <Text style={{ color: '#ffffff', fontWeight: 900, fontSize: 13, textAlign: 'center', marginTop: 1 }}>
+              {data.submittalNumber}
+            </Text>
+          </View>
+        </View>
+
+        {/* Company / Project header block */}
+        <View
+          style={{
+            borderWidth: 1,
+            borderColor: BORDER,
+            borderRadius: 8,
+            paddingHorizontal: 10,
+            paddingVertical: 8,
+            marginBottom: SECTION_GAP,
+          }}
+        >
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+              {data.logoDataUri ? (
+                <Image src={data.logoDataUri} style={{ width: 50, height: 50, objectFit: 'contain' }} />
+              ) : null}
+              <View style={{ marginLeft: data.logoDataUri ? 10 : 0 }}>
+                <Text style={{ fontSize: 13, fontWeight: 900, color: GREEN_DARK, letterSpacing: 0.25 }}>
+                  {(data.brand || '').toUpperCase()}
+                </Text>
+                {data.brandSub ? (
+                  <Text style={{ fontSize: 7.5, color: GREEN_LABEL, letterSpacing: 1.1, marginTop: 1, fontWeight: 800 }}>
+                    {data.brandSub.toUpperCase()}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={{ fontSize: 6.2, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 3 }}>
+                STATUS
+              </Text>
               <Text
                 style={{
-                  fontSize: 20,
-                  fontWeight: 800,
-                  color: data.themePrimary || '#1f3768',
-                  letterSpacing: 0.6,
+                  alignSelf: 'flex-start',
+                  fontSize: 7.8,
+                  fontWeight: 900,
+                  paddingVertical: 4,
+                  paddingHorizontal: 14,
+                  borderRadius: 10,
+                  ...(headerStatusStyle as any),
                 }}
               >
-                {(data.brand || 'BUILDSWIFT').toUpperCase()}
+                {statusLabel}
               </Text>
-              {data.brandSub ? (
-                <Text style={{ fontSize: 9, color: '#475569', letterSpacing: 1.4, marginTop: 1 }}>
-                  {data.brandSub.toUpperCase()}
-                </Text>
-              ) : null}
             </View>
           </View>
 
-          <View style={{ alignItems: 'flex-end', maxWidth: 240 }}>
-            {contactLines(data.contactAddress || '').map((line, idx) => (
-              <Text key={`addr-${idx}`} style={{ fontSize: 8.6, color: '#334155' }}>
-                {line}
+          <View style={{ marginTop: 8, flexDirection: 'row' }}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Text style={{ fontSize: 10, fontWeight: 900, color: TEXT_DARK, marginBottom: 2 }}>
+                {data.brand}
               </Text>
-            ))}
-            {data.contactPhone ? (
-              <Text style={{ fontSize: 8.6, color: '#334155', marginTop: 2 }}>{data.contactPhone}</Text>
-            ) : null}
-            {data.contactEmail ? (
-              <Text style={{ fontSize: 8.6, color: '#334155' }}>{data.contactEmail}</Text>
-            ) : null}
-          </View>
-        </View>
-
-        {/* ── SUBMITTAL HEADLINE ── */}
-        <View
-          style={{
-            backgroundColor: DARK,
-            paddingHorizontal: 26,
-            paddingVertical: 14,
-          }}
-        >
-          <Text
-            style={{
-              fontSize: 19,
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: 1.5,
-              color: '#ffffff',
-              marginBottom: 6,
-            }}
-          >
-            Submittal
-          </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <Text style={{ fontSize: 15, fontWeight: 700, color: '#ffcc00' }}>
-              {data.submittalNumber}
-            </Text>
-            <Text
-              style={{
-                ...statusStyle,
-                fontSize: 7.5,
-                fontWeight: 700,
-                paddingHorizontal: 18,
-                paddingVertical: 5,
-                borderRadius: 20,
-                textTransform: 'uppercase',
-                letterSpacing: 0.6,
-              }}
-            >
-              {statusLabel}
-            </Text>
-          </View>
-        </View>
-
-        {/* ── PROJECT GRID ── */}
-        <View style={{ borderBottomWidth: 2, borderBottomColor: DARK }}>
-          {/* Row 1: Project / Project Address */}
-          <View
-            style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#c0c0c0' }}
-          >
-            <InfoCell label="Project">
-              <Text style={{ fontSize: 9, fontWeight: 500, color: '#111111' }}>
+              {formatAddressLines(data.contactAddress).map((line, idx) => (
+                <Text key={`caddr-${idx}`} style={{ fontSize: 8.4, color: TEXT_DARK, lineHeight: 1.25 }}>
+                  {line}
+                </Text>
+              ))}
+              <Text style={{ fontSize: 8.2, color: TEXT_DARK, marginTop: 3 }}>
+                {data.contactPhone} {' | '} {data.contactEmail}
+              </Text>
+            </View>
+            <View style={{ width: 1, backgroundColor: BORDER }} />
+            <View style={{ flex: 1, paddingLeft: 10 }}>
+              <Text style={{ fontSize: LABEL_FONT, color: GREEN_LABEL, textTransform: 'uppercase', marginBottom: 3, fontWeight: 800 }}>
+                PROJECT
+              </Text>
+              <Text style={{ fontSize: 10, fontWeight: 900, color: TEXT_DARK, marginBottom: 2 }}>
                 {data.projectName}
               </Text>
-            </InfoCell>
-            <InfoCell label="Project Address">
-              <Text style={{ fontSize: 9, fontWeight: 500, color: '#111111' }}>
-                {data.projectNo}
-              </Text>
-            </InfoCell>
-          </View>
-          {/* Row 2: Date / Due Date */}
-          <View
-            style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#c0c0c0' }}
-          >
-            <InfoCell label="Date">
-              <Text style={{ fontSize: 9, fontWeight: 500, color: '#111111' }}>{data.date}</Text>
-            </InfoCell>
-            <InfoCell label="Due Date">
-              <Text style={{ fontSize: 9, fontWeight: 500, color: '#111111' }}>
-                {data.actionNeededBy}
-              </Text>
-            </InfoCell>
-          </View>
-          {/* Row 3: Submitted By / Priority */}
-          <View
-            style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#c0c0c0' }}
-          >
-            <InfoCell label="Submitted By">
-              <Text style={{ fontSize: 9, fontWeight: 500, color: '#111111' }}>
-                {data.submittedBy}
-              </Text>
-            </InfoCell>
-            <InfoCell label="Priority">
-              {pTagStyle ? (
-                <Text
-                  style={{
-                    ...pTagStyle,
-                    fontSize: 7,
-                    fontWeight: 700,
-                    paddingHorizontal: 14,
-                    paddingVertical: 2,
-                    borderRadius: 3,
-                    textTransform: 'uppercase',
-                    alignSelf: 'flex-start',
-                  }}
-                >
-                  {data.priority}
-                </Text>
-              ) : (
-                <Text style={{ fontSize: 9, fontWeight: 500, color: '#111111' }}>
-                  {data.priority}
-                </Text>
-              )}
-            </InfoCell>
-          </View>
-        </View>
-
-        {/* ── SPEC SECTION ── */}
-        {data.specSection && data.specSection !== '—' ? (
-          <View
-            style={{
-              paddingHorizontal: 26,
-              paddingVertical: 18,
-              borderBottomWidth: 1,
-              borderBottomColor: SECTION_BORDER,
-            }}
-          >
-            <SectionTitle title="Spec Section" />
-            <Text style={{ fontSize: 9.2, lineHeight: 1.5 }}>{data.specSection}</Text>
-          </View>
-        ) : null}
-
-        {/* ── SUBMITTAL ── */}
-        {data.submittalTitle && data.submittalTitle !== '—' ? (
-          <View
-            style={{
-              paddingHorizontal: 26,
-              paddingVertical: 18,
-              borderBottomWidth: 1,
-              borderBottomColor: SECTION_BORDER,
-            }}
-          >
-            <SectionTitle title="Submittal" />
-            <Text style={{ fontSize: 9.2, lineHeight: 1.5, fontWeight: 700 }}>{data.submittalTitle}</Text>
-          </View>
-        ) : null}
-
-        {/* ── MANUFACTURER ── */}
-        {data.manufacturer && data.manufacturer !== '—' ? (
-          <View
-            style={{
-              paddingHorizontal: 26,
-              paddingVertical: 18,
-              borderBottomWidth: 1,
-              borderBottomColor: SECTION_BORDER,
-            }}
-          >
-            <SectionTitle title="Manufacturer" />
-            <Text style={{ fontSize: 9.2, lineHeight: 1.5 }}>{data.manufacturer}</Text>
-          </View>
-        ) : null}
-
-        {/* ── QUESTION / ISSUE ── */}
-        {data.questionIssue && data.questionIssue !== '—' ? (
-          <View
-            style={{
-              paddingHorizontal: 26,
-              paddingVertical: 18,
-              borderBottomWidth: 1,
-              borderBottomColor: SECTION_BORDER,
-            }}
-          >
-            <SectionTitle title="Question / Issue" />
-            <Text style={{ fontSize: 9.2, lineHeight: 1.5 }}>{data.questionIssue}</Text>
-          </View>
-        ) : null}
-
-        {/* ── ATTACHMENTS ── */}
-        {data.attachments.length > 0 ? (
-          <View
-            style={{
-              paddingHorizontal: 26,
-              paddingVertical: 18,
-              borderBottomWidth: 1,
-              borderBottomColor: SECTION_BORDER,
-            }}
-          >
-            <SectionTitle title="Attachments" />
-            {data.attachments.map((a, i) => (
-              <Text key={`att-${i}`} style={{ fontSize: 9, marginBottom: 4 }}>
-                {'\u2022 '}{a}
-              </Text>
-            ))}
-          </View>
-        ) : null}
-
-        {/* ── LINKED DOCUMENTS ── */}
-        {data.linkedDocuments.length > 0 ? (
-          <View
-            style={{
-              paddingHorizontal: 26,
-              paddingVertical: 18,
-              borderBottomWidth: 1,
-              borderBottomColor: SECTION_BORDER,
-            }}
-          >
-            <SectionTitle title="Linked Documents" />
-            {data.linkedDocuments.map((doc, i) => (
-              <View
-                key={`ld-${i}`}
-                style={{
-                  backgroundColor: '#f0f4ff',
-                  borderLeftWidth: 3,
-                  borderLeftColor: DARK,
-                  paddingHorizontal: 12,
-                  paddingVertical: 8,
-                  marginTop: i > 0 ? 6 : 0,
-                }}
-              >
-                <Text style={{ fontSize: 9 }}>
-                  <Text style={{ fontWeight: 700 }}>{doc.id}</Text>
-                  {doc.title ? ` \u2014 ${doc.title}` : ''}
-                </Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        {/* ── APPROVAL LOG ── */}
-        {data.approvalRows.length > 0 ? (
-          <View
-            wrap={false}
-            style={{
-              paddingHorizontal: 26,
-              paddingVertical: 18,
-              borderBottomWidth: 1,
-              borderBottomColor: SECTION_BORDER,
-            }}
-          >
-            <SectionTitle title="Approval Log" />
-            {/* Table header */}
-            <View style={{ flexDirection: 'row', backgroundColor: DARK }}>
-              {(['Role', 'Signature', 'Date', 'Notes'] as const).map((h, i) => (
-                <Text
-                  key={h}
-                  style={{
-                    width:
-                      i === 0 ? '22%' : i === 1 ? '36%' : i === 2 ? '18%' : '24%',
-                    fontSize: 6.8,
-                    fontWeight: 700,
-                    color: '#ffffff',
-                    textTransform: 'uppercase',
-                    letterSpacing: 0.3,
-                    paddingHorizontal: 10,
-                    paddingVertical: 8,
-                  }}
-                >
-                  {h}
+              {formatAddressLines(data.projectAddress).map((line, idx) => (
+                <Text key={`paddr-${idx}`} style={{ fontSize: 8.6, color: TEXT_DARK, lineHeight: 1.25, marginTop: idx === 0 ? 1 : 0 }}>
+                  {line}
                 </Text>
               ))}
             </View>
-            {/* Rows */}
-            {data.approvalRows.map((row, idx) => {
-              const sig = sigStyle(row.signature)
-              return (
-                <View
-                  key={`ar-${idx}`}
+          </View>
+
+          {/* 2x2 grid: dates + to/from */}
+          <View style={{ marginTop: 10, borderWidth: 1, borderColor: BORDER, borderRadius: 7, overflow: 'hidden' }}>
+            <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: BORDER }}>
+              <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8, borderRightWidth: 1, borderRightColor: BORDER }}>
+                <Text style={{ fontSize: LABEL_FONT, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}>
+                  DATE ISSUED
+                </Text>
+                <Text style={{ fontSize: 9.6, fontWeight: 900, color: TEXT_DARK }}>{data.dateIssued}</Text>
+              </View>
+              <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8 }}>
+                <Text style={{ fontSize: LABEL_FONT, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}>
+                  REQUIRED REVIEW DATE
+                </Text>
+                <Text style={{ fontSize: 9.6, fontWeight: 900, color: TEXT_DARK }}>{data.requiredReviewDate}</Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row' }}>
+              <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8 }}>
+                <Text style={{ fontSize: LABEL_FONT, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}>
+                  FROM
+                </Text>
+                {(splitLines(data.from).length ? splitLines(data.from) : ['Not Provided']).slice(0, 4).map((line, idx) => (
+                  <Text key={`from-${idx}`} style={{ fontSize: 8.8, color: TEXT_DARK, fontWeight: idx === 0 ? 900 : 500, lineHeight: 1.25 }}>
+                    {line}
+                  </Text>
+                ))}
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* Submittal Summary — four columns in one row (Summit reference) */}
+        <View style={{ borderWidth: 1, borderColor: BORDER, borderRadius: 8, backgroundColor: '#ffffff', marginBottom: SECTION_GAP }}>
+          <View style={{ paddingHorizontal: 8, paddingTop: 6, paddingBottom: 7 }}>
+            <Text style={{ fontSize: 9, fontWeight: 900, color: GREEN_DARK, textTransform: 'uppercase', letterSpacing: 0.35, marginBottom: 6 }}>
+              Submittal Summary
+            </Text>
+            <View style={{ flexDirection: 'row' }}>
+              <View style={{ flex: 1.35, borderRightWidth: 1, borderRightColor: BORDER, paddingRight: 8 }}>
+                <Text style={{ fontSize: 6.2, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}>
+                  Submittal Title
+                </Text>
+                <Text style={{ fontSize: 8.2, fontWeight: 800, color: TEXT_DARK, lineHeight: 1.2 }}>
+                  {clampText(data.submittalTitle, 64)}
+                </Text>
+              </View>
+              <View style={{ flex: 0.85, borderRightWidth: 1, borderRightColor: BORDER, paddingHorizontal: 8 }}>
+                <Text style={{ fontSize: 6.2, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}>
+                  Priority
+                </Text>
+                <Text style={{ fontSize: 8.5, fontWeight: 900, ...(pStyle as any) }}>
+                  {(data.priority || '—').toUpperCase()}
+                </Text>
+              </View>
+              <View style={{ flex: 1, paddingLeft: 8 }}>
+                <Text style={{ fontSize: 6.2, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 4 }}>
+                  Status
+                </Text>
+                <Text
                   style={{
-                    flexDirection: 'row',
-                    borderBottomWidth: idx === data.approvalRows.length - 1 ? 2 : 1,
-                    borderBottomColor:
-                      idx === data.approvalRows.length - 1 ? DARK : '#cccccc',
-                    backgroundColor: '#ffffff',
-                    minHeight: 28,
+                    alignSelf: 'flex-start',
+                    paddingHorizontal: 12,
+                    paddingVertical: 3.5,
+                    borderRadius: 10,
+                    fontSize: 7.4,
+                    fontWeight: 900,
+                    ...(summaryStatusStyle as any),
                   }}
                 >
+                  {statusLabel}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        <Card title="Submittal Details">
+          <Text style={{ fontSize: 6.2, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}>
+            Detailed Description
+          </Text>
+          <Text style={{ fontSize: 8.5, lineHeight: 1.28, marginBottom: 6 }}>
+            {stripHtmlToPlainParagraphs(data.detailedDescription)}
+          </Text>
+          <View style={{ borderWidth: 1, borderColor: BORDER, borderRadius: 6, overflow: 'hidden', backgroundColor: '#fafcfb' }}>
+            <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: BORDER }}>
+              <View style={{ flex: 1, padding: 7, borderRightWidth: 1, borderRightColor: BORDER }}>
+                <Text style={{ fontSize: LABEL_FONT, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}>
+                  Manufacturer / Vendor
+                </Text>
+                <Text style={{ fontSize: 8.3, fontWeight: 700, color: TEXT_DARK, lineHeight: 1.22 }}>{data.manufacturerVendor}</Text>
+              </View>
+              <View style={{ flex: 1, padding: 7 }}>
+                <Text style={{ fontSize: LABEL_FONT, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}>
+                  Material / Product
+                </Text>
+                <Text style={{ fontSize: 8.3, fontWeight: 700, color: TEXT_DARK, lineHeight: 1.22 }}>{data.materialProductName}</Text>
+              </View>
+            </View>
+            <View style={{ padding: 7 }}>
+              <Text style={{ fontSize: LABEL_FONT, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}>
+                Specification Section(s)
+              </Text>
+              <Text style={{ fontSize: 8.3, fontWeight: 700, color: TEXT_DARK }}>
+                {data.specificationSections}
+              </Text>
+            </View>
+          </View>
+        </Card>
+
+        {/* Approval / Tracking (kept near bottom; log table limited for single page) */}
+        <Card title="Approval / Tracking">
+          <View
+            style={{
+              borderWidth: 1,
+              borderColor: BORDER,
+              borderRadius: 7,
+              overflow: 'hidden',
+              backgroundColor: '#ffffff',
+            }}
+          >
+            <View style={{ flexDirection: 'row' }}>
+              <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 7, borderRightWidth: 1, borderRightColor: BORDER }}>
+                <Text style={{ fontSize: 6.2, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 3 }}>
+                  FINAL STATUS
+                </Text>
+                <Text
+                  style={{
+                    alignSelf: 'flex-start',
+                    paddingHorizontal: 14,
+                    paddingVertical: 3.5,
+                    borderRadius: 10,
+                    fontSize: 7.8,
+                    fontWeight: 900,
+                    ...(statusBadgeStyle(data.finalStatus || data.status) as any),
+                  }}
+                >
+                  {statusPillLabel(data.finalStatus || data.status)}
+                </Text>
+              </View>
+              <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 7 }}>
+                <Text style={{ fontSize: 6.2, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 3 }}>
+                  REVIEWED BY
+                </Text>
+                <Text style={{ fontSize: 8.2, fontWeight: 800, color: TEXT_DARK }}>{data.reviewedBy}</Text>
+              </View>
+            </View>
+            <View style={{ height: 1, backgroundColor: BORDER }} />
+            <View style={{ paddingHorizontal: 10, paddingVertical: 6 }}>
+              <Text style={{ fontSize: 6.2, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800 }}>
+                APPROVAL / REVIEW LOG
+              </Text>
+            </View>
+            <View style={{ borderTopWidth: 1, borderTopColor: BORDER }}>
+              <View style={{ flexDirection: 'row', backgroundColor: TABLE_HEAD }}>
+                {['Reviewer Email', 'Signature', 'Action', 'Date'].map((h, idx) => (
                   <Text
+                    key={h}
                     style={{
-                      width: '22%',
-                      fontSize: 8,
-                      paddingHorizontal: 10,
-                      paddingVertical: 8,
+                      width:
+                        idx === 0
+                          ? '26%'
+                          : idx === 1
+                            ? '26%'
+                            : idx === 2
+                              ? '28%'
+                              : '20%',
+                      fontSize: 6.6,
+                      fontWeight: 900,
+                      paddingHorizontal: 6,
+                      paddingVertical: 4,
+                      textTransform: 'uppercase',
+                      color: TEXT_DARK,
+                      borderRightWidth: idx === 3 ? 0 : 1,
+                      borderRightColor: BORDER,
                     }}
                   >
-                    {row.role}
+                    {h}
                   </Text>
-                  <View style={{ width: '36%', paddingHorizontal: 10, paddingVertical: 8 }}>
-                    {row.signatureUrl ? (
-                      <Image
-                        src={row.signatureUrl}
-                        style={{ width: 74, height: 16, objectFit: 'contain' }}
-                      />
-                    ) : row.signatureName ? (
-                      <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Oblique', color: '#444444' }}>
-                        {row.signatureName}
+                ))}
+              </View>
+              {(data.approvalRows.length ? data.approvalRows : []).map((r, idx) => (
+                <View key={`row-${idx}`} style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: BORDER, backgroundColor: '#ffffff' }}>
+                  <Text style={{ width: '26%', fontSize: 7.4, paddingHorizontal: 6, paddingVertical: 4, borderRightWidth: 1, borderRightColor: BORDER }}>
+                    {r.name}
+                  </Text>
+                  <View style={{ width: '26%', paddingHorizontal: 6, paddingVertical: 4, borderRightWidth: 1, borderRightColor: BORDER }}>
+                    {r.signatureUrl ? (
+                      <Image src={r.signatureUrl} style={{ width: 64, height: 14, objectFit: 'contain' }} />
+                    ) : r.signatureName ? (
+                      <Text style={{ fontSize: 7.4, fontFamily: 'Helvetica-Oblique', color: TEXT_DARK }}>
+                        {r.signatureName}
                       </Text>
                     ) : (
-                      <Text
-                        style={{
-                          fontSize: 8,
-                          fontWeight: 600,
-                          color: sig.color,
-                          textTransform: row.signature !== 'pending' ? 'uppercase' : 'none',
-                        }}
-                      >
-                        {sig.text}
-                      </Text>
+                      <View style={{ height: 0.8, backgroundColor: '#94a3b8', marginTop: 8 }} />
                     )}
                   </View>
-                  <Text
-                    style={{
-                      width: '18%',
-                      fontSize: 8,
-                      paddingHorizontal: 10,
-                      paddingVertical: 8,
-                    }}
-                  >
-                    {row.date}
+                  <Text style={{ width: '28%', fontSize: 7.4, paddingHorizontal: 6, paddingVertical: 4, borderRightWidth: 1, borderRightColor: BORDER }}>
+                    {r.action}
                   </Text>
-                  <Text
-                    style={{
-                      width: '24%',
-                      fontSize: 8,
-                      paddingHorizontal: 10,
-                      paddingVertical: 8,
-                    }}
-                  >
-                    {row.notes}
+                  <Text style={{ width: '20%', fontSize: 7.4, paddingHorizontal: 6, paddingVertical: 4 }}>
+                    {r.date}
                   </Text>
                 </View>
-              )
-            })}
+              ))}
+            </View>
           </View>
-        ) : null}
+        </Card>
 
-        {/* ── FOOTER ── */}
-        <View
-          style={{
-            textAlign: 'center',
-            paddingHorizontal: 26,
-            paddingVertical: 10,
-            backgroundColor: '#f9f9f9',
-            borderTopWidth: 1,
-            borderTopColor: SECTION_BORDER,
-          }}
-        >
-          <Text style={{ fontSize: 6.8, color: '#888888' }}>{data.footerNote}</Text>
+        {/* Flexible spacer so footer sits at bottom on short content */}
+        <View style={{ flexGrow: 1 }} />
+
+        <View style={{ backgroundColor: GREEN_DARK, borderRadius: 6, marginTop: 2, paddingVertical: 8, alignItems: 'center' }}>
+          <Text style={{ color: '#ffffff', fontSize: 8.2, fontWeight: 900, letterSpacing: 0.2 }}>
+            Construction Documentation.
+          </Text>
+        </View>
         </View>
       </Page>
     </Document>

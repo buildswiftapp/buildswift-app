@@ -65,6 +65,7 @@ export interface DocumentMetadata {
   specSection?: string
   manufacturer?: string
   productName?: string
+  quantity?: string
 
   contractAmount?: number
   proposedAmount?: number

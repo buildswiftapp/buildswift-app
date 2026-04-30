@@ -116,8 +116,9 @@ export async function GET(_req: Request, { params }: Params) {
 
   const { data: cycleRequests } = await privilegedDb
     .from('review_requests')
-    .select('full_name,reviewer_email,decision,decided_at,decision_notes,signature_url')
+    .select('full_name,reviewer_email,decision,decided_at,decision_notes,signature_url,created_at')
     .eq('review_cycle_id', cycleRow.id)
+    .order('created_at', { ascending: true })
 
   const metadata =
     versionRow?.metadata && typeof versionRow.metadata === 'object'
@@ -171,23 +172,6 @@ export async function GET(_req: Request, { params }: Params) {
         })
         .filter(Boolean)
     : []
-
-  const approvalRows = await Promise.all(
-    (cycleRequests ?? []).map(async (row) => ({
-      title: row.reviewer_email || row.full_name?.trim() || 'Reviewer',
-      role: 'Reviewer',
-      signature:
-        row.decision === 'approve'
-          ? ('approved' as const)
-          : row.decision === 'reject'
-            ? ('rejected' as const)
-            : ('pending' as const),
-      signatureName: row.decision === 'approve' ? row.full_name?.trim() || null : null,
-      signatureUrl: await resolveSignatureImageDataUrl({ supabase: privilegedDb, raw: row.signature_url }),
-      date: row.decided_at ? new Date(row.decided_at).toLocaleDateString('en-US') : '—',
-      notes: row.decision_notes?.trim() || '—',
-    }))
-  )
 
   const attachmentNames = mergeAttachmentNames(
     metadata,
@@ -258,6 +242,116 @@ export async function GET(_req: Request, { params }: Params) {
   const submittedByFromMeta =
     typeof metadata.submittedBy === 'string' && metadata.submittedBy.trim() ? metadata.submittedBy.trim() : null
   const submittedBy = submittedByFromMeta || documentAuthorDisplay || null
+
+  const reviewerRows = await Promise.all(
+    (cycleRequests ?? []).map(async (row) => ({
+      reviewerEmail: typeof row.reviewer_email === 'string' && row.reviewer_email.trim() ? row.reviewer_email.trim() : null,
+      title:
+        (typeof row.full_name === 'string' && row.full_name.trim()) ||
+        (typeof row.reviewer_email === 'string' && row.reviewer_email.trim()) ||
+        'Reviewer',
+      role: 'Reviewer',
+      action:
+        row.decision === 'approve'
+          ? 'Approved'
+          : row.decision === 'reject'
+            ? 'Rejected'
+            : 'Pending review',
+      signature:
+        row.decision === 'approve'
+          ? ('approved' as const)
+          : row.decision === 'reject'
+            ? ('rejected' as const)
+            : ('pending' as const),
+      signatureName:
+        row.decision === 'approve' &&
+        typeof row.full_name === 'string' &&
+        row.full_name.trim()
+          ? row.full_name.trim()
+          : null,
+      signatureUrl: await resolveSignatureImageDataUrl({
+        supabase: privilegedDb,
+        raw:
+          typeof row.signature_url === 'string' && row.signature_url.trim()
+            ? row.signature_url.trim()
+            : null,
+      }),
+      date:
+        typeof row.decided_at === 'string' && row.decided_at
+          ? new Date(row.decided_at).toLocaleDateString('en-US')
+          : '—',
+      notes:
+        !row.decision &&
+        !(typeof row.decision_notes === 'string' && row.decision_notes.trim())
+          ? 'Awaiting review'
+          : typeof row.decision_notes === 'string' && row.decision_notes.trim()
+            ? row.decision_notes.trim()
+            : row.decision
+              ? '—'
+              : 'Awaiting review',
+    }))
+  )
+
+  let submissionDateRaw: string | null = null
+  let submissionLogNotes = ''
+  if (document.doc_type === 'rfi') {
+    submissionDateRaw =
+      (typeof metadata.rfiDate === 'string' && metadata.rfiDate.trim()) ||
+      (typeof metadata.documentDate === 'string' && metadata.documentDate.trim()) ||
+      (typeof metadata.date === 'string' && metadata.date.trim()) ||
+      null
+    submissionLogNotes = 'RFI submitted'
+  } else if (document.doc_type === 'submittal') {
+    submissionDateRaw =
+      (typeof metadata.submittalDate === 'string' && metadata.submittalDate.trim()) ||
+      (typeof metadata.documentDate === 'string' && metadata.documentDate.trim()) ||
+      (typeof metadata.date === 'string' && metadata.date.trim()) ||
+      null
+    submissionLogNotes = 'Submittal created'
+  }
+
+  const formattedSubmissionIssued =
+    typeof submissionDateRaw === 'string' && submissionDateRaw
+      ? (() => {
+          const trimmed = submissionDateRaw
+          const t = Date.parse(trimmed.includes('T') ? trimmed : trimmed + 'T12:00:00')
+          if (!Number.isNaN(t)) {
+            return new Date(t).toLocaleDateString('en-US', {
+              month: 'long',
+              day: 'numeric',
+              year: 'numeric',
+            })
+          }
+          return trimmed
+        })()
+      : '—'
+
+  const submissionName =
+    (typeof submittedBy === 'string' && submittedBy.trim()) ||
+    (typeof documentAuthorDisplay === 'string' && documentAuthorDisplay.trim()) ||
+    'Not Provided'
+
+  const submissionRow =
+    document.doc_type === 'rfi' || document.doc_type === 'submittal'
+      ? [
+          {
+            title: submissionName,
+            role: 'Submitter',
+            action: 'Submitted',
+            signature: 'pending' as const,
+            signatureName: null,
+            signatureUrl: null,
+            date: formattedSubmissionIssued,
+            notes: submissionLogNotes,
+          },
+        ]
+      : []
+
+  const approvalRows =
+    document.doc_type === 'submittal' || document.doc_type === 'rfi'
+      ? [...submissionRow, ...reviewerRows]
+      : reviewerRows
+
   const priority = typeof metadata.priority === 'string' ? metadata.priority : null
   const specSection =
     (typeof metadata.specSection === 'string' && metadata.specSection) ||
@@ -273,27 +367,83 @@ export async function GET(_req: Request, { params }: Params) {
           (typeof metadata.submittalNumber === 'string' && metadata.submittalNumber) ||
           document.doc_number ||
           null,
-        projectNo: (projectAddress && projectAddress.trim()) || projectNo,
-        date:
+        projectAddress:
+          (typeof projectAddress === 'string' && projectAddress.trim()) ||
+          (typeof metadata.projectAddress === 'string' && metadata.projectAddress) ||
+          (typeof metadata.project_address === 'string' && metadata.project_address) ||
+          projectNo,
+        dateIssued:
           (typeof metadata.submittalDate === 'string' && metadata.submittalDate) ||
           (typeof metadata.documentDate === 'string' && metadata.documentDate) ||
           (typeof metadata.date === 'string' && metadata.date) ||
           null,
-        contractDate,
-        submittedBy,
+        requiredReviewDate:
+          (typeof metadata.actionNeededBy === 'string' && metadata.actionNeededBy) ||
+          (typeof metadata.requiredReviewDate === 'string' && metadata.requiredReviewDate) ||
+          (typeof metadata.dueDate === 'string' && metadata.dueDate) ||
+          null,
+        to:
+          (typeof metadata.to === 'string' && metadata.to) ||
+          (typeof metadata.recipient === 'string' && metadata.recipient) ||
+          null,
+        from:
+          (typeof metadata.from === 'string' && metadata.from) ||
+          (typeof metadata.sender === 'string' && metadata.sender) ||
+          submittedBy,
+        submittalType:
+          (typeof metadata.submittalType === 'string' && metadata.submittalType) ||
+          (typeof metadata.type === 'string' && metadata.type) ||
+          null,
         priority,
-        rfiNo: (typeof metadata.rfiNo === 'string' && metadata.rfiNo) || null,
-        actionNeededBy:
-          (typeof metadata.actionNeededBy === 'string' && metadata.actionNeededBy) || null,
-        specSection,
-        manufacturer:
-          (typeof metadata.manufacturer === 'string' && metadata.manufacturer) || null,
-        productName:
-          (typeof metadata.productName === 'string' && metadata.productName) || null,
+        detailedDescription:
+          (typeof metadata.detailedDescription === 'string' && metadata.detailedDescription) ||
+          (typeof metadata.description === 'string' && metadata.description) ||
+          null,
+        manufacturerVendor:
+          (typeof metadata.manufacturer === 'string' && metadata.manufacturer) ||
+          (typeof metadata.vendor === 'string' && metadata.vendor) ||
+          null,
+        materialProductName:
+          (typeof metadata.productName === 'string' && metadata.productName) ||
+          (typeof metadata.material === 'string' && metadata.material) ||
+          null,
+        modelNumber:
+          (typeof metadata.modelNumber === 'string' && metadata.modelNumber) ||
+          (typeof metadata.model === 'string' && metadata.model) ||
+          null,
+        quantity:
+          (typeof metadata.quantity === 'string' && metadata.quantity) ||
+          (typeof metadata.qty === 'string' && metadata.qty) ||
+          null,
+        specificationSections: specSection,
+        drawingSheetNumbers:
+          (typeof metadata.drawingNumber === 'string' && metadata.drawingNumber) ||
+          (typeof metadata.sheetNumber === 'string' && metadata.sheetNumber) ||
+          null,
+        detailReferences:
+          (typeof metadata.detailReference === 'string' && metadata.detailReference) ||
+          (typeof metadata.detailReferences === 'string' && metadata.detailReferences) ||
+          null,
+        relatedRfiNumbers:
+          (typeof metadata.rfiNo === 'string' && metadata.rfiNo) ||
+          (typeof metadata.relatedRfi === 'string' && metadata.relatedRfi) ||
+          null,
         attachments: attachmentNames,
-        linkedDocuments: Array.isArray(metadata.linkedDocuments)
-          ? (metadata.linkedDocuments as Array<{ id: string; title: string }>)
-          : null,
+        reviewerComments:
+          (typeof metadata.reviewerComments === 'string' && metadata.reviewerComments) ||
+          (typeof metadata.comments === 'string' && metadata.comments) ||
+          null,
+        reviewedBy:
+          (typeof metadata.reviewedBy === 'string' && metadata.reviewedBy) || null,
+        reviewDate:
+          (typeof metadata.reviewDate === 'string' && metadata.reviewDate) || null,
+        costImpact:
+          (typeof metadata.costImpact === 'string' && metadata.costImpact) || null,
+        scheduleImpact:
+          (typeof metadata.scheduleImpact === 'string' && metadata.scheduleImpact) || null,
+        impactDescription:
+          (typeof metadata.impactDescription === 'string' && metadata.impactDescription) || null,
+        approvalRows: approvalRows.length ? approvalRows : undefined,
         brandingCompanyName,
         contactAddress: accountContactAddress || process.env.REVIEW_PDF_CONTACT_ADDRESS || null,
         contactPhone: accountContactPhone || process.env.REVIEW_PDF_CONTACT_PHONE || null,
@@ -320,6 +470,14 @@ export async function GET(_req: Request, { params }: Params) {
           (typeof metadata.dueDate === 'string' && metadata.dueDate) ||
           contractDate,
         submittedBy,
+        recipient:
+          (typeof metadata.recipient === 'string' && metadata.recipient) ||
+          (typeof metadata.to === 'string' && metadata.to) ||
+          null,
+        sender:
+          (typeof metadata.sender === 'string' && metadata.sender) ||
+          (typeof metadata.from === 'string' && metadata.from) ||
+          submittedBy,
         priority,
         scheduleImpact:
           (typeof metadata.scheduleImpact === 'string' && metadata.scheduleImpact) || null,
@@ -327,7 +485,47 @@ export async function GET(_req: Request, { params }: Params) {
           (typeof metadata.costImpact === 'string' && metadata.costImpact) || null,
         scopeImpact:
           (typeof metadata.scopeImpact === 'string' && metadata.scopeImpact) || null,
-        attachments: attachmentNames,
+        impactDescription:
+          (typeof metadata.impactDescription === 'string' && metadata.impactDescription) ||
+          (typeof metadata.scopeImpact === 'string' && metadata.scopeImpact) ||
+          null,
+        reasonForRequest:
+          (typeof metadata.reasonForRequest === 'string' && metadata.reasonForRequest) ||
+          (typeof metadata.reason === 'string' && metadata.reason) ||
+          null,
+        conflictIdentification:
+          (typeof metadata.conflictIdentification === 'string' && metadata.conflictIdentification) || null,
+        missingInformation:
+          (typeof metadata.missingInformation === 'string' && metadata.missingInformation) || null,
+        clarificationRequired:
+          (typeof metadata.clarificationRequired === 'string' && metadata.clarificationRequired) || null,
+        drawingNumber:
+          (typeof metadata.drawingNumber === 'string' && metadata.drawingNumber) ||
+          (typeof metadata.sheetNumber === 'string' && metadata.sheetNumber) ||
+          null,
+        specificationSection:
+          (typeof metadata.specSection === 'string' && metadata.specSection) ||
+          (typeof metadata.specificationSection === 'string' && metadata.specificationSection) ||
+          null,
+        specificReference:
+          (typeof metadata.specificReference === 'string' && metadata.specificReference) || null,
+        location:
+          (typeof metadata.location === 'string' && metadata.location) || null,
+        responseContent:
+          (typeof metadata.responseContent === 'string' && metadata.responseContent) ||
+          (typeof metadata.response === 'string' && metadata.response) ||
+          null,
+        responder:
+          (typeof metadata.responder === 'string' && metadata.responder) ||
+          (typeof metadata.respondedBy === 'string' && metadata.respondedBy) ||
+          null,
+        responseDate:
+          (typeof metadata.responseDate === 'string' && metadata.responseDate) || null,
+        attachments: (attachmentNames ?? []).map((name) => ({
+          fileName: name,
+          fileType: name.includes('.') ? name.split('.').pop()?.toUpperCase() || 'FILE' : 'FILE',
+          notes: 'Not Provided',
+        })),
         brandingCompanyName,
         contactAddress: accountContactAddress || process.env.REVIEW_PDF_CONTACT_ADDRESS || null,
         contactPhone: accountContactPhone || process.env.REVIEW_PDF_CONTACT_PHONE || null,
@@ -336,6 +534,7 @@ export async function GET(_req: Request, { params }: Params) {
       })
     : isChangeOrder
     ? await generateChangeOrderPdfBuffer({
+        documentId: document.id,
         title: document.title,
         projectName,
         descriptionHtml,
@@ -343,20 +542,60 @@ export async function GET(_req: Request, { params }: Params) {
           (typeof metadata.changeOrderNumber === 'string' && metadata.changeOrderNumber) ||
           document.doc_number ||
           null,
-        projectNo: (projectAddress && projectAddress.trim()) || projectNo,
-        date:
+        dateIssued:
           (typeof metadata.changeOrderDate === 'string' && metadata.changeOrderDate) ||
           (typeof metadata.date === 'string' && metadata.date) ||
           null,
-        contractDate: dueDate || contractDate,
+        projectAddress:
+          (typeof projectAddress === 'string' && projectAddress.trim()) ||
+          (typeof metadata.projectAddress === 'string' && metadata.projectAddress) ||
+          (typeof metadata.project_address === 'string' && metadata.project_address) ||
+          projectNo,
+        fromContractor:
+          (typeof metadata.from === 'string' && metadata.from) ||
+          (typeof metadata.contractor === 'string' && metadata.contractor) ||
+          (typeof metadata.sender === 'string' && metadata.sender) ||
+          null,
         submittedBy,
+        requiredReviewDate:
+          (typeof metadata.requiredReviewDate === 'string' && metadata.requiredReviewDate.trim()) ||
+          (typeof metadata.actionNeededBy === 'string' && metadata.actionNeededBy.trim()) ||
+          (typeof metadata.dueDate === 'string' && metadata.dueDate.trim()) ||
+          null,
+        quantity:
+          typeof metadata.quantity === 'number'
+            ? metadata.quantity
+            : typeof metadata.quantity === 'string'
+              ? metadata.quantity
+              : typeof metadata.specQuantity === 'string'
+                ? metadata.specQuantity
+                : typeof metadata.changeOrderQty === 'string'
+                  ? metadata.changeOrderQty
+                  : null,
+        primeContractValue:
+          typeof metadata.contractAmount === 'number'
+            ? metadata.contractAmount
+            : typeof metadata.contractAmount === 'string'
+              ? metadata.contractAmount
+              : typeof metadata.primeContractValue === 'number'
+                ? metadata.primeContractValue
+                : typeof metadata.primeContractValue === 'string'
+                  ? metadata.primeContractValue
+                  : null,
+        changeType: typeof metadata.changeType === 'string' ? metadata.changeType : null,
         priority,
-        status: reviewStatus,
+        reason: (typeof metadata.reason === 'string' && metadata.reason) || null,
+        reasonCategory: typeof metadata.reasonCategory === 'string' ? metadata.reasonCategory : null,
+        status:
+          reviewStatus === 'APPROVED' ? 'APPROVED' : reviewStatus === 'REJECTED' ? 'REJECTED' : 'PENDING',
         scheduleImpact:
           (typeof metadata.scheduleImpact === 'string' && metadata.scheduleImpact) || null,
         newCompletionDate:
           (typeof metadata.newCompletionDate === 'string' && metadata.newCompletionDate) || null,
-        reason: (typeof metadata.reason === 'string' && metadata.reason) || null,
+        scheduleDays:
+          typeof metadata.scheduleDays === 'number' || typeof metadata.scheduleDays === 'string'
+            ? metadata.scheduleDays
+            : null,
         totalCost:
           typeof metadata.proposedAmount === 'number'
             ? metadata.proposedAmount
@@ -371,7 +610,77 @@ export async function GET(_req: Request, { params }: Params) {
               total: number
             }>)
           : null,
+        laborCost:
+          typeof metadata.laborCost === 'number'
+            ? metadata.laborCost
+            : typeof metadata.laborCost === 'string'
+              ? metadata.laborCost
+              : null,
+        materialCost:
+          typeof metadata.materialCost === 'number'
+            ? metadata.materialCost
+            : typeof metadata.materialCost === 'string'
+              ? metadata.materialCost
+              : null,
+        equipmentCost:
+          typeof metadata.equipmentCost === 'number'
+            ? metadata.equipmentCost
+            : typeof metadata.equipmentCost === 'string'
+              ? metadata.equipmentCost
+              : null,
+        subcontractorCost:
+          typeof metadata.subcontractorCost === 'number'
+            ? metadata.subcontractorCost
+            : typeof metadata.subcontractorCost === 'string'
+              ? metadata.subcontractorCost
+              : null,
+        overheadProfit:
+          typeof metadata.overheadProfit === 'number'
+            ? metadata.overheadProfit
+            : typeof metadata.overheadProfit === 'string'
+              ? metadata.overheadProfit
+              : null,
+        updatedContractValue:
+          typeof metadata.updatedContractValue === 'number'
+            ? metadata.updatedContractValue
+            : typeof metadata.updatedContractValue === 'string'
+              ? metadata.updatedContractValue
+              : null,
+        drawingSheetNumbers:
+          (typeof metadata.drawingNumber === 'string' && metadata.drawingNumber) ||
+          (typeof metadata.sheetNumber === 'string' && metadata.sheetNumber) ||
+          (typeof metadata.drawingSheetNumbers === 'string' && metadata.drawingSheetNumbers) ||
+          null,
+        specificationSections:
+          (typeof metadata.specSection === 'string' && metadata.specSection) ||
+          (typeof metadata.specificationSections === 'string' && metadata.specificationSections) ||
+          null,
+        detailReferences:
+          (typeof metadata.detailReference === 'string' && metadata.detailReference) ||
+          (typeof metadata.detailReferences === 'string' && metadata.detailReferences) ||
+          null,
+        relatedRfiNumbers:
+          (typeof metadata.rfiNo === 'string' && metadata.rfiNo) ||
+          (typeof metadata.relatedRfiNumbers === 'string' && metadata.relatedRfiNumbers) ||
+          (typeof metadata.relatedRfi === 'string' && metadata.relatedRfi) ||
+          null,
+        relatedSubmittalNumbers:
+          (typeof metadata.submittalNumber === 'string' && metadata.submittalNumber) ||
+          (typeof metadata.relatedSubmittalNumbers === 'string' && metadata.relatedSubmittalNumbers) ||
+          null,
+        reviewerComments:
+          (typeof metadata.reviewerComments === 'string' && metadata.reviewerComments) ||
+          (typeof metadata.comments === 'string' && metadata.comments) ||
+          null,
+        reviewedBy: (typeof metadata.reviewedBy === 'string' && metadata.reviewedBy) || null,
+        reviewDate: (typeof metadata.reviewDate === 'string' && metadata.reviewDate) || null,
+        attachments:
+          Array.isArray(metadata.attachments) && metadata.attachments.length > 0
+            ? (metadata.attachments as Array<Record<string, unknown>>)
+            : attachmentNames ?? [],
+        approvalRows: approvalRows.length ? approvalRows : undefined,
         brandingCompanyName,
+        brandingLogoDataUri: brandingLogoDataUri || null,
         contactAddress: accountContactAddress || process.env.REVIEW_PDF_CONTACT_ADDRESS || null,
         contactPhone: accountContactPhone || process.env.REVIEW_PDF_CONTACT_PHONE || null,
         contactEmail: process.env.REVIEW_PDF_CONTACT_EMAIL || null,

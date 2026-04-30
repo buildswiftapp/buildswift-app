@@ -26,7 +26,6 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import type { Attachment as DocAttachment, DocumentType, Project } from '@/lib/types'
 import { uploadPendingAttachments } from '@/lib/supabase/upload-attachments'
-import { ReviewerManagementSection } from '@/app/components/reviewer-management-section'
 import { MissingScopeEditorSection } from '../../../components/missing-scope-editor-section'
 import { docTypeToMissingScopeType } from '@/lib/missing-scope-client'
 import { buildRfiDescriptionBody, buildSubmittalDescriptionBody } from '@/lib/document-html'
@@ -94,19 +93,13 @@ function NewDocumentContent() {
     specSection: '',
     manufacturer: '',
     productName: '',
+    quantity: '',
     notes: '',
     priority: 'normal' as 'low' | 'normal' | 'urgent',
   })
 
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [reviewConfig, setReviewConfig] = useState<{
-    reviewers: string[]
-    expires_in_days: 3 | 7 | 14
-  }>({
-    reviewers: [],
-    expires_in_days: 7,
-  })
 
   useEffect(() => {
     const loadProjects = async () => {
@@ -195,9 +188,6 @@ function NewDocumentContent() {
     if (!formData.projectId) return toast.error('Please select a project')
     if (!formData.title.trim()) return toast.error('Please enter a title')
     if (!formData.description.trim()) return toast.error('Please add description')
-    if (!asDraft && reviewConfig.reviewers.length === 0) {
-      return toast.error('Add at least one reviewer before sending')
-    }
 
     setIsSubmitting(true)
     try {
@@ -234,7 +224,8 @@ function NewDocumentContent() {
           title: formData.title,
           description: descriptionBody,
           due_date: formData.dueDate || null,
-          save_as_draft: asDraft,
+          // For send-for-review, we create the document then collect reviewer details on the next screen.
+          save_as_draft: true,
           metadata: {
             rfiDate: formData.type === 'rfi' ? formData.date : undefined,
             submittalDate: formData.type === 'submittal' ? formData.date : undefined,
@@ -248,6 +239,7 @@ function NewDocumentContent() {
             specSection: formData.type === 'submittal' ? formData.specSection : undefined,
             manufacturer: formData.type === 'submittal' ? formData.manufacturer : undefined,
             productName: formData.type === 'submittal' ? formData.productName : undefined,
+            quantity: formData.type === 'submittal' ? formData.quantity : undefined,
             notes: formData.notes || undefined,
             attachments: docAttachments,
             priority: formData.priority,
@@ -255,33 +247,13 @@ function NewDocumentContent() {
         },
       })
 
-      if (!asDraft) {
-        try {
-          await apiFetch(`/api/documents/${document.id}/send-for-review`, {
-            method: 'POST',
-            json: {
-              reviewers: reviewConfig.reviewers,
-              expires_in_days: reviewConfig.expires_in_days,
-              resend: false,
-            },
-          })
-          toast.success(
-            `${formData.type === 'rfi' ? 'RFI' : 'Submittal'} created and review invitations sent`
-          )
-        } catch (sendErr) {
-          toast.error(
-            sendErr instanceof Error
-              ? sendErr.message
-              : 'Document was saved but review emails could not be sent'
-          )
-          router.push(`/documents/${document.id}`)
-          return
-        }
-      } else {
+      if (asDraft) {
         toast.success('Draft saved successfully')
+        router.push(`/documents?type=${formData.type}`)
+        return
       }
 
-      router.push(`/documents?type=${formData.type}`)
+      router.push(`/documents/${document.id}/send-for-review`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to save document')
     } finally {
@@ -325,25 +297,48 @@ function NewDocumentContent() {
       style={{ backgroundColor: PAGE_BG }}
     >
       <div className="mx-auto w-full max-w-[min(100%,1920px)]">
-        <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between lg:mb-10">
-          <div className="min-w-0 max-w-3xl">
-            <h1 className="text-3xl font-bold tracking-tight text-[#0f172a]">
-              {formData.type === 'rfi' ? 'Create New RFI' : 'Create New Submittal'}
-            </h1>
-            <p className="mt-2 text-base leading-relaxed text-[#64748b]">
-              Organize your request by section. BuildSwift generates a professional document from your inputs.
-            </p>
+        <div className="mb-6 flex flex-col gap-4 sm:mb-8 lg:mb-10">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0 max-w-3xl">
+              <h1 className="text-3xl font-bold tracking-tight text-[#0f172a]">
+                {formData.type === 'rfi' ? 'Create New RFI' : 'Create New Submittal'}
+              </h1>
+              <p className="mt-2 text-base leading-relaxed text-[#64748b]">
+                Organize your request by section. BuildSwift generates a professional document from your inputs.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center lg:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-2 border-2 border-dashed border-[#60a5fa] bg-white text-[#1e3a8a] shadow-sm hover:bg-[#eff6ff] sm:shrink-0"
+                onClick={() => void handleSubmit(true)}
+                disabled={isSubmitting}
+              >
+                <Save className="h-4 w-4" />
+                Save as Draft
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                className="min-w-[10rem] !bg-[#0b1d3a] text-white shadow-[0_4px_14px_rgba(15,23,42,0.25)] hover:!bg-[#132b4f] hover:brightness-100 sm:shrink-0"
+                onClick={() => void handleSubmit(false)}
+                disabled={isSubmitting}
+              >
+                Send for Review
+              </Button>
+              <Button
+                variant="outline"
+                className="shrink-0 gap-2 rounded-lg border-[#e2e8f0] bg-white px-4 text-[#0f172a] shadow-sm hover:bg-[#f8fafc] sm:shrink-0"
+                asChild
+              >
+                <Link href={`/documents?type=${formData.type}`}>
+                  <ArrowLeft className="h-4 w-4" />
+                  Back to {formData.type === 'rfi' ? 'RFIs' : 'Submittals'}
+                </Link>
+              </Button>
+            </div>
           </div>
-          <Button
-            variant="outline"
-            className="shrink-0 gap-2 rounded-lg border-[#e2e8f0] bg-white px-4 text-[#0f172a] shadow-sm hover:bg-[#f8fafc]"
-            asChild
-          >
-            <Link href={`/documents?type=${formData.type}`}>
-              <ArrowLeft className="h-4 w-4" />
-              Back to {formData.type === 'rfi' ? 'RFIs' : 'Submittals'}
-            </Link>
-          </Button>
         </div>
 
         <div className="grid grid-cols-1 gap-6 md:gap-7 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
@@ -439,7 +434,7 @@ function NewDocumentContent() {
             {formData.type === 'submittal' && (
               <div className={formCardClassName()}>
                 <h2 className="mb-5 text-lg font-semibold text-[#0f172a]">Submittal details</h2>
-                <div className="grid gap-5 sm:grid-cols-3">
+                <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
                   <div>
                     <label className={capLabel}>Spec section</label>
                     <Input
@@ -459,6 +454,14 @@ function NewDocumentContent() {
                     <Input
                       value={formData.productName}
                       onChange={(e) => setFormData((p) => ({ ...p, productName: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className={capLabel}>Quantity</label>
+                    <Input
+                      value={formData.quantity}
+                      onChange={(e) => setFormData((p) => ({ ...p, quantity: e.target.value }))}
+                      placeholder="e.g., 4"
                     />
                   </div>
                 </div>
@@ -571,40 +574,9 @@ function NewDocumentContent() {
               />
               <p className={hintClass}>{formData.notes.length} characters</p>
             </div>
-
-            <div className="flex flex-col gap-3 border-t border-[#e2e8f0] pt-6 sm:flex-row sm:items-center sm:justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                className="gap-2 border-2 border-dashed border-[#60a5fa] bg-white text-[#1e3a8a] shadow-sm hover:bg-[#eff6ff]"
-                onClick={() => void handleSubmit(true)}
-                disabled={isSubmitting}
-              >
-                <Save className="h-4 w-4" />
-                Save as Draft
-              </Button>
-              <Button
-                type="button"
-                variant="default"
-                className="min-w-[10rem] !bg-[#0b1d3a] text-white shadow-[0_4px_14px_rgba(15,23,42,0.25)] hover:!bg-[#132b4f] hover:brightness-100"
-                onClick={() => void handleSubmit(false)}
-                disabled={isSubmitting || reviewConfig.reviewers.length === 0}
-              >
-                Send for Review
-              </Button>
-            </div>
           </div>
 
           <aside className="w-full min-w-0 space-y-6 lg:sticky lg:top-6 lg:self-start">
-            <div className={formCardClassName()}>
-              <ReviewerManagementSection
-                embedded
-                layout="create"
-                hideSendButton
-                onReviewConfigChange={setReviewConfig}
-              />
-            </div>
-
             <div className={formCardClassName()}>
               <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">Categorization</h3>
               <div className="mb-6">

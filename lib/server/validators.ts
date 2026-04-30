@@ -52,9 +52,36 @@ export const updateDocumentSchema = z.object({
 
 export const sendForReviewSchema = z.object({
   reviewers: z
-    .array(z.string().trim().toLowerCase().email())
+    .array(
+      z.union([
+        z.string().trim().toLowerCase().email(),
+        z.object({
+          email: z.string().trim().toLowerCase().email(),
+          full_name: z.string().trim().min(1).max(200).optional(),
+          company: z.string().trim().min(1).max(200).optional(),
+        }),
+      ])
+    )
     .min(1)
-    .transform((reviewers) => Array.from(new Set(reviewers))),
+    .transform((reviewers) => {
+      const seen = new Set<string>()
+      const out: Array<{ email: string; full_name?: string; company?: string }> = []
+      for (const r of reviewers) {
+        const row =
+          typeof r === 'string'
+            ? { email: r }
+            : { email: r.email, full_name: r.full_name, company: r.company }
+        const e = row.email.toLowerCase().trim()
+        if (!e || seen.has(e)) continue
+        seen.add(e)
+        out.push({
+          email: e,
+          full_name: row.full_name?.trim() || undefined,
+          company: row.company?.trim() || undefined,
+        })
+      }
+      return out
+    }),
   /** When true, only refresh tokens for reviewers on the latest open review cycle (expired links only). */
   resend: z.boolean().optional().default(false),
   /** Link lifetime for new tokens (days). Default 7. */

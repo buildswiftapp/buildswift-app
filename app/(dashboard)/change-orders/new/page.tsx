@@ -27,7 +27,6 @@ import { toast } from 'sonner'
 import type { Attachment as DocAttachment } from '@/lib/types'
 import { uploadPendingAttachments } from '@/lib/supabase/upload-attachments'
 import {
-  ReviewerManagementSection,
   type ReviewInviteSendPayload,
 } from '@/app/components/reviewer-management-section'
 import { MissingScopeEditorSection } from '../../../components/missing-scope-editor-section'
@@ -153,13 +152,6 @@ function NewChangeOrderContent() {
   const [costItems, setCostItems] = useState<CostItemDraft[]>([])
 
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [reviewConfig, setReviewConfig] = useState<{
-    reviewers: string[]
-    expires_in_days: 3 | 7 | 14
-  }>({
-    reviewers: [],
-    expires_in_days: 7,
-  })
 
   useEffect(() => {
     const loadProjects = async () => {
@@ -390,31 +382,14 @@ function NewChangeOrderContent() {
     }
   }
 
-  const handleSendForReview = async (payload: ReviewInviteSendPayload) => {
+  const handleSendForReview = async (_payload: ReviewInviteSendPayload) => {
     if (!validateForm()) return
-    if (payload.reviewers.length === 0) {
-      toast.error('Add at least one reviewer before sending')
-      return
-    }
 
     setIsSubmitting(true)
     try {
-      const documentId = await createDocument(false)
-      try {
-        await apiFetch(`/api/documents/${documentId}/send-for-review`, {
-          method: 'POST',
-          json: payload,
-        })
-        toast.success('Change order created and review invitations sent')
-        router.push('/documents?type=change_order')
-      } catch (sendErr) {
-        toast.error(
-          sendErr instanceof Error
-            ? sendErr.message
-            : 'Change order was saved but review emails could not be sent'
-        )
-        router.push(`/documents/${documentId}`)
-      }
+      // Create as draft first; reviewer details are collected on the next screen.
+      const documentId = await createDocument(true)
+      router.push(`/documents/${documentId}/send-for-review`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to save change order')
     } finally {
@@ -430,25 +405,54 @@ function NewChangeOrderContent() {
       style={{ backgroundColor: PAGE_BG }}
     >
       <div className="mx-auto w-full max-w-[min(100%,1920px)]">
-        <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-start sm:justify-between lg:mb-10">
-          <div className="min-w-0 max-w-3xl">
-            <h1 className="text-3xl font-bold tracking-tight text-[#0f172a]">
-              Create New Change Order
-            </h1>
-            <p className="mt-2 text-base leading-relaxed text-[#64748b]">
-              Organize your change request by section. BuildSwift generates a professional document from your inputs.
-            </p>
+        <div className="mb-6 flex flex-col gap-4 sm:mb-8 lg:mb-10">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0 max-w-3xl">
+              <h1 className="text-3xl font-bold tracking-tight text-[#0f172a]">
+                Create New Change Order
+              </h1>
+              <p className="mt-2 text-base leading-relaxed text-[#64748b]">
+                Organize your change request by section. BuildSwift generates a professional document from your inputs.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center lg:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-2 border-2 border-dashed border-[#60a5fa] bg-white text-[#1e3a8a] shadow-sm hover:bg-[#eff6ff] sm:shrink-0"
+                onClick={() => handleSubmit(true)}
+                disabled={isSubmitting}
+              >
+                <Save className="h-4 w-4" />
+                Save as Draft
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                className="min-w-[10rem] !bg-[#0b1d3a] text-white shadow-[0_4px_14px_rgba(15,23,42,0.25)] hover:!bg-[#132b4f] hover:brightness-100 sm:shrink-0"
+                onClick={() =>
+                  void handleSendForReview({
+                    reviewers: [],
+                    expires_in_days: 7,
+                    resend: false,
+                  })
+                }
+                disabled={isSubmitting}
+              >
+                Send for Review
+              </Button>
+              <Button
+                variant="outline"
+                className="shrink-0 gap-2 rounded-lg border-[#e2e8f0] bg-white px-4 text-[#0f172a] shadow-sm hover:bg-[#f8fafc] sm:shrink-0"
+                asChild
+              >
+                <Link href="/documents?type=change_order">
+                  <ArrowLeft className="h-4 w-4" />
+                  Back to Change Orders
+                </Link>
+              </Button>
+            </div>
           </div>
-          <Button
-            variant="outline"
-            className="shrink-0 gap-2 rounded-lg border-[#e2e8f0] bg-white px-4 text-[#0f172a] shadow-sm hover:bg-[#f8fafc]"
-            asChild
-          >
-            <Link href="/documents?type=change_order">
-              <ArrowLeft className="h-4 w-4" />
-              Back to Change Orders
-            </Link>
-          </Button>
         </div>
 
         <div className="grid grid-cols-1 gap-6 md:gap-7 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
@@ -773,46 +777,9 @@ function NewChangeOrderContent() {
               />
               <p className={hintClass}>{formData.notes.length} characters</p>
             </div>
-
-            <div className="flex flex-col gap-3 border-t border-[#e2e8f0] pt-6 sm:flex-row sm:items-center sm:justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                className="gap-2 border-2 border-dashed border-[#60a5fa] bg-white text-[#1e3a8a] shadow-sm hover:bg-[#eff6ff]"
-                onClick={() => handleSubmit(true)}
-                disabled={isSubmitting}
-              >
-                <Save className="h-4 w-4" />
-                Save as Draft
-              </Button>
-              <Button
-                type="button"
-                variant="default"
-                className="min-w-[10rem] !bg-[#0b1d3a] text-white shadow-[0_4px_14px_rgba(15,23,42,0.25)] hover:!bg-[#132b4f] hover:brightness-100"
-                onClick={() =>
-                  void handleSendForReview({
-                    reviewers: reviewConfig.reviewers,
-                    expires_in_days: reviewConfig.expires_in_days,
-                    resend: false,
-                  })
-                }
-                disabled={isSubmitting || reviewConfig.reviewers.length === 0}
-              >
-                Send for Review
-              </Button>
-            </div>
           </div>
 
           <aside className="w-full min-w-0 space-y-6 lg:sticky lg:top-6 lg:self-start">
-            <div className={formCardClassName()}>
-              <ReviewerManagementSection
-                embedded
-                layout="create"
-                onReviewConfigChange={setReviewConfig}
-                onSend={handleSendForReview}
-              />
-            </div>
-
             <div className={formCardClassName()}>
               <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">
                 Categorization

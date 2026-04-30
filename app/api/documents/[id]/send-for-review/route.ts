@@ -307,11 +307,13 @@ export async function POST(req: Request, { params }: Params) {
     const { id } = await params
     const payload = sendForReviewSchema.safeParse(await req.json().catch(() => ({})))
     if (!payload.success) return badRequest('Invalid payload', payload.error.flatten())
+    const reviewers = payload.data.reviewers
+    const reviewerEmails = reviewers.map((r) => r.email)
 
     const supabase = await createSupabaseServerClient()
     if (!supabase) return serverError('Supabase is not configured')
     const privilegedDb = createSupabaseAdminClient() ?? supabase
-    if (payload.data.reviewers.length > 1) {
+    if (reviewerEmails.length > 1) {
       const proGate = await assertCanUseProFeature(
         privilegedDb as any,
         auth.accountId,
@@ -370,7 +372,7 @@ export async function POST(req: Request, { params }: Params) {
         _review_url: string
       }[] = []
 
-      for (const email of payload.data.reviewers) {
+      for (const email of reviewerEmails) {
         const { data: reqRow, error: reqErr } = await privilegedDb
           .from('review_requests')
           .select('id,decided_at,token_expires_at,created_at,email_status,reviewer_email')
@@ -594,11 +596,12 @@ export async function POST(req: Request, { params }: Params) {
     if (cycleError) return serverError(cycleError.message)
     if (!cycle) return serverError('Failed to create review cycle')
 
-    const requestRows = payload.data.reviewers.map((email) => {
+    const requestRows = reviewers.map((reviewer) => {
       const token = generateSecureToken()
       return {
         review_cycle_id: cycle.id,
-        reviewer_email: email.toLowerCase(),
+        reviewer_email: reviewer.email.toLowerCase(),
+        full_name: reviewer.full_name,
         secure_token_hash: hashToken(token),
         token_expires_at: new Date(reviewLinkExpiresAtMs(expiresInDays)).toISOString(),
         email_status: 'sent',
@@ -610,6 +613,7 @@ export async function POST(req: Request, { params }: Params) {
     const requestInsertRows = requestRows.map((row) => ({
       review_cycle_id: row.review_cycle_id,
       reviewer_email: row.reviewer_email,
+      ...(row.full_name ? { full_name: row.full_name } : {}),
       secure_token_hash: row.secure_token_hash,
       token_expires_at: row.token_expires_at,
       email_status: row.email_status,
@@ -658,7 +662,7 @@ export async function POST(req: Request, { params }: Params) {
       documentId: id,
       projectId: document.project_id,
       eventData: {
-        reviewer_count: payload.data.reviewers.length,
+        reviewer_count: reviewerEmails.length,
         cycle_no: cycleNo,
         expires_in_days: expiresInDays,
       },

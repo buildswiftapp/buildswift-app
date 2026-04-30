@@ -8,6 +8,7 @@ import {
   Download,
   Eye,
   Plus,
+  Send,
   Save,
   Trash2,
   Upload,
@@ -44,7 +45,6 @@ import { cn } from '@/lib/utils'
 import { MissingScopeEditorSection } from '../../../components/missing-scope-editor-section'
 import { docTypeToMissingScopeType } from '@/lib/missing-scope-client'
 import { DocumentActivityPanel } from '@/app/components/document-activity-panel'
-import { ReviewerManagementSection } from '@/app/components/reviewer-management-section'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { Attachment as DocAttachment } from '@/lib/types'
 
@@ -157,6 +157,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     specSection: '',
     manufacturer: '',
     productName: '',
+    quantity: '',
     description: '',
     notes: '',
   })
@@ -400,6 +401,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
         specSection: sub.specSection || undefined,
         manufacturer: sub.manufacturer || undefined,
         productName: sub.productName || undefined,
+        quantity: sub.quantity || undefined,
         notes: sub.notes || undefined,
         attachments: toDocAttachments(attachments),
       },
@@ -480,6 +482,10 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     window.setTimeout(() => setExportingPdf(false), 600)
   }
 
+  const handleGoSendForReview = useCallback(() => {
+    router.push(`/documents/${id}/send-for-review`)
+  }, [router, id])
+
   const pageTitle = useMemo(() => {
     if (!doc) return 'Document'
     if (doc.doc_type === 'rfi') return 'Edit RFI'
@@ -525,6 +531,15 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                 {exportingPdf ? 'Exporting...' : 'Export to PDF'}
               </Button>
             ) : null}
+            <Button
+              type="button"
+              onClick={handleGoSendForReview}
+              className="shrink-0 gap-2 rounded-xl px-4"
+              disabled={isSaving}
+            >
+              <Send className="h-4 w-4" />
+              Send for Review
+            </Button>
             <Button
               variant="outline"
               className="shrink-0 gap-2 rounded-xl bg-white px-4 text-foreground hover:bg-muted"
@@ -660,7 +675,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             {docType === 'submittal' ? (
               <div className={formCardClassName()}>
                 <h2 className="mb-5 text-lg font-semibold text-foreground">Submittal details</h2>
-                <div className="grid gap-5 sm:grid-cols-3">
+                <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
                   <div>
                     <label className={capLabel}>Spec section</label>
                     <Input
@@ -680,6 +695,14 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                     <Input
                       value={sub.productName}
                       onChange={(e) => setSub((p) => ({ ...p, productName: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className={capLabel}>Quantity</label>
+                    <Input
+                      value={sub.quantity}
+                      onChange={(e) => setSub((p) => ({ ...p, quantity: e.target.value }))}
+                      placeholder="e.g., 4"
                     />
                   </div>
                 </div>
@@ -933,48 +956,20 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
 
           <aside className="w-full min-w-0 space-y-6 lg:sticky lg:top-6 lg:self-start">
             {docType === 'change_order' ? (
-              <>
-                <div className={formCardClassName()}>
-                  <ReviewerManagementSection
-                    embedded
-                    layout="create"
-                    onSend={async ({ reviewers, expires_in_days, resend }) => {
-                      await apiFetch('/api/documents/' + id + '/send-for-review', {
-                        method: 'POST',
-                        json: { reviewers, expires_in_days, resend },
-                      })
-                      toast.success('Review invitations sent')
-                    }}
-                  />
-                </div>
-
-                <div className={formCardClassName()}>
-                  <h3 className="mb-5 text-lg font-semibold text-foreground">Categorization</h3>
-                  <div className="space-y-4">
-                    <div>
-                      <label className={capLabel}>Reason</label>
-                      <p className="text-sm font-medium text-foreground">{reasonLabel}</p>
-                    </div>
-                    <div className="border-t border-border pt-4">
-                      <label className={capLabel}>Schedule impact</label>
-                      <p className="text-sm font-medium text-foreground">{scheduleLabel}</p>
-                    </div>
+              <div className={formCardClassName()}>
+                <h3 className="mb-5 text-lg font-semibold text-foreground">Categorization</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className={capLabel}>Reason</label>
+                    <p className="text-sm font-medium text-foreground">{reasonLabel}</p>
+                  </div>
+                  <div className="border-t border-border pt-4">
+                    <label className={capLabel}>Schedule impact</label>
+                    <p className="text-sm font-medium text-foreground">{scheduleLabel}</p>
                   </div>
                 </div>
-              </>
-            ) : (
-              <div className={formCardClassName()}>
-                <ReviewerManagementSection
-                  onSend={async ({ reviewers, expires_in_days, resend }) => {
-                    await apiFetch('/api/documents/' + id + '/send-for-review', {
-                      method: 'POST',
-                      json: { reviewers, expires_in_days, resend },
-                    })
-                    toast.success('Review invitations sent')
-                  }}
-                />
               </div>
-            )}
+            ) : null}
 
             <div className={formCardClassName()}>
               <h3 className="mb-5 text-lg font-semibold text-foreground">Summary</h3>

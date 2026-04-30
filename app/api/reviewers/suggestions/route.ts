@@ -1,5 +1,6 @@
 import { ok, serverError, unauthorized } from '@/lib/server/api-response'
 import { getAuthContext } from '@/lib/server/auth'
+import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 
 const MAX_QUERY_LEN = 120
@@ -28,8 +29,9 @@ export async function GET(req: Request) {
 
   const supabase = await createSupabaseServerClient()
   if (!supabase) return serverError('Supabase is not configured')
+  const privilegedDb = createSupabaseAdminClient() ?? supabase
 
-  const { data: cycles, error: cycleError } = await supabase
+  const { data: cycles, error: cycleError } = await privilegedDb
     .from('review_cycles')
     .select('id')
     .eq('sent_by', auth.user.id)
@@ -48,7 +50,7 @@ export async function GET(req: Request) {
   const ordered: string[] = []
 
   for (const batch of chunk(cycleIds, BATCH)) {
-    const base = supabase.from('review_requests').select('reviewer_email').in('review_cycle_id', batch)
+    const base = privilegedDb.from('review_requests').select('reviewer_email').in('review_cycle_id', batch)
     const query = hasQuery ? base.ilike('reviewer_email', pattern as string) : base
     const { data: rows, error: reqError } = await query.limit(hasQuery ? 80 : 200)
 

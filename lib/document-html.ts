@@ -29,6 +29,30 @@ export function stripSimpleHtml(s: string) {
   return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
+/** Plain text for react-pdf descriptions: strips tags, preserves line breaks, no truncation. */
+export function stripHtmlToPlainParagraphs(raw: string): string {
+  const t = (raw ?? '').trim()
+  if (!t) return ''
+  let s = t
+  s = s.replace(/<\/(?:p|div|h[1-6]|li|ul|ol)\s*>/gi, '\n')
+  s = s.replace(/<br\s*\/?>/gi, '\n')
+  s = s.replace(/<[^>]+>/g, '')
+  s = s
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\u00a0/g, ' ')
+  return s
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 export function strongField(html: string, label: string): string {
   const re = new RegExp(`<strong>${escapeRe(label)}:</strong>\\s*([^<]*)`, 'i')
   const m = html.match(re)
@@ -163,6 +187,7 @@ export function buildSubmittalHeaderHtml(values: {
   specSection: string
   manufacturer: string
   productName: string
+  quantity: string
 }): string {
   const dateLong = formatLongDateFromIso(values.date)
   return `<h2>Product Submittal</h2>
@@ -173,7 +198,8 @@ export function buildSubmittalHeaderHtml(values: {
 <p><strong>Specification Section:</strong> ${values.specSection || 'N/A'}</p>
 <h3>Product Information</h3>
 <p><strong>Manufacturer:</strong> ${values.manufacturer || 'TBD'}</p>
-<p><strong>Product:</strong> ${values.productName || 'TBD'}</p>`
+<p><strong>Product:</strong> ${values.productName || 'TBD'}</p>
+<p><strong>Quantity:</strong> ${values.quantity || 'TBD'}</p>`
 }
 
 /** Body HTML for submittal — stored in `document.description` when using structured storage. */
@@ -193,6 +219,7 @@ export function buildSubmittalHtml(values: {
   specSection: string
   manufacturer: string
   productName: string
+  quantity: string
   description: string
   notes: string
 }): string {
@@ -205,6 +232,7 @@ export function buildSubmittalHtml(values: {
       specSection: values.specSection,
       manufacturer: values.manufacturer,
       productName: values.productName,
+      quantity: values.quantity,
     }) + buildSubmittalDescriptionBody(values)
   )
 }
@@ -228,6 +256,7 @@ export function ensureSubmittalFullDescriptionHtml(
     ''
   const manufacturer = (typeof metadata.manufacturer === 'string' && metadata.manufacturer) || ''
   const productName = (typeof metadata.productName === 'string' && metadata.productName) || ''
+  const quantity = (typeof metadata.quantity === 'string' && metadata.quantity) || ''
   return (
     buildSubmittalHeaderHtml({
       number: num,
@@ -237,6 +266,7 @@ export function ensureSubmittalFullDescriptionHtml(
       specSection: spec,
       manufacturer,
       productName,
+      quantity,
     }) + raw
   )
 }
@@ -392,6 +422,7 @@ export function initialSubmittalState(args: {
   specSection: string
   manufacturer: string
   productName: string
+  quantity: string
   description: string
   notes: string
 } {
@@ -407,6 +438,7 @@ export function initialSubmittalState(args: {
   const specSection = (typeof m.specSection === 'string' && m.specSection) || strongField(html, 'Specification Section') || ''
   const manufacturer = (typeof m.manufacturer === 'string' && m.manufacturer) || ''
   const productName = (typeof m.productName === 'string' && m.productName) || ''
+  const quantity = (typeof m.quantity === 'string' && m.quantity) || strongField(html, 'Quantity') || ''
   let description = extractH3Block(html, 'Description') || ''
   if (!description) {
     description =
@@ -415,7 +447,7 @@ export function initialSubmittalState(args: {
         .trim() || ''
   }
   const notes = (typeof m.notes === 'string' && m.notes) || extractH3Block(html, 'Notes') || ''
-  return { number, title, date: dateIso, specSection, manufacturer, productName, description, notes }
+  return { number, title, date: dateIso, specSection, manufacturer, productName, quantity, description, notes }
 }
 
 export function initialChangeOrderState(args: {
