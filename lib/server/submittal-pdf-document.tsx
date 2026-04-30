@@ -1,7 +1,6 @@
 import React from 'react'
 import { Document, Image, Page, Text, View } from '@react-pdf/renderer'
 import { stripHtmlToPlainParagraphs } from '@/lib/document-html'
-import { PdfHeader } from '@/lib/server/pdf-header'
 
 export type SubmittalAttachmentRow = {
   fileName: string
@@ -196,28 +195,123 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
             padding: 8,
           }}
         >
-          <PdfHeader
-            themeColor={GREEN_DARK}
-            titleLeft="SUBMITTAL"
-            numberLabel="SUBMITTAL #"
-            numberValue={data.submittalNumber}
-            logoDataUri={data.logoDataUri}
-            brand={data.brand || 'BuildSwift'}
-            brandSub={data.brandSub || null}
-            statusText={statusLabel}
-            statusStyle={headerStatusStyle as any}
-            contactAddress={data.contactAddress}
-            contactPhone={data.contactPhone}
-            contactEmail={data.contactEmail}
-            projectName={data.projectName}
-            projectAddress={data.projectAddress}
-            mutedColor={GREEN_LABEL}
-            titleAccentColor={GREEN_DARK}
-            borderColor={BORDER}
-          />
+        {/* Top bar: single dark green strip + right ID badge (Summit reference) */}
+        <View style={{ flexDirection: 'row', alignItems: 'stretch', marginBottom: SECTION_GAP }}>
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: GREEN_DARK,
+              borderRadius: 6,
+              minHeight: 38,
+              justifyContent: 'center',
+              paddingHorizontal: 12,
+              marginRight: 8,
+            }}
+          >
+            <Text style={{ color: '#ffffff', textAlign: 'center', fontWeight: 900, fontSize: 15, letterSpacing: 1.2, textTransform: 'uppercase' }}>
+              SUBMITTAL
+            </Text>
+          </View>
+          <View
+            style={{
+              width: 108,
+              backgroundColor: GREEN_DARK,
+              borderRadius: 6,
+              minHeight: 38,
+              paddingVertical: 5,
+              paddingHorizontal: 8,
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ color: '#ffffff', fontSize: 6.5, textAlign: 'center', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 0.5 }}>
+              SUBMITTAL #
+            </Text>
+            <Text style={{ color: '#ffffff', fontWeight: 900, fontSize: 13, textAlign: 'center', marginTop: 1 }}>
+              {data.submittalNumber}
+            </Text>
+          </View>
+        </View>
+
+        {/* Company / Project header block */}
+        <View
+          style={{
+            borderWidth: 1,
+            borderColor: BORDER,
+            borderRadius: 8,
+            paddingHorizontal: 10,
+            paddingVertical: 8,
+            marginBottom: SECTION_GAP,
+          }}
+        >
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+              {data.logoDataUri ? (
+                <Image src={data.logoDataUri} style={{ width: 50, height: 50, objectFit: 'contain' }} />
+              ) : null}
+              <View style={{ marginLeft: data.logoDataUri ? 10 : 0 }}>
+                <Text style={{ fontSize: 13, fontWeight: 900, color: GREEN_DARK, letterSpacing: 0.25 }}>
+                  {(data.brand || '').toUpperCase()}
+                </Text>
+                {data.brandSub ? (
+                  <Text style={{ fontSize: 7.5, color: GREEN_LABEL, letterSpacing: 1.1, marginTop: 1, fontWeight: 800 }}>
+                    {data.brandSub.toUpperCase()}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={{ fontSize: 6.2, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 3 }}>
+                STATUS
+              </Text>
+              <Text
+                style={{
+                  alignSelf: 'flex-start',
+                  fontSize: 7.8,
+                  fontWeight: 900,
+                  paddingVertical: 4,
+                  paddingHorizontal: 14,
+                  borderRadius: 10,
+                  ...(headerStatusStyle as any),
+                }}
+              >
+                {statusLabel}
+              </Text>
+            </View>
+          </View>
+
+          <View style={{ marginTop: 8, flexDirection: 'row' }}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Text style={{ fontSize: 10, fontWeight: 900, color: TEXT_DARK, marginBottom: 2 }}>
+                {data.brand}
+              </Text>
+              {formatAddressLines(data.contactAddress).map((line, idx) => (
+                <Text key={`caddr-${idx}`} style={{ fontSize: 8.4, color: TEXT_DARK, lineHeight: 1.25 }}>
+                  {line}
+                </Text>
+              ))}
+              <Text style={{ fontSize: 8.2, color: TEXT_DARK, marginTop: 3 }}>
+                {data.contactPhone} {' | '} {data.contactEmail}
+              </Text>
+            </View>
+            <View style={{ width: 1, backgroundColor: BORDER }} />
+            <View style={{ flex: 1, paddingLeft: 10 }}>
+              <Text style={{ fontSize: LABEL_FONT, color: GREEN_LABEL, textTransform: 'uppercase', marginBottom: 3, fontWeight: 800 }}>
+                PROJECT
+              </Text>
+              <Text style={{ fontSize: 10, fontWeight: 900, color: TEXT_DARK, marginBottom: 2 }}>
+                {data.projectName}
+              </Text>
+              {formatAddressLines(data.projectAddress).map((line, idx) => (
+                <Text key={`paddr-${idx}`} style={{ fontSize: 8.6, color: TEXT_DARK, lineHeight: 1.25, marginTop: idx === 0 ? 1 : 0 }}>
+                  {line}
+                </Text>
+              ))}
+            </View>
+          </View>
 
           {/* 2x2 grid: dates + to/from */}
-          <View style={{ marginTop: 0, borderWidth: 1, borderColor: BORDER, borderRadius: 7, overflow: 'hidden', marginBottom: SECTION_GAP }}>
+          <View style={{ marginTop: 10, borderWidth: 1, borderColor: BORDER, borderRadius: 7, overflow: 'hidden' }}>
             <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: BORDER }}>
               <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8, borderRightWidth: 1, borderRightColor: BORDER }}>
                 <Text style={{ fontSize: LABEL_FONT, color: GREEN_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}>
@@ -245,6 +339,7 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
               </View>
             </View>
           </View>
+        </View>
 
         {/* Submittal Summary — four columns in one row (Summit reference) */}
         <View style={{ borderWidth: 1, borderColor: BORDER, borderRadius: 8, backgroundColor: '#ffffff', marginBottom: SECTION_GAP }}>

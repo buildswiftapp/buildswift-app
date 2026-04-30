@@ -1,7 +1,6 @@
 import React from 'react'
 import { Document, Image, Page, Text, View } from '@react-pdf/renderer'
 import { stripHtmlToPlainParagraphs } from '@/lib/document-html'
-import { PdfHeader } from '@/lib/server/pdf-header'
 
 export type ChangeOrderAttachmentRow = { fileName: string; fileType: string; notes: string }
 
@@ -197,30 +196,79 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
             padding: 7,
           }}
         >
-            <PdfHeader
-              themeColor={PURPLE_DARK}
-              titleLeft="CHANGE ORDER"
-              numberLabel="CHANGE ORDER #"
-              numberValue={data.changeOrderNumber}
-              logoDataUri={data.logoDataUri}
-              brand={data.brand || 'BuildSwift'}
-              brandSub={data.brandSub || null}
-              statusText={data.summaryStatus}
-              statusStyle={statusStyle as any}
-              contactAddress={data.contactAddress}
-              contactPhone={data.contactPhone}
-              contactEmail={data.contactEmail}
-              projectName={data.projectName}
-              projectAddress={data.projectAddress}
-              mutedColor={MUTED}
-              titleAccentColor={PURPLE_DARK}
-              borderColor={PURPLE_BORDER}
-            />
+          {/* Top purple bars */}
+          <View style={{ flexDirection: 'row', marginBottom: 6 }}>
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: PURPLE_DARK,
+                borderTopLeftRadius: 10,
+                borderBottomLeftRadius: 6,
+                height: 32,
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginRight: 6,
+              }}
+            >
+              <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: 900, letterSpacing: 0.6, textTransform: 'uppercase' }}>
+                Change Order
+              </Text>
+            </View>
+            <View
+              style={{
+                width: 130,
+                backgroundColor: PURPLE_DARK,
+                borderTopRightRadius: 10,
+                borderBottomRightRadius: 6,
+                height: 32,
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ color: '#ffffff', fontSize: 6.2, fontWeight: 800, textTransform: 'uppercase' }}>Change Order #</Text>
+              <Text style={{ color: '#ffffff', fontSize: 10.2, fontWeight: 900, marginTop: 1 }}>{data.changeOrderNumber}</Text>
+            </View>
+          </View>
+
+          {/* Header (no account/project branding) — match simple strip style */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SECTION_GAP }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 10 }}>
+              {data.logoDataUri ? <Image src={data.logoDataUri} style={{ width: 62, height: 62, objectFit: 'contain' }} /> : null}
+              <View style={{ marginLeft: data.logoDataUri ? 12 : 0, flexShrink: 1 }}>
+                <Text style={{ fontSize: 15, fontWeight: 900, color: PURPLE_DARK, letterSpacing: 0.25 }}>
+                  {(data.brand || 'BUILDSWIFT').toUpperCase()}
+                </Text>
+                {data.brandSub ? (
+                  <Text style={{ fontSize: 8.2, color: MUTED, letterSpacing: 2.2, marginTop: 1, fontWeight: 700 }}>
+                    {data.brandSub.toUpperCase()}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={{ fontSize: 6.2, fontWeight: 800, color: MUTED, textTransform: 'uppercase', marginBottom: 3 }}>
+                STATUS
+              </Text>
+              <Text
+                style={{
+                  fontSize: 7.8,
+                  fontWeight: 900,
+                  paddingVertical: 4,
+                  paddingHorizontal: 14,
+                  borderRadius: 10,
+                  textTransform: 'uppercase',
+                  ...statusStyle,
+                }}
+              >
+                {data.summaryStatus}
+              </Text>
+            </View>
+          </View>
 
           {/* Date issued / due / from — aligns with Submittal PDF */}
           <View
             style={{
-              marginTop: 0,
+              marginTop: 8,
               marginBottom: SECTION_GAP,
               borderWidth: 1,
               borderColor: BORDER,
