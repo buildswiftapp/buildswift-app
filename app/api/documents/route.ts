@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { badRequest, created, ok, serverError, unauthorized } from '@/lib/server/api-response'
 import { getAuthContext } from '@/lib/server/auth'
 import { syncDocumentAttachments } from '@/lib/server/attachments'
@@ -52,6 +53,17 @@ export async function POST(req: Request) {
   if (!parsed.success) return badRequest('Invalid payload', parsed.error.flatten())
   const body = parsed.data
 
+  const metadataPayload: Record<string, unknown> =
+    body.metadata && typeof body.metadata === 'object' ? { ...(body.metadata as Record<string, unknown>) } : {}
+
+  let docNumber = body.doc_number?.trim() || null
+  if (body.doc_type === 'change_order') {
+    if (!docNumber) docNumber = `CO-${randomUUID().replace(/-/g, '').slice(0, 10).toUpperCase()}`
+    if (!(typeof metadataPayload.changeOrderNumber === 'string' && metadataPayload.changeOrderNumber.trim())) {
+      metadataPayload.changeOrderNumber = docNumber
+    }
+  }
+
   const { data: projectRow, error: projectError } = await supabase
     .from('projects')
     .select('id')
@@ -70,7 +82,7 @@ export async function POST(req: Request) {
     row: {
       account_id: auth.accountId,
       project_id: body.project_id,
-      doc_number: body.doc_number || null,
+      doc_number: docNumber,
       title: body.title,
       description: body.description,
       internal_status: body.save_as_draft ? 'draft' : 'in_review',
@@ -93,6 +105,7 @@ export async function POST(req: Request) {
     }
     return serverError(msg)
   }
+  if (!doc) return serverError('Failed to create document')
 
   const { data: version, error: versionError } = await supabase
     .from('document_versions')
@@ -101,7 +114,7 @@ export async function POST(req: Request) {
       version_no: 1,
       title: body.title,
       description: body.description,
-      metadata: body.metadata,
+      metadata: metadataPayload,
       created_by: auth.user.id,
     })
     .select('id')
@@ -114,7 +127,7 @@ export async function POST(req: Request) {
     documentId: doc.id,
     documentVersionId: version?.id ?? null,
     uploadedBy: auth.user.id,
-    attachmentsRaw: body.metadata?.attachments,
+    attachmentsRaw: metadataPayload.attachments,
   })
   if (attachmentError) return serverError(attachmentError.message)
 

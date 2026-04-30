@@ -1,24 +1,20 @@
 import React from 'react'
 import { Document, Image, Page, Text, View } from '@react-pdf/renderer'
-
-// ── Types ─────────────────────────────────────────────────────────────────────
+import { stripHtmlToPlainParagraphs } from '@/lib/document-html'
 
 export type RfiApprovalRow = {
-  title: string
+  name: string
   role: string
+  action: string
+  reference: string
   signatureName: string | null
   signatureUrl?: string | null
   date: string
-  notes: string
 }
 
-export type RfiImpactItem = {
-  label: string
-  value: string
-}
+export type RfiAttachmentRow = { fileName: string; fileType: string; notes: string }
 
 export type RfiPdfViewModel = {
-  // Company header
   logoDataUri: string
   brand: string
   brandSub: string
@@ -26,470 +22,543 @@ export type RfiPdfViewModel = {
   contactAddress: string
   contactPhone: string
   contactEmail: string
-  // RFI metadata
   rfiNumber: string
   status: string
   projectName: string
-  projectNo: string
-  date: string
-  contractDate: string
-  submittedBy: string
+  projectAddress: string
+  issueDate: string
+  requiredResponseDate: string
+  recipient: string
+  sender: string
+  summaryTitle: string
   priority: string
-  // Content sections
-  reasonForChange: string
-  questionIssue: string
-  proposedInterpretation: string
-  impactItems: RfiImpactItem[]
-  attachments: string[]
-  // Approval
+  detailedQuestion: string
+  reasonForRequest: string
+  conflictIdentification: string
+  missingInformation: string
+  clarificationRequired: string
+  drawingSheetNumber: string
+  specificationSection: string
+  specificReference: string
+  location: string
+  attachments: RfiAttachmentRow[]
+  responseContent: string
+  responder: string
+  responseDate: string
+  costImpact: string
+  scheduleImpact: string
+  impactDescription: string
+  finalStatus: string
+  reviewedBy: string
   approvalRows: RfiApprovalRow[]
-  // Footer
   footerNote: string
 }
 
-// ── Palette ───────────────────────────────────────────────────────────────────
-
-const DARK = '#1a1a1a'
-const AMBER = '#e6a800'
-const SECTION_BORDER = '#dddddd'
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
+const BORDER = '#d9e0ea'
+const CARD_BG = '#ffffff'
+const HEADER_BG = '#153f6f'
+const TITLE_BLUE = '#1e4275'
+const TEXT_DARK = '#1f2937'
+const MUTED = '#5b6471'
+const TABLE_HEAD = '#edf1f6'
+const STATUS_YELLOW = { backgroundColor: '#f2c94c', color: '#111827' }
+const BASE_FONT = 9.2
+const LABEL_FONT = 7
+const VALUE_FONT = 9.2
+const SECTION_GAP = 10
 
 function statusBadgeStyle(status: string): { backgroundColor: string; color: string } {
-  const s = status.toUpperCase()
-  if (s === 'APPROVED') return { backgroundColor: '#2e7d32', color: '#ffffff' }
-  if (s === 'REJECTED') return { backgroundColor: '#c62828', color: '#ffffff' }
-  return { backgroundColor: AMBER, color: '#000000' }
+  const s = (status || '').toUpperCase()
+  if (s === 'ANSWERED') return { backgroundColor: '#16a34a', color: '#ffffff' }
+  if (s === 'CLOSED') return { backgroundColor: '#dc2626', color: '#ffffff' }
+  return { backgroundColor: '#f59e0b', color: '#111827' }
 }
 
-function priorityTagStyle(priority: string): { backgroundColor: string; color: string } | null {
-  const p = (priority ?? '').trim().toLowerCase()
-  if (!p || p === '—') return null
-  if (p === 'urgent' || p === 'high') return { backgroundColor: '#d32f2f', color: '#ffffff' }
-  if (p === 'medium') return { backgroundColor: '#f59e0b', color: '#111111' }
-  if (p === 'low') return { backgroundColor: '#388e3c', color: '#ffffff' }
-  return { backgroundColor: '#64748b', color: '#ffffff' }
+function impactMark(value: string, expected: 'None' | 'Potential' | 'Yes') {
+  return (value || '').toLowerCase() === expected.toLowerCase() ? '☑' : '☐'
 }
 
-function contactLines(address: string) {
-  return address.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+function blankIfPlaceholder(value: string | null | undefined) {
+  const v = (value || '').trim()
+  if (!v) return ''
+  const upper = v.toUpperCase()
+  if (upper === 'N/A' || upper === 'NA' || upper === 'NOT PROVIDED') return ''
+  if (v === '—' || v === '-') return ''
+  return v
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+function clampText(value: string, maxChars: number) {
+  const t = (value || '').trim()
+  if (t.length <= maxChars) return t
+  return t.slice(0, Math.max(0, maxChars - 1)).trimEnd() + '…'
+}
 
-function SectionTitle({ title }: { title: string }) {
+function splitLines(value: string): string[] {
+  return (value || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+}
+
+function formatAddressLines(value: string): string[] {
+  const raw = (value || '').trim()
+  if (!raw) return []
+  const nl = splitLines(raw)
+  if (nl.length > 1) return nl
+
+  // Common DB storage is "street, city, state zip" (comma-separated). Convert to 2 lines.
+  const parts = raw
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean)
+  if (parts.length >= 2) {
+    const first = parts[0]
+    const rest = parts.slice(1).join(', ')
+    return [first, rest].filter(Boolean)
+  }
+
+  // Fallback: try to split before a trailing country token.
+  const m = raw.match(/^(.*?)(\s+(?:USA|United States|US)\b.*)$/i)
+  if (m && m[1] && m[2]) return [m[1].trim(), m[2].trim()]
+
+  return [raw]
+}
+
+function Field({ label, value }: { label: string; value: string }) {
   return (
-    <View style={{ alignSelf: 'flex-start', marginBottom: 10 }}>
-      <Text
-        style={{
-          fontSize: 9.5,
-          fontWeight: 700,
-          textTransform: 'uppercase',
-          letterSpacing: 0.6,
-          color: '#111111',
-          paddingBottom: 3,
-        }}
-      >
-        {title}
-      </Text>
-      <View style={{ height: 2, backgroundColor: DARK }} />
-    </View>
-  )
-}
-
-function InfoCell({
-  label,
-  children,
-  flex = 1,
-}: {
-  label: string
-  children: React.ReactNode
-  flex?: number
-}) {
-  return (
-    <View style={{ flex, paddingHorizontal: 18, paddingVertical: 12 }}>
-      <Text
-        style={{
-          fontSize: 7,
-          fontWeight: 700,
-          textTransform: 'uppercase',
-          color: '#666666',
-          letterSpacing: 0.4,
-          marginBottom: 3,
-        }}
-      >
+    <View style={{ flex: 1, paddingRight: 8 }}>
+      <Text style={{ fontSize: LABEL_FONT, color: MUTED, textTransform: 'uppercase', marginBottom: 2 }}>
         {label}
       </Text>
-      {children}
+      <Text style={{ fontSize: VALUE_FONT, color: TEXT_DARK, fontWeight: 600, lineHeight: 1.25 }}>
+        {value}
+      </Text>
     </View>
   )
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+function CardTitle({ title }: { title: string }) {
+  return (
+    <Text
+      style={{
+        fontSize: 9.2,
+        fontWeight: 800,
+        color: TITLE_BLUE,
+        textTransform: 'uppercase',
+        letterSpacing: 0.2,
+        marginBottom: 6,
+      }}
+    >
+      {title}
+    </Text>
+  )
+}
+
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: BORDER,
+        borderRadius: 7,
+        backgroundColor: CARD_BG,
+        marginBottom: SECTION_GAP,
+      }}
+    >
+      <View style={{ paddingHorizontal: 10, paddingTop: 8, paddingBottom: 9 }}>
+        <CardTitle title={title} />
+        {children}
+      </View>
+    </View>
+  )
+}
 
 export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
   const statusStyle = statusBadgeStyle(data.status)
-  const pTagStyle = priorityTagStyle(data.priority)
-  const statusLabel =
-    data.status.charAt(0).toUpperCase() + data.status.slice(1).toLowerCase()
-
-  const pageWidth = 595.28
-  const pageHeight = (() => {
-    const base = 780
-    const approvalRows = Math.max(0, data.approvalRows?.length ?? 0)
-    const attachments = Math.max(0, data.attachments?.length ?? 0)
-    const impacts = Math.max(0, data.impactItems?.length ?? 0)
-    const questionLen = (data.questionIssue ?? '').trim().length
-    const extra =
-      approvalRows * 18 +
-      attachments * 14 +
-      impacts * 18 +
-      Math.min(360, Math.ceil(questionLen / 180) * 16)
-    return Math.min(4200, Math.max(700, base + extra))
-  })()
+  const priorityUpper = (data.priority || '').toUpperCase()
+  const priorityStyle =
+    priorityUpper === 'HIGH'
+      ? { color: '#dc2626' }
+      : priorityUpper === 'LOW'
+        ? { color: '#16a34a' }
+        : { color: TEXT_DARK }
+  const isPending = (data.status || '').toUpperCase() === 'PENDING'
+  const approvalTopStatusLabel = isPending ? 'PENDING' : (data.finalStatus || data.status || 'PENDING')
+  const reviewedByDisplay = isPending ? 'TBD' : (data.reviewedBy || 'TBD')
 
   return (
     <Document>
       <Page
-        size={[pageWidth, pageHeight]}
-        style={{ fontFamily: 'Helvetica', fontSize: 10, color: DARK, backgroundColor: '#ffffff' }}
+        size="LETTER"
+        style={{
+          fontFamily: 'Helvetica',
+          fontSize: BASE_FONT,
+          color: TEXT_DARK,
+          backgroundColor: '#ffffff',
+          padding: 10,
+        }}
       >
-        {/* ── HEADER (logo + contact block) ── */}
         <View
           style={{
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            paddingTop: 22,
-            paddingBottom: 12,
-            paddingHorizontal: 26,
-            borderBottomWidth: 2,
-            borderBottomColor: DARK,
+            flex: 1,
+            borderWidth: 2,
+            borderColor: HEADER_BG,
+            borderRadius: 4,
+            backgroundColor: '#ffffff',
+            padding: 8,
           }}
         >
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            {data.logoDataUri ? (
-              <Image src={data.logoDataUri} style={{ width: 54, height: 54 }} />
-            ) : null}
-            <View style={{ marginLeft: data.logoDataUri ? 10 : 0 }}>
+          <View style={{ flexDirection: 'row', marginBottom: SECTION_GAP }}>
+          {/* Title bar (match reference: emphasized RFI) */}
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: HEADER_BG,
+              borderRadius: 7,
+              minHeight: 36,
+              justifyContent: 'center',
+              paddingHorizontal: 14,
+              marginRight: 6,
+            }}
+          >
+            <Text style={{ color: '#ffffff', textAlign: 'center' }}>
+              <Text style={{ fontWeight: 800, fontSize: 14, letterSpacing: 0.2 }}>RFI </Text>
+              <Text style={{ fontWeight: 700, fontSize: 12, letterSpacing: 0.2 }}>REQUEST FOR INFORMATION</Text>
+            </Text>
+          </View>
+
+          {/* RFI # block only (status moved to company header) */}
+          <View
+            style={{
+              width: 98,
+              backgroundColor: HEADER_BG,
+              borderRadius: 7,
+              minHeight: 36,
+              paddingVertical: 6,
+              paddingHorizontal: 10,
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ color: '#ffffff', fontSize: 7, textAlign: 'center', textTransform: 'uppercase', fontWeight: 700 }}>
+              RFI #
+            </Text>
+            <Text style={{ color: '#ffffff', fontWeight: 800, fontSize: 12, textAlign: 'center', marginTop: 2 }}>
+              {data.rfiNumber}
+            </Text>
+          </View>
+        </View>
+
+        <View
+          style={{
+            borderWidth: 1,
+            borderColor: BORDER,
+            borderRadius: 7,
+            paddingHorizontal: 10,
+            paddingVertical: 8,
+            marginBottom: SECTION_GAP,
+          }}
+        >
+          {/* Row 1: Company lockup (left) + STATUS pill (right) */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 10 }}>
+              {data.logoDataUri ? <Image src={data.logoDataUri} style={{ width: 52, height: 52 }} /> : null}
+              <View style={{ marginLeft: data.logoDataUri ? 10 : 0, flex: 1 }}>
+                <Text style={{ fontSize: 14, fontWeight: 800, color: TITLE_BLUE, letterSpacing: 0.2 }}>
+                  {(data.brand || 'BUILDSWIFT').toUpperCase()}
+                </Text>
+                <Text style={{ fontSize: 7.5, color: MUTED, letterSpacing: 2.2, marginTop: 1 }}>
+                  {(data.brandSub || '').toUpperCase()}
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={{ fontSize: 6.2, color: MUTED, textTransform: 'uppercase', fontWeight: 800, marginBottom: 3 }}>
+                STATUS
+              </Text>
               <Text
                 style={{
-                  fontSize: 20,
-                  fontWeight: 800,
-                  color: data.themePrimary || '#1f3768',
-                  letterSpacing: 0.6,
+                  alignSelf: 'flex-start',
+                  fontSize: 7.8,
+                  fontWeight: 900,
+                  paddingVertical: 4,
+                  paddingHorizontal: 14,
+                  borderRadius: 10,
+                  ...(statusStyle as any),
                 }}
               >
-                {(data.brand || 'BUILDSWIFT').toUpperCase()}
+                {data.status}
               </Text>
-              {data.brandSub ? (
-                <Text style={{ fontSize: 9, color: '#475569', letterSpacing: 1.4, marginTop: 1 }}>
-                  {data.brandSub.toUpperCase()}
-                </Text>
-              ) : null}
             </View>
           </View>
 
-          <View style={{ alignItems: 'flex-end', maxWidth: 240 }}>
-            {contactLines(data.contactAddress || '').map((line, idx) => (
-              <Text key={`addr-${idx}`} style={{ fontSize: 8.6, color: '#334155' }}>
-                {line}
+          {/* Row 2: Contact (left) + Project (right) */}
+          <View style={{ marginTop: 8, flexDirection: 'row' }}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Text style={{ fontSize: 9.6, fontWeight: 800, color: TEXT_DARK, marginBottom: 3 }}>
+                {data.brand}
               </Text>
-            ))}
-            {data.contactPhone ? (
-              <Text style={{ fontSize: 8.6, color: '#334155', marginTop: 2 }}>{data.contactPhone}</Text>
-            ) : null}
-            {data.contactEmail ? (
-              <Text style={{ fontSize: 8.6, color: '#334155' }}>{data.contactEmail}</Text>
-            ) : null}
-          </View>
-        </View>
-
-        {/* ── RFI HEADLINE ── */}
-        <View
-          style={{
-            backgroundColor: DARK,
-            paddingHorizontal: 26,
-            paddingVertical: 14,
-          }}
-        >
-          <Text
-            style={{
-              fontSize: 19,
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: 1.5,
-              color: '#ffffff',
-              marginBottom: 6,
-            }}
-          >
-            Request for Information (RFI)
-          </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <Text style={{ fontSize: 15, fontWeight: 700, color: '#ffcc00' }}>
-              {data.rfiNumber}
-            </Text>
-            <Text
-              style={{
-                ...statusStyle,
-                fontSize: 7.5,
-                fontWeight: 700,
-                paddingHorizontal: 18,
-                paddingVertical: 5,
-                borderRadius: 20,
-                textTransform: 'uppercase',
-                letterSpacing: 0.6,
-              }}
-            >
-              {statusLabel}
-            </Text>
-          </View>
-        </View>
-
-        {/* ── PROJECT GRID ── */}
-        <View style={{ borderBottomWidth: 2, borderBottomColor: DARK }}>
-          {/* Row 1 */}
-          <View
-            style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#c0c0c0' }}
-          >
-            <InfoCell label="Project">
-              <Text style={{ fontSize: 9, fontWeight: 500, color: '#111111' }}>
+              {formatAddressLines(data.contactAddress).map((line, idx) => (
+                <Text
+                  key={`caddr-${idx}`}
+                  style={{ fontSize: 8.4, color: TEXT_DARK, lineHeight: 1.25 }}
+                >
+                  {line}
+                </Text>
+              ))}
+              <Text style={{ fontSize: 8.2, color: TEXT_DARK, marginTop: 3 }}>
+                {data.contactPhone} {' | '} {data.contactEmail}
+              </Text>
+            </View>
+            <View style={{ width: 1, backgroundColor: BORDER }} />
+            <View style={{ flex: 1, paddingLeft: 10 }}>
+              <Text style={{ fontSize: LABEL_FONT, color: MUTED, textTransform: 'uppercase', marginBottom: 3, fontWeight: 800 }}>
+                PROJECT
+              </Text>
+              <Text style={{ fontSize: 10, fontWeight: 900, color: TEXT_DARK, marginBottom: 2 }}>
                 {data.projectName}
               </Text>
-            </InfoCell>
-            <InfoCell label="Project Address">
-              <Text style={{ fontSize: 9, fontWeight: 500, color: '#111111' }}>
-                {data.projectNo}
-              </Text>
-            </InfoCell>
-          </View>
-          {/* Row 2 */}
-          <View
-            style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#c0c0c0' }}
-          >
-            <InfoCell label="Date">
-              <Text style={{ fontSize: 9, fontWeight: 500, color: '#111111' }}>{data.date}</Text>
-            </InfoCell>
-            <InfoCell label="Due Date">
-              <Text style={{ fontSize: 9, fontWeight: 500, color: '#111111' }}>
-                {data.contractDate}
-              </Text>
-            </InfoCell>
-          </View>
-          {/* Row 3 */}
-          <View style={{ flexDirection: 'row' }}>
-            <InfoCell label="Submitted By">
-              <Text style={{ fontSize: 9, fontWeight: 500, color: '#111111' }}>
-                {data.submittedBy}
-              </Text>
-            </InfoCell>
-            <InfoCell label="Priority">
-              {pTagStyle ? (
+              {formatAddressLines(data.projectAddress).map((line, idx) => (
                 <Text
-                  style={{
-                    ...pTagStyle,
-                    fontSize: 7,
-                    fontWeight: 700,
-                    paddingHorizontal: 14,
-                    paddingVertical: 2,
-                    borderRadius: 3,
-                    textTransform: 'uppercase',
-                    alignSelf: 'flex-start',
-                  }}
+                  key={`paddr-${idx}`}
+                  style={{ fontSize: 8.6, color: TEXT_DARK, lineHeight: 1.25, marginTop: idx === 0 ? 1 : 0 }}
                 >
-                  {data.priority}
-                </Text>
-              ) : (
-                <Text style={{ fontSize: 9, fontWeight: 500, color: '#111111' }}>
-                  {data.priority}
-                </Text>
-              )}
-            </InfoCell>
-          </View>
-        </View>
-
-        {/* ── REASON FOR CHANGE ORDER ── */}
-        {data.reasonForChange && data.reasonForChange !== '—' ? (
-          <View
-            style={{
-              paddingHorizontal: 26,
-              paddingVertical: 18,
-              borderBottomWidth: 1,
-              borderBottomColor: SECTION_BORDER,
-            }}
-          >
-            <SectionTitle title="Reason for Change Order" />
-            <Text style={{ fontSize: 9.2, lineHeight: 1.5 }}>{data.reasonForChange}</Text>
-          </View>
-        ) : null}
-
-        {/* ── QUESTION / ISSUE ── */}
-        {data.questionIssue && data.questionIssue !== '—' ? (
-          <View
-            style={{
-              paddingHorizontal: 26,
-              paddingVertical: 18,
-              borderBottomWidth: 1,
-              borderBottomColor: SECTION_BORDER,
-            }}
-          >
-            <SectionTitle title="Question / Issue" />
-            <Text style={{ fontSize: 9.2, lineHeight: 1.5 }}>{data.questionIssue}</Text>
-          </View>
-        ) : null}
-
-        {/* ── CONTRACTOR'S PROPOSED INTERPRETATION ── */}
-        {data.proposedInterpretation && data.proposedInterpretation !== '—' ? (
-          <View
-            style={{
-              paddingHorizontal: 26,
-              paddingVertical: 18,
-              borderBottomWidth: 1,
-              borderBottomColor: SECTION_BORDER,
-            }}
-          >
-            <SectionTitle title="Contractor's Proposed Interpretation" />
-            <Text style={{ fontSize: 9.2, lineHeight: 1.5 }}>{data.proposedInterpretation}</Text>
-          </View>
-        ) : null}
-
-        {/* ── IMPACT ── */}
-        {data.impactItems.length > 0 ? (
-          <View
-            style={{
-              paddingHorizontal: 26,
-              paddingVertical: 18,
-              borderBottomWidth: 1,
-              borderBottomColor: SECTION_BORDER,
-            }}
-          >
-            <SectionTitle title="Impact" />
-            {data.impactItems.map((item, i) => (
-              <View key={`imp-${i}`} style={{ flexDirection: 'row', paddingVertical: 4 }}>
-                <Text style={{ fontSize: 9, fontWeight: 700, width: 140 }}>{item.label}:</Text>
-                <Text style={{ fontSize: 9, flex: 1 }}>{item.value}</Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        {/* ── ATTACHMENTS ── */}
-        {data.attachments.length > 0 ? (
-          <View
-            style={{
-              paddingHorizontal: 26,
-              paddingVertical: 18,
-              borderBottomWidth: 1,
-              borderBottomColor: SECTION_BORDER,
-            }}
-          >
-            <SectionTitle title="Attachments" />
-            {data.attachments.map((a, i) => (
-              <Text key={`att-${i}`} style={{ fontSize: 9, marginBottom: 4 }}>
-                {'\u2022 '}{a}
-              </Text>
-            ))}
-          </View>
-        ) : null}
-
-        {/* ── APPROVAL LOG ── */}
-        {data.approvalRows.length > 0 ? (
-          <View
-            wrap={false}
-            style={{
-              paddingHorizontal: 26,
-              paddingVertical: 18,
-              borderBottomWidth: 1,
-              borderBottomColor: SECTION_BORDER,
-            }}
-          >
-            <SectionTitle title="Approval Log" />
-            {/* Table header */}
-            <View style={{ flexDirection: 'row', backgroundColor: DARK }}>
-              {(['Role', 'Signature', 'Date', 'Notes'] as const).map((h, i) => (
-                <Text
-                  key={h}
-                  style={{
-                    width:
-                      i === 0 ? '22%' : i === 1 ? '36%' : i === 2 ? '18%' : '24%',
-                    fontSize: 6.8,
-                    fontWeight: 700,
-                    color: '#ffffff',
-                    textTransform: 'uppercase',
-                    letterSpacing: 0.3,
-                    paddingHorizontal: 10,
-                    paddingVertical: 8,
-                  }}
-                >
-                  {h}
+                  {line}
                 </Text>
               ))}
             </View>
-            {/* Rows */}
-            {data.approvalRows.map((row, idx) => (
-              <View
-                key={`ar-${idx}`}
-                style={{
-                  flexDirection: 'row',
-                  borderBottomWidth: idx === data.approvalRows.length - 1 ? 2 : 1,
-                  borderBottomColor: idx === data.approvalRows.length - 1 ? DARK : '#cccccc',
-                  backgroundColor: '#ffffff',
-                  minHeight: 28,
-                }}
-              >
-                <Text
-                  style={{ width: '22%', fontSize: 8, paddingHorizontal: 10, paddingVertical: 8 }}
-                >
-                  {row.role}
+          </View>
+          {/* Summit layout: boxed 2x2 grid for dates + to/from */}
+          <View
+            style={{
+              marginTop: 10,
+              borderWidth: 1,
+              borderColor: BORDER,
+              borderRadius: 7,
+              overflow: 'hidden',
+            }}
+          >
+            {/* Row 1: Date Issued | Required Response Date */}
+            <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: BORDER }}>
+              <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8, borderRightWidth: 1, borderRightColor: BORDER }}>
+                <Text style={{ fontSize: LABEL_FONT, color: MUTED, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}>
+                  DATE ISSUED
                 </Text>
-                <View style={{ width: '36%', paddingHorizontal: 10, paddingVertical: 8 }}>
-                  {row.signatureUrl ? (
-                    <Image
-                      src={row.signatureUrl}
-                      style={{ width: 74, height: 16, objectFit: 'contain' }}
-                    />
-                  ) : row.signatureName ? (
-                    <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Oblique', color: '#444444' }}>
-                      {row.signatureName}
-                    </Text>
-                  ) : (
-                    <View
-                      style={{
-                        width: 60,
-                        height: 0.7,
-                        backgroundColor: '#94a3b8',
-                        marginTop: 9,
-                      }}
-                    />
-                  )}
-                </View>
-                <Text
-                  style={{ width: '18%', fontSize: 8, paddingHorizontal: 10, paddingVertical: 8 }}
-                >
-                  {row.date}
+                <Text style={{ fontSize: 9.6, fontWeight: 800, color: TEXT_DARK }}>{data.issueDate}</Text>
+              </View>
+              <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8 }}>
+                <Text style={{ fontSize: LABEL_FONT, color: MUTED, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}>
+                  REQUIRED RESPONSE DATE
                 </Text>
-                <Text
-                  style={{ width: '24%', fontSize: 8, paddingHorizontal: 10, paddingVertical: 8 }}
-                >
-                  {row.notes}
+                <Text style={{ fontSize: 9.6, fontWeight: 800, color: TEXT_DARK }}>{data.requiredResponseDate}</Text>
+              </View>
+            </View>
+
+            {/* Row 2: From */}
+            <View style={{ flexDirection: 'row' }}>
+              <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8 }}>
+                <Text style={{ fontSize: LABEL_FONT, color: MUTED, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}>
+                  FROM
+                </Text>
+                {(splitLines(data.sender).length ? splitLines(data.sender) : ['Not Provided']).slice(0, 5).map((line, idx) => (
+                  <Text
+                    key={`from3-${idx}`}
+                    style={{ fontSize: 8.8, color: TEXT_DARK, fontWeight: idx === 0 ? 800 : 500, lineHeight: 1.25 }}
+                  >
+                    {line}
+                  </Text>
+                ))}
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* RFI SUMMARY (match reference: tighter padding + yellow status pill) */}
+        <View style={{ borderWidth: 1.4, borderColor: BORDER, borderRadius: 7, backgroundColor: '#ffffff', marginBottom: 7 }}>
+          <View style={{ paddingHorizontal: 8, paddingTop: 6, paddingBottom: 7 }}>
+            <Text style={{ fontSize: 9.2, fontWeight: 900, color: TEXT_DARK, textTransform: 'uppercase', letterSpacing: 0.2, marginBottom: 5 }}>
+              RFI SUMMARY
+            </Text>
+            <View style={{ flexDirection: 'row' }}>
+              <View style={{ flex: 2, borderRightWidth: 1, borderRightColor: BORDER, paddingRight: 10 }}>
+                <Text style={{ fontSize: 6.2, color: MUTED, textTransform: 'uppercase', fontWeight: 700, marginBottom: 2 }}>
+                  RFI TITLE
+                </Text>
+                <Text style={{ fontSize: 8.4, fontWeight: 700, color: TEXT_DARK }}>
+                  {clampText(data.summaryTitle, 80)}
                 </Text>
               </View>
-            ))}
+              <View style={{ flex: 1, borderRightWidth: 1, borderRightColor: BORDER, paddingHorizontal: 10 }}>
+                <Text style={{ fontSize: 6.2, color: MUTED, textTransform: 'uppercase', fontWeight: 700, marginBottom: 2 }}>
+                  PRIORITY
+                </Text>
+                <Text style={{ fontSize: 8.6, fontWeight: 800, ...(priorityStyle as any) }}>{priorityUpper || '—'}</Text>
+              </View>
+              <View style={{ flex: 1, paddingLeft: 10 }}>
+                <Text style={{ fontSize: 6.2, color: MUTED, textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>
+                  STATUS
+                </Text>
+                <Text
+                  style={{
+                    alignSelf: 'flex-start',
+                    fontSize: 7.8,
+                    fontWeight: 800,
+                    paddingVertical: 4,
+                    paddingHorizontal: 14,
+                    borderRadius: 10,
+                    ...(STATUS_YELLOW as any),
+                  }}
+                >
+                  {data.status}
+                </Text>
+              </View>
+            </View>
           </View>
-        ) : null}
+        </View>
 
-        {/* ── FOOTER ── */}
+        <Card title="Detailed Question / Description">
+          <Text style={{ fontSize: 8, lineHeight: 1.35, marginBottom: 5 }}>
+            {stripHtmlToPlainParagraphs(data.detailedQuestion)}
+          </Text>
+        </Card>
+
+        <Card title="Approval / Tracking">
+          {/* Match reference: header row split into two columns */}
+          <View
+            style={{
+              borderWidth: 1,
+              borderColor: BORDER,
+              borderRadius: 7,
+              overflow: 'hidden',
+              backgroundColor: '#ffffff',
+            }}
+          >
+            <View style={{ flexDirection: 'row' }}>
+              <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 7, borderRightWidth: 1, borderRightColor: BORDER }}>
+                <Text style={{ fontSize: 6.2, color: MUTED, textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>
+                  FINAL STATUS
+                </Text>
+                <Text
+                  style={{
+                    alignSelf: 'flex-start',
+                    paddingHorizontal: 14,
+                    paddingVertical: 3.5,
+                    borderRadius: 10,
+                    fontSize: 7.8,
+                    fontWeight: 800,
+                    borderWidth: 0.8,
+                    borderColor: '#e7d49a',
+                    ...(STATUS_YELLOW as any),
+                  }}
+                >
+                  {approvalTopStatusLabel}
+                </Text>
+              </View>
+              <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 7 }}>
+                <Text style={{ fontSize: 6.2, color: MUTED, textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>
+                  REVIEWED BY
+                </Text>
+                <Text style={{ fontSize: 8.2, fontWeight: 700, color: TEXT_DARK }}>{reviewedByDisplay}</Text>
+              </View>
+            </View>
+
+            <View style={{ height: 1, backgroundColor: BORDER }} />
+
+            <View style={{ paddingHorizontal: 10, paddingVertical: 6 }}>
+              <Text style={{ fontSize: 6.2, color: MUTED, textTransform: 'uppercase', fontWeight: 700 }}>
+                APPROVAL / RESPONSE LOG
+              </Text>
+            </View>
+
+            {/* Dense table like reference */}
+            <View style={{ borderTopWidth: 1, borderTopColor: BORDER }}>
+              <View style={{ flexDirection: 'row', backgroundColor: TABLE_HEAD }}>
+                {['Reviewer Email', 'Signature', 'Action', 'Date'].map((h, idx) => (
+                  <Text
+                    key={h}
+                    style={{
+                      width:
+                        idx === 0 ? '28%' : idx === 1 ? '24%' : idx === 2 ? '28%' : '20%',
+                      fontSize: 6.6,
+                      fontWeight: 700,
+                      paddingHorizontal: 6,
+                      paddingVertical: 4,
+                      textTransform: 'uppercase',
+                      color: TEXT_DARK,
+                      borderRightWidth: idx === 3 ? 0 : 1,
+                      borderRightColor: BORDER,
+                    }}
+                  >
+                    {h}
+                  </Text>
+                ))}
+              </View>
+              {(
+                data.approvalRows.length
+                  ? data.approvalRows
+                  : [
+                      {
+                        name: (splitLines(data.sender).length ? splitLines(data.sender)[0] : data.sender) || 'Not Provided',
+                        role: 'Submitter',
+                        action: 'Submitted',
+                        date: data.issueDate || '—',
+                        reference: 'RFI submitted',
+                        signatureName: null,
+                        signatureUrl: null,
+                      },
+                    ]
+              ).map((r, idx) => (
+                  <View
+                    key={`r-${idx}`}
+                    style={{
+                      flexDirection: 'row',
+                      borderTopWidth: 1,
+                      borderTopColor: BORDER,
+                      backgroundColor: '#ffffff',
+                    }}
+                  >
+                    <Text style={{ width: '28%', fontSize: 7.4, paddingHorizontal: 6, paddingVertical: 4, borderRightWidth: 1, borderRightColor: BORDER }}>
+                      {r.name}
+                    </Text>
+                    <View style={{ width: '24%', paddingHorizontal: 6, paddingVertical: 4, borderRightWidth: 1, borderRightColor: BORDER }}>
+                      {r.signatureUrl ? (
+                        <Image src={r.signatureUrl} style={{ width: 64, height: 14, objectFit: 'contain' }} />
+                      ) : r.signatureName ? (
+                        <Text style={{ fontSize: 7.4, fontFamily: 'Helvetica-Oblique', color: TEXT_DARK }}>
+                          {r.signatureName}
+                        </Text>
+                      ) : (
+                        <View style={{ height: 0.8, backgroundColor: '#94a3b8', marginTop: 8 }} />
+                      )}
+                    </View>
+                    <Text style={{ width: '28%', fontSize: 7.4, paddingHorizontal: 6, paddingVertical: 4, borderRightWidth: 1, borderRightColor: BORDER }}>
+                      {r.action}
+                    </Text>
+                    <Text style={{ width: '20%', fontSize: 7.4, paddingHorizontal: 6, paddingVertical: 4 }}>
+                      {r.date}
+                    </Text>
+                  </View>
+                ))}
+            </View>
+          </View>
+        </Card>
+
+        {/* Flexible spacer so content fills the page when short */}
+        <View style={{ flexGrow: 1 }} />
+
         <View
           style={{
-            textAlign: 'center',
-            paddingHorizontal: 26,
-            paddingVertical: 10,
-            backgroundColor: '#f9f9f9',
-            borderTopWidth: 1,
-            borderTopColor: SECTION_BORDER,
+            backgroundColor: HEADER_BG,
+            borderRadius: 7,
+            marginTop: 2,
+            paddingVertical: 8,
+            alignItems: 'center',
           }}
         >
-          <Text style={{ fontSize: 6.8, color: '#888888' }}>{data.footerNote}</Text>
+          <Text style={{ color: '#ffffff', fontSize: 8, fontWeight: 700 }}>
+            Construction Documentation.
+          </Text>
+        </View>
         </View>
       </Page>
     </Document>
