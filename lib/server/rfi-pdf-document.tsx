@@ -1,7 +1,6 @@
 import React from 'react'
 import { Document, Image, Page, Text, View } from '@react-pdf/renderer'
 import { stripHtmlToPlainParagraphs } from '@/lib/document-html'
-import { PdfHeader } from '@/lib/server/pdf-header'
 
 export type RfiApprovalRow = {
   name: string
@@ -209,31 +208,130 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
             padding: 8,
           }}
         >
-          <PdfHeader
-            themeColor={HEADER_BG}
-            titleLeft="RFI"
-            titleRight="REQUEST FOR INFORMATION"
-            numberLabel="RFI #"
-            numberValue={data.rfiNumber}
-            logoDataUri={data.logoDataUri}
-            brand={data.brand || 'BuildSwift'}
-            brandSub={data.brandSub || null}
-            statusText={data.status}
-            statusStyle={statusStyle as any}
-            contactAddress={data.contactAddress}
-            contactPhone={data.contactPhone}
-            contactEmail={data.contactEmail}
-            projectName={data.projectName}
-            projectAddress={data.projectAddress}
-            mutedColor={MUTED}
-            titleAccentColor={TITLE_BLUE}
-            borderColor={BORDER}
-          />
+          <View style={{ flexDirection: 'row', marginBottom: SECTION_GAP }}>
+          {/* Title bar (match reference: emphasized RFI) */}
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: HEADER_BG,
+              borderRadius: 7,
+              minHeight: 36,
+              justifyContent: 'center',
+              paddingHorizontal: 14,
+              marginRight: 6,
+            }}
+          >
+            <Text style={{ color: '#ffffff', textAlign: 'center' }}>
+              <Text style={{ fontWeight: 800, fontSize: 14, letterSpacing: 0.2 }}>RFI </Text>
+              <Text style={{ fontWeight: 700, fontSize: 12, letterSpacing: 0.2 }}>REQUEST FOR INFORMATION</Text>
+            </Text>
+          </View>
 
+          {/* RFI # block only (status moved to company header) */}
+          <View
+            style={{
+              width: 98,
+              backgroundColor: HEADER_BG,
+              borderRadius: 7,
+              minHeight: 36,
+              paddingVertical: 6,
+              paddingHorizontal: 10,
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ color: '#ffffff', fontSize: 7, textAlign: 'center', textTransform: 'uppercase', fontWeight: 700 }}>
+              RFI #
+            </Text>
+            <Text style={{ color: '#ffffff', fontWeight: 800, fontSize: 12, textAlign: 'center', marginTop: 2 }}>
+              {data.rfiNumber}
+            </Text>
+          </View>
+        </View>
+
+        <View
+          style={{
+            borderWidth: 1,
+            borderColor: BORDER,
+            borderRadius: 7,
+            paddingHorizontal: 10,
+            paddingVertical: 8,
+            marginBottom: SECTION_GAP,
+          }}
+        >
+          {/* Row 1: Company lockup (left) + STATUS pill (right) */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 10 }}>
+              {data.logoDataUri ? <Image src={data.logoDataUri} style={{ width: 52, height: 52 }} /> : null}
+              <View style={{ marginLeft: data.logoDataUri ? 10 : 0, flex: 1 }}>
+                <Text style={{ fontSize: 14, fontWeight: 800, color: TITLE_BLUE, letterSpacing: 0.2 }}>
+                  {(data.brand || 'BUILDSWIFT').toUpperCase()}
+                </Text>
+                <Text style={{ fontSize: 7.5, color: MUTED, letterSpacing: 2.2, marginTop: 1 }}>
+                  {(data.brandSub || '').toUpperCase()}
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={{ fontSize: 6.2, color: MUTED, textTransform: 'uppercase', fontWeight: 800, marginBottom: 3 }}>
+                STATUS
+              </Text>
+              <Text
+                style={{
+                  alignSelf: 'flex-start',
+                  fontSize: 7.8,
+                  fontWeight: 900,
+                  paddingVertical: 4,
+                  paddingHorizontal: 14,
+                  borderRadius: 10,
+                  ...(statusStyle as any),
+                }}
+              >
+                {data.status}
+              </Text>
+            </View>
+          </View>
+
+          {/* Row 2: Contact (left) + Project (right) */}
+          <View style={{ marginTop: 8, flexDirection: 'row' }}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Text style={{ fontSize: 9.6, fontWeight: 800, color: TEXT_DARK, marginBottom: 3 }}>
+                {data.brand}
+              </Text>
+              {formatAddressLines(data.contactAddress).map((line, idx) => (
+                <Text
+                  key={`caddr-${idx}`}
+                  style={{ fontSize: 8.4, color: TEXT_DARK, lineHeight: 1.25 }}
+                >
+                  {line}
+                </Text>
+              ))}
+              <Text style={{ fontSize: 8.2, color: TEXT_DARK, marginTop: 3 }}>
+                {data.contactPhone} {' | '} {data.contactEmail}
+              </Text>
+            </View>
+            <View style={{ width: 1, backgroundColor: BORDER }} />
+            <View style={{ flex: 1, paddingLeft: 10 }}>
+              <Text style={{ fontSize: LABEL_FONT, color: MUTED, textTransform: 'uppercase', marginBottom: 3, fontWeight: 800 }}>
+                PROJECT
+              </Text>
+              <Text style={{ fontSize: 10, fontWeight: 900, color: TEXT_DARK, marginBottom: 2 }}>
+                {data.projectName}
+              </Text>
+              {formatAddressLines(data.projectAddress).map((line, idx) => (
+                <Text
+                  key={`paddr-${idx}`}
+                  style={{ fontSize: 8.6, color: TEXT_DARK, lineHeight: 1.25, marginTop: idx === 0 ? 1 : 0 }}
+                >
+                  {line}
+                </Text>
+              ))}
+            </View>
+          </View>
           {/* Summit layout: boxed 2x2 grid for dates + to/from */}
           <View
             style={{
-              marginTop: 0,
+              marginTop: 10,
               borderWidth: 1,
               borderColor: BORDER,
               borderRadius: 7,
@@ -460,6 +558,7 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
           <Text style={{ color: '#ffffff', fontSize: 8, fontWeight: 700 }}>
             Construction Documentation.
           </Text>
+        </View>
         </View>
       </Page>
     </Document>
