@@ -228,12 +228,12 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
           },
         ]
   const approvalTruncated = data.approvalRows.length > MAX_APPROVAL_ROWS
-  const attachmentRows = (data.attachments.length ? data.attachments : [{ fileName: 'N/A', fileType: 'N/A', notes: 'N/A' }]).slice(
-    0,
-    MAX_ATTACHMENTS_ROWS
-  )
-  const attachmentsTruncated =
-    data.attachments.length > MAX_ATTACHMENTS_ROWS
+  const hasAttachments = data.attachments.some((a) => {
+    const name = (a?.fileName ?? '').trim()
+    return Boolean(name) && name !== 'N/A' && name !== '—' && name !== 'Not Provided'
+  })
+  const attachmentRows = data.attachments.slice(0, MAX_ATTACHMENTS_ROWS)
+  const attachmentsTruncated = data.attachments.length > MAX_ATTACHMENTS_ROWS
 
   const questionPlain = stripHtmlToPlainParagraphs(data.detailedQuestion)
 
@@ -490,46 +490,48 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
           </Text>
         </Card>
 
-        <Card title="Attachments">
-          <View style={{ borderWidth: 1, borderColor: BORDER, borderRadius: 7, overflow: 'hidden' }}>
-            <View style={{ flexDirection: 'row', backgroundColor: TABLE_HEAD }}>
-              {(['FILE NAME', 'FILE TYPE'] as const).map((h, idx) => (
-                <Text
-                  key={h}
-                  style={{
-                    width: idx === 0 ? '68%' : '32%',
-                    fontSize: LABEL_FONT,
-                    fontWeight: 700,
-                    paddingHorizontal: 8,
-                    paddingVertical: 6,
-                    textTransform: 'uppercase',
-                    color: TEXT_DARK,
-                    borderRightWidth: idx === 1 ? 0 : 1,
-                    borderRightColor: BORDER,
-                  }}
-                >
-                  {h}
-                </Text>
-              ))}
-            </View>
-            {attachmentRows.map((a, idx) => (
-              <View
-                key={`att-${idx}`}
-                style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: BORDER, backgroundColor: '#ffffff' }}
-              >
-                <Text style={{ width: '68%', fontSize: BASE_FONT, paddingHorizontal: 7, paddingVertical: 6, borderRightWidth: 1, borderRightColor: BORDER, lineHeight: BODY_LINE_HEIGHT }}>
-                  {clampChars(a.fileName, 48)}
-                </Text>
-                <Text style={{ width: '32%', fontSize: BASE_FONT, paddingHorizontal: 7, paddingVertical: 6, lineHeight: BODY_LINE_HEIGHT }}>{a.fileType}</Text>
+        {hasAttachments ? (
+          <Card title="Attachments">
+            <View style={{ borderWidth: 1, borderColor: BORDER, borderRadius: 7, overflow: 'hidden' }}>
+              <View style={{ flexDirection: 'row', backgroundColor: TABLE_HEAD }}>
+                {(['FILE NAME', 'FILE TYPE'] as const).map((h, idx) => (
+                  <Text
+                    key={h}
+                    style={{
+                      width: idx === 0 ? '68%' : '32%',
+                      fontSize: LABEL_FONT,
+                      fontWeight: 700,
+                      paddingHorizontal: 8,
+                      paddingVertical: 6,
+                      textTransform: 'uppercase',
+                      color: TEXT_DARK,
+                      borderRightWidth: idx === 1 ? 0 : 1,
+                      borderRightColor: BORDER,
+                    }}
+                  >
+                    {h}
+                  </Text>
+                ))}
               </View>
-            ))}
-            {attachmentsTruncated ? (
-              <Text style={{ fontSize: LABEL_FONT - 0.4, color: MUTED, paddingHorizontal: 8, paddingVertical: 5 }}>
-                +{data.attachments.length - MAX_ATTACHMENTS_ROWS} additional attachment(s) not listed
-              </Text>
-            ) : null}
-          </View>
-        </Card>
+              {attachmentRows.map((a, idx) => (
+                <View
+                  key={`att-${idx}`}
+                  style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: BORDER, backgroundColor: '#ffffff' }}
+                >
+                  <Text style={{ width: '68%', fontSize: BASE_FONT, paddingHorizontal: 7, paddingVertical: 6, borderRightWidth: 1, borderRightColor: BORDER, lineHeight: BODY_LINE_HEIGHT }}>
+                    {clampChars(a.fileName, 48)}
+                  </Text>
+                  <Text style={{ width: '32%', fontSize: BASE_FONT, paddingHorizontal: 7, paddingVertical: 6, lineHeight: BODY_LINE_HEIGHT }}>{a.fileType}</Text>
+                </View>
+              ))}
+              {attachmentsTruncated ? (
+                <Text style={{ fontSize: LABEL_FONT - 0.4, color: MUTED, paddingHorizontal: 8, paddingVertical: 5 }}>
+                  +{data.attachments.length - MAX_ATTACHMENTS_ROWS} additional attachment(s) not listed
+                </Text>
+              ) : null}
+            </View>
+          </Card>
+        ) : null}
 
         <Card title="Response">
           <View style={{ borderWidth: 1, borderColor: BORDER, borderRadius: 7, overflow: 'hidden', backgroundColor: '#ffffff' }}>

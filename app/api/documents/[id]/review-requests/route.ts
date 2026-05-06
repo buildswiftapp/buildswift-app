@@ -39,7 +39,7 @@ export async function GET(req: Request, { params }: Params) {
 
   const { data: requests, error: reqError } = await supabase
     .from('review_requests')
-    .select('id,review_cycle_id,reviewer_email,full_name,decision,decided_at,viewed_at,email_status,created_at')
+    .select('id,review_cycle_id,reviewer_email,full_name,reviewer_role,decision,decided_at,viewed_at,email_status,created_at')
     .eq('review_cycle_id', cycle.id)
     .order('created_at', { ascending: true })
 
@@ -51,6 +51,7 @@ export async function GET(req: Request, { params }: Params) {
       id: r.id,
       reviewer_email: r.reviewer_email,
       full_name: (r as any).full_name ?? null,
+      reviewer_role: (r as any).reviewer_role ?? null,
       decision: r.decision ?? null,
       decided_at: r.decided_at ?? null,
       viewed_at: (r as any).viewed_at ?? null,

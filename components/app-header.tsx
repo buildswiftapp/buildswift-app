@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Building2, ChevronDown, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 import { useApp } from '@/lib/app-context'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -14,12 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { createSupabaseBrowserClient } from '@/lib/supabase/client'
 
-type AppHeaderProps = {
-  sidebarCollapsed: boolean
-  onToggleSidebar: () => void
-}
-
-export function AppHeader({ sidebarCollapsed, onToggleSidebar }: AppHeaderProps) {
+export function AppHeader() {
   const { user, logout } = useApp()
   const supabase = createSupabaseBrowserClient()
 
@@ -40,36 +35,8 @@ export function AppHeader({ sidebarCollapsed, onToggleSidebar }: AppHeaderProps)
   }
 
   return (
-    <header className="h-[74px] border-b border-border bg-white/95 px-3 backdrop-blur">
-      <div className="flex h-full w-full items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Link href="/dashboard" className="flex items-center gap-2 py-1" aria-label="BuildSwift home">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#eef2f7] text-[#334155]">
-              <Building2 className="h-5 w-5" strokeWidth={1.9} aria-hidden />
-            </span>
-            <span className="text-[28px] font-semibold tracking-tight">
-              <span className="text-primary">Build</span>
-              <span className="text-primary">Swift</span>
-            </span>
-          </Link>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={onToggleSidebar}
-            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className="h-9 w-9 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            {sidebarCollapsed ? (
-              <PanelLeftOpen className="h-4.5 w-4.5" strokeWidth={1.8} />
-            ) : (
-              <PanelLeftClose className="h-4.5 w-4.5" strokeWidth={1.8} />
-            )}
-          </Button>
-        </div>
-
-        <div className="flex items-center gap-4">
+    <header className="flex h-[74px] shrink-0 items-center justify-end border-b border-border bg-white/95 px-4 backdrop-blur sm:px-6">
+      <div className="flex w-full items-center justify-end gap-4">
           {user && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -102,7 +69,6 @@ export function AppHeader({ sidebarCollapsed, onToggleSidebar }: AppHeaderProps)
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-        </div>
       </div>
     </header>
   )

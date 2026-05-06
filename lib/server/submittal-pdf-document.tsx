@@ -263,10 +263,11 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
   const pStyle = priorityStyle(data.priority)
   const statusLabel = statusPillLabel(data.status)
   const attachmentsTruncated = data.attachments.length > MAX_ATTACHMENTS_ROWS
-  const attachmentRows =
-    data.attachments.length > 0
-      ? data.attachments.slice(0, MAX_ATTACHMENTS_ROWS)
-      : [{ fileName: 'N/A', fileType: 'N/A', notes: 'N/A' }]
+  const hasAttachments = data.attachments.some((a) => {
+    const name = (a?.fileName ?? '').trim()
+    return Boolean(name) && name !== 'N/A' && name !== '—' && name !== 'Not Provided'
+  })
+  const attachmentRows = data.attachments.slice(0, MAX_ATTACHMENTS_ROWS)
 
   const descPlain = stripHtmlToPlainParagraphs(data.detailedDescription)
 
@@ -561,43 +562,45 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
           </BorderedSectionWithLegend>
 
           {/* Attachments */}
-          <BorderedSectionWithLegend legend="Attachments">
-            <View style={{ borderWidth: 1, borderColor: BORDER, borderRadius: 8, overflow: 'hidden' }}>
-              <View style={{ flexDirection: 'row', backgroundColor: TABLE_HEAD }}>
-                {(['FILE NAME', 'FILE TYPE'] as const).map((h, idx) => (
-                  <Text
-                    key={h}
-                    style={{
-                      width: idx === 0 ? '68%' : '32%',
-                      fontSize: LABEL_FONT,
-                      fontWeight: 900,
-                      paddingHorizontal: 9,
-                      paddingVertical: 7,
-                      textTransform: 'uppercase',
-                      color: TEXT_DARK,
-                      borderRightWidth: idx === 1 ? 0 : 1,
-                      borderRightColor: BORDER,
-                    }}
-                  >
-                    {h}
-                  </Text>
-                ))}
-              </View>
-              {attachmentRows.map((a, idx) => (
-                <View key={`a-${idx}`} style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: BORDER }}>
-                  <Text style={{ width: '68%', fontSize: 7.25, padding: 6, borderRightWidth: 1, borderRightColor: BORDER }}>
-                    {clampText(a.fileName || 'N/A', 48)}
-                  </Text>
-                  <Text style={{ width: '32%', fontSize: 7.25, padding: 6 }}>{clampText(a.fileType || 'N/A', 14)}</Text>
+          {hasAttachments ? (
+            <BorderedSectionWithLegend legend="Attachments">
+              <View style={{ borderWidth: 1, borderColor: BORDER, borderRadius: 8, overflow: 'hidden' }}>
+                <View style={{ flexDirection: 'row', backgroundColor: TABLE_HEAD }}>
+                  {(['FILE NAME', 'FILE TYPE'] as const).map((h, idx) => (
+                    <Text
+                      key={h}
+                      style={{
+                        width: idx === 0 ? '68%' : '32%',
+                        fontSize: LABEL_FONT,
+                        fontWeight: 900,
+                        paddingHorizontal: 9,
+                        paddingVertical: 7,
+                        textTransform: 'uppercase',
+                        color: TEXT_DARK,
+                        borderRightWidth: idx === 1 ? 0 : 1,
+                        borderRightColor: BORDER,
+                      }}
+                    >
+                      {h}
+                    </Text>
+                  ))}
                 </View>
-              ))}
-              {attachmentsTruncated ? (
-                <Text style={{ fontSize: 6, color: GREEN_LABEL, paddingHorizontal: 8, paddingVertical: 5 }}>
-                  +{data.attachments.length - MAX_ATTACHMENTS_ROWS} more attachment(s) not shown
-                </Text>
-              ) : null}
-            </View>
-          </BorderedSectionWithLegend>
+                {attachmentRows.map((a, idx) => (
+                  <View key={`a-${idx}`} style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: BORDER }}>
+                    <Text style={{ width: '68%', fontSize: 7.25, padding: 6, borderRightWidth: 1, borderRightColor: BORDER }}>
+                      {clampText(a.fileName || 'N/A', 48)}
+                    </Text>
+                    <Text style={{ width: '32%', fontSize: 7.25, padding: 6 }}>{clampText(a.fileType || 'N/A', 14)}</Text>
+                  </View>
+                ))}
+                {attachmentsTruncated ? (
+                  <Text style={{ fontSize: 6, color: GREEN_LABEL, paddingHorizontal: 8, paddingVertical: 5 }}>
+                    +{data.attachments.length - MAX_ATTACHMENTS_ROWS} more attachment(s) not shown
+                  </Text>
+                ) : null}
+              </View>
+            </BorderedSectionWithLegend>
+          ) : null}
 
           {/* Review / Response — reviewed by row + full-width comments (spec layout) */}
           <BorderedSectionWithLegend legend="Review / Response">

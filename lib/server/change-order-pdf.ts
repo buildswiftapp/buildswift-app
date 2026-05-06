@@ -259,8 +259,51 @@ function mapApprovalAction(sig: 'approved' | 'rejected' | 'pending'): string {
   return 'Pending'
 }
 
+function cleanCoReviewerDisplayName(raw: string): string {
+  const n = (raw ?? '').trim()
+  if (!n || n.toLowerCase() === 'not provided') return ''
+  return n
+}
+
+/** Prefer the most recent Approved/Rejected reviewer; otherwise a single invitee awaiting review. */
+function pickChangeOrderReviewedByDisplay(
+  rows: Array<{ name: string; action: string }>
+): string {
+  const lastDecided = [...rows].reverse().find((r) => {
+    const a = (r.action || '').trim().toLowerCase()
+    return a === 'approved' || a === 'rejected'
+  })
+  if (lastDecided) {
+    const n = cleanCoReviewerDisplayName(lastDecided.name)
+    if (n) return n
+  }
+  const names = rows.map((r) => cleanCoReviewerDisplayName(r.name)).filter(Boolean)
+  if (names.length === 1) return names[0]!
+  return '—'
+}
+
+/** When metadata has no explicit TO, list invited reviewers (cycle order, de-duped). */
+function pickChangeOrderSentToFromReviewers(rows: Array<{ name: string }>): string {
+  const seen = new Set<string>()
+  const parts: string[] = []
+  for (const r of rows) {
+    const n = cleanCoReviewerDisplayName(r.name)
+    if (!n) continue
+    const key = n.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    parts.push(n)
+    if (parts.length >= 5) break
+  }
+  return parts.join(', ')
+}
+
 function isChangeOrderReviewerRole(role: string | null | undefined): boolean {
-  return (role ?? '').toLowerCase().includes('reviewer')
+  const t = (role ?? '').trim().toLowerCase()
+  if (!t) return true
+  // Exclude submission rows / non-review activity.
+  if (t.includes('contractor') || t.includes('submitter')) return false
+  return true
 }
 
 function sumCostItems(
@@ -385,7 +428,6 @@ export async function generateChangeOrderPdfBuffer(input: ChangeOrderPdfInput): 
   const requiredReviewDisplayOptional = fmtLongDate(input.requiredReviewDate ?? input.actionNeededBy)
 
   const projectAddress = defNa(input.projectAddress)
-  const toOwner = defNp(input.toOwner)
   const fromContractor = defNp(input.fromContractor || input.submittedBy)
 
   const descHtml = input.descriptionHtml || ''
@@ -506,14 +548,22 @@ export async function generateChangeOrderPdfBuffer(input: ChangeOrderPdfInput): 
       const name = nameCandidate || 'Not Provided'
       const explicitAction = typeof r.action === 'string' ? r.action.trim() : ''
       const action = explicitAction || mapApprovalAction(r.signature)
+      const sigUrl = typeof r.signatureUrl === 'string' && r.signatureUrl.trim() ? r.signatureUrl.trim() : null
+      const sigName = typeof r.signatureName === 'string' && r.signatureName.trim() ? r.signatureName.trim() : null
       return {
         name,
         role: defNp(r.role),
         action,
+        signatureUrl: sigUrl,
+        signatureName: sigName,
         date: (r.date || '').trim() || 'N/A',
         notes: (r.notes || '').trim() || 'N/A',
       }
     })
+
+  const reviewedByDisplay = pickChangeOrderReviewedByDisplay(approvalRowsPdf)
+  const toOwnerMeta = (input.toOwner ?? '').trim()
+  const toOwner = defNp(toOwnerMeta || pickChangeOrderSentToFromReviewers(approvalRowsPdf))
 
   const originalDaysN = parseWholeDays(input.originalProjectDurationDays)
   const originalDurationDisplay =
@@ -650,6 +700,7 @@ export async function generateChangeOrderPdfBuffer(input: ChangeOrderPdfInput): 
     attachments: attachmentsList,
 
     finalAuthorizationStatus: finalAuth,
+    reviewedByDisplay,
     approvalRows: approvalRowsPdf,
   }
 

@@ -58,6 +58,7 @@ export const sendForReviewSchema = z.object({
         z.object({
           email: z.string().trim().toLowerCase().email(),
           full_name: z.string().trim().min(1).max(200).optional(),
+          role: z.string().trim().min(1).max(80).optional(),
           company: z.string().trim().min(1).max(200).optional(),
         }),
       ])
@@ -65,12 +66,12 @@ export const sendForReviewSchema = z.object({
     .min(1)
     .transform((reviewers) => {
       const seen = new Set<string>()
-      const out: Array<{ email: string; full_name?: string; company?: string }> = []
+      const out: Array<{ email: string; full_name?: string; company?: string; role?: string }> = []
       for (const r of reviewers) {
         const row =
           typeof r === 'string'
             ? { email: r }
-            : { email: r.email, full_name: r.full_name, company: r.company }
+            : { email: r.email, full_name: r.full_name, company: r.company, role: (r as any).role }
         const e = row.email.toLowerCase().trim()
         if (!e || seen.has(e)) continue
         seen.add(e)
@@ -78,6 +79,7 @@ export const sendForReviewSchema = z.object({
           email: e,
           full_name: row.full_name?.trim() || undefined,
           company: row.company?.trim() || undefined,
+          role: typeof (row as any).role === 'string' ? ((row as any).role || '').trim() || undefined : undefined,
         })
       }
       return out
