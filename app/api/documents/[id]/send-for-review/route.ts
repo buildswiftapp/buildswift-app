@@ -98,7 +98,7 @@ function createReviewEmailContent(input: {
       `Powered by BuildSwift`,
     ].join('\n'),
     html: `
-      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;line-height:1.6;color:#111827;max-width:600px;margin:0 auto">
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.6;color:#111827;max-width:600px;margin:0 auto">
         <div style="background:linear-gradient(135deg, #f4f6fb 0%, #ffffff 100%);padding:24px;border-radius:12px;margin-bottom:24px">
           <h2 style="margin:0 0 16px 0;font-size:24px;font-weight:700;color:#111827">Review Request</h2>
           <p style="margin:0;font-size:16px;color:#64748b">You have been requested to review the following document:</p>
