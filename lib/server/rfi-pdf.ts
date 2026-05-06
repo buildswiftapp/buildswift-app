@@ -59,6 +59,8 @@ export type RfiPdfInput = {
     notes: string
   }>
   // Branding
+  /** Account logo data URI; falls back to default BuildSwift asset when absent */
+  brandingLogoDataUri?: string | null
   brandingCompanyName?: string | null
   contactAddress?: string | null
   contactPhone?: string | null
@@ -205,10 +207,12 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
     input.contactAddress?.trim() || '123 Main Street\nAnytown, USA 12345'
   const contactPhone = input.contactPhone?.trim() || '(555) 123-4567'
   const contactEmail = input.contactEmail?.trim() || 'info@buildswift.com'
-  const logoDataUri = resolveLogoDataUri()
+  const logoDataUri =
+    typeof input.brandingLogoDataUri === 'string' && input.brandingLogoDataUri.trim().length > 0
+      ? input.brandingLogoDataUri.trim()
+      : resolveLogoDataUri()
   const brand = companyName
   const brandSub = 'CONSTRUCTION'
-  const themePrimary = '#1f3768'
 
   const html = input.descriptionHtml || ''
 
@@ -337,9 +341,6 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
     return v ? 'Potential' : 'None'
   }
 
-  // Suppress unused resolveLogoDataUri — kept for future custom branding support
-  void resolveLogoDataUri()
-
   const responseSourceRow = pickSourceApprovalRowForResponse(approvalRows)
 
   const trimmedResponseContent = input.responseContent?.trim() ?? ''
@@ -388,7 +389,6 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
     logoDataUri,
     brand,
     brandSub,
-    themePrimary,
     contactAddress,
     contactPhone,
     contactEmail,
