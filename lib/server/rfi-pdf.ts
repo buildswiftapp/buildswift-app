@@ -2,6 +2,7 @@ import { readFileSync } from 'fs'
 import React from 'react'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { extractH3Block, strongField } from '@/lib/document-html'
+import { registerPdfArialFonts } from '@/lib/server/register-pdf-arial-fonts'
 import { getOpenAIClient } from '@/lib/server/openai'
 import { z } from 'zod'
 import {
@@ -201,6 +202,7 @@ async function composeRfiWithAi(input: {
 // ── Main function ──────────────────────────────────────────────────────────────
 
 export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> {
+  registerPdfArialFonts()
   const companyName = input.brandingCompanyName?.trim() || 'BuildSwift Construction'
 
   const contactAddress =

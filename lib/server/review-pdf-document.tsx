@@ -200,7 +200,7 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
           paddingHorizontal: 28,
           fontSize: 10,
           color: '#0f172a',
-          fontFamily: 'Helvetica',
+          fontFamily: 'Arial',
         }}
       >
 
