@@ -5,7 +5,6 @@ import { renderToBuffer } from '@react-pdf/renderer'
 import { extractH3Block, strongField } from '@/lib/document-html'
 import { brandingAccentFromPrimary, parseBrandingPrimaryColor } from '@/lib/branding-utils'
 import { ReviewPdfDocument, type ReviewPdfViewModel } from '@/lib/server/review-pdf-document'
-import { registerPdfArialFonts } from '@/lib/server/register-pdf-arial-fonts'
 
 type ReviewPdfInput = {
   title: string
@@ -420,7 +419,6 @@ function formatPriorityLabel(raw: string | null | undefined) {
 }
 
 export async function generateReviewPdfBuffer(input: ReviewPdfInput): Promise<Buffer> {
-  registerPdfArialFonts()
   const docJson = documentHtmlToJsonContent(input)
   const specSection =
     input.specSection ||

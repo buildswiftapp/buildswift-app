@@ -10,7 +10,6 @@
     "test:api:smoke": "node scripts/api-smoke.mjs"
   },
   "dependencies": {
-    "@fontsource/arimo": "^5.2.8",
     "@heroui/react": "^3.0.3",
     "@heroui/styles": "^3.0.3",
     "@hookform/resolvers": "^3.9.1",

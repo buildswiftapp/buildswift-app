@@ -14,7 +14,6 @@ import {
   type ChangeOrderCostLinePdfRow,
   type ChangeOrderPdfViewModel,
 } from '@/lib/server/change-order-pdf-document'
-import { registerPdfArialFonts } from '@/lib/server/register-pdf-arial-fonts'
 
 export type ChangeOrderPdfInput = {
   documentId?: string | null
@@ -393,7 +392,6 @@ function sumCoCostRowSubtotals(rows: ChangeOrderCostLinePdfRow[]): number {
 }
 
 export async function generateChangeOrderPdfBuffer(input: ChangeOrderPdfInput): Promise<Buffer> {
-  registerPdfArialFonts()
   const companyLegalName =
     (input.brandingCompanyName && input.brandingCompanyName.trim()) || 'BuildSwift Construction'
   const logoDataUri =
