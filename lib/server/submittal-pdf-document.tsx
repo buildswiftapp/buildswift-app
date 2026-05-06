@@ -168,7 +168,7 @@ function ReviewerSignatureCell({
       {url ? (
         <Image src={url} style={{ width: 70, height: 20, objectFit: 'contain' }} />
       ) : name ? (
-        <Text style={{ fontSize: VALUE_FONT - 0.5, fontFamily: 'Arial', fontStyle: 'italic', color: TEXT_DARK }}>{name}</Text>
+        <Text style={{ fontSize: VALUE_FONT - 0.5, fontFamily: 'Helvetica-Oblique', color: TEXT_DARK }}>{name}</Text>
       ) : (
         <View style={{ borderBottomWidth: 0.9, borderBottomColor: BORDER, marginTop: 10, opacity: 0.9 }} />
       )}
@@ -277,7 +277,7 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
         size={[PAGE_WIDTH_PT, PAGE_HEIGHT_PT]}
         wrap={false}
         style={{
-          fontFamily: 'Arial',
+          fontFamily: 'Helvetica',
           fontSize: BASE_FONT,
           color: TEXT_DARK,
           backgroundColor: PAGE_BG,

@@ -172,8 +172,7 @@ function CoApprovalLogSignatureCell({
         <Text
           style={{
             fontSize: BASE_FONT - 0.55,
-            fontFamily: 'Arial',
-            fontStyle: 'italic',
+            fontFamily: 'Helvetica-Oblique',
             color: TEXT_DARK,
             lineHeight: BODY_LINE_HEIGHT,
           }}
@@ -458,7 +457,7 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
         size={[PAGE_WIDTH_PT, PAGE_HEIGHT_PT]}
         wrap={false}
         style={{
-          fontFamily: 'Arial',
+          fontFamily: 'Helvetica',
           fontSize: BASE_FONT,
           color: TEXT_DARK,
           backgroundColor: '#ffffff',

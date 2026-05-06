@@ -242,7 +242,7 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
         size={[PAGE_WIDTH_PT, PAGE_HEIGHT_PT]}
         wrap={false}
         style={{
-          fontFamily: 'Arial',
+          fontFamily: 'Helvetica',
           fontSize: BASE_FONT,
           color: TEXT_DARK,
           backgroundColor: '#ffffff',

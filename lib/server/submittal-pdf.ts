@@ -2,7 +2,6 @@ import { readFileSync } from 'fs'
 import React from 'react'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { extractH3Block, strongField } from '@/lib/document-html'
-import { registerPdfArialFonts } from '@/lib/server/register-pdf-arial-fonts'
 import { getOpenAIClient } from '@/lib/server/openai'
 import { z } from 'zod'
 import {
@@ -213,7 +212,6 @@ Return JSON only. Rules:
 export async function generateSubmittalPdfBuffer(
   input: SubmittalPdfInput
 ): Promise<Buffer> {
-  registerPdfArialFonts()
   const companyName = input.brandingCompanyName?.trim() || 'BuildSwift Construction'
 
   const contactAddress =
