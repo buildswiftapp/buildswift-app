@@ -399,18 +399,19 @@ export async function generateChangeOrderPdfBuffer(input: ChangeOrderPdfInput): 
       ? input.brandingLogoDataUri.trim()
       : resolveFallbackLogoDataUri()
 
+  // Match submittal-pdf: prefer account contact; same defaults when unset (no "Not Provided" placeholders).
+  const defaultContactAddress = '123 Main Street\nAnytown, USA 12345'
+  const addressSource =
+    input.contactAddress?.trim().length > 0 ? input.contactAddress.trim() : defaultContactAddress
   const rawAddress =
-    (
-      input.contactAddress ||
-      (input.brandingCompanyName ? 'Not Provided' : '123 Main Street\nAnytown, USA 12345')
-    )
+    addressSource
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter(Boolean)
-      .join('\n') || 'Not Provided'
+      .join('\n') || defaultContactAddress
 
-  const phone = input.contactPhone || (input.brandingCompanyName ? 'Not Provided' : '(555) 123-4567')
-  const email = input.contactEmail || (input.brandingCompanyName ? 'Not Provided' : 'info@buildswift.com')
+  const phone = input.contactPhone?.trim() || '(555) 123-4567'
+  const email = input.contactEmail?.trim() || 'info@buildswift.com'
 
   const tokens = companyLegalName.trim().split(/\s+/).filter(Boolean)
   const brand = tokens[0]?.toUpperCase() || 'BUILDSWIFT'

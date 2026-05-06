@@ -21,7 +21,6 @@ export type RfiPdfViewModel = {
   logoDataUri: string
   brand: string
   brandSub: string
-  themePrimary: string
   contactAddress: string
   contactPhone: string
   contactEmail: string
@@ -61,11 +60,11 @@ export type RfiPdfViewModel = {
 const BORDER = '#e8edf2'
 /** Soft outline for cards / section boxes (lighter than prior navy) */
 const CARD_BORDER = '#c8d8e8'
-/** Outer page frame — subtle, not full header navy */
-const PAGE_FRAME = '#b8cce0'
 const CARD_BG = '#ffffff'
 const HEADER_BG = '#153f6f'
 const TITLE_BLUE = '#1e4275'
+/** Outermost page frame border (aligned with header bar) */
+const PAGE_FRAME = HEADER_BG
 const TEXT_DARK = '#1f2937'
 const MUTED = '#5b6471'
 const TABLE_HEAD = '#edf1f6'
@@ -313,7 +312,9 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
           {/* Row 1: Company lockup + Status */}
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 10 }}>
-              {data.logoDataUri ? <Image src={data.logoDataUri} style={{ width: 40, height: 40 }} /> : null}
+              {data.logoDataUri ? (
+                <Image src={data.logoDataUri} style={{ width: 40, height: 40, objectFit: 'contain' }} />
+              ) : null}
               <View style={{ marginLeft: data.logoDataUri ? 8 : 0, flex: 1 }}>
                 <Text style={{ fontSize: BASE_FONT + 3.2, fontWeight: 800, color: TITLE_BLUE, letterSpacing: 0.25 }}>
                   {(data.brand || 'BUILDSWIFT').toUpperCase()}

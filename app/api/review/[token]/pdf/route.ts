@@ -549,6 +549,7 @@ export async function GET(_req: Request, { params }: Params) {
           notes: 'Not Provided',
         })),
         brandingCompanyName,
+        brandingLogoDataUri: brandingLogoDataUri || null,
         contactAddress: accountContactAddress || process.env.REVIEW_PDF_CONTACT_ADDRESS || null,
         contactPhone: accountContactPhone || process.env.REVIEW_PDF_CONTACT_PHONE || null,
         contactEmail: process.env.REVIEW_PDF_CONTACT_EMAIL || null,
