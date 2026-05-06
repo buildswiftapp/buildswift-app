@@ -1,15 +1,19 @@
 'use client'
 
+import type { ReactNode } from 'react'
 import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft,
+  CalendarClock,
+  CheckCircle,
+  CircleDollarSign,
   Download,
   Eye,
-  Plus,
   Send,
   Save,
+  Timer,
   Trash2,
   Upload,
   X,
@@ -27,13 +31,34 @@ import {
   initialRfiState,
   initialSubmittalState,
   parseMoneyInput,
-  scheduleImpactValueToInputText,
 } from '@/lib/document-html'
+import {
+  computeBaseline,
+  computeDerived,
+  computeSchedule,
+  formatScheduleLabel,
+  formatSignedUsd,
+  serializeChangeOrderImpactToMetadata,
+  validateChangeOrderImpact,
+  type ChangeOrderBaselineState,
+  type ChangeOrderCostState,
+  type ChangeOrderImpactValidationErrors,
+  type ChangeOrderScheduleState,
+} from '@/lib/co-impact'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Spinner } from '@/components/ui/spinner'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   Select,
   SelectContent,
@@ -42,6 +67,15 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import {
+  backfillFromLegacy,
+  canClose,
+  isFinal,
+  isLocked,
+  statusBadge,
+  statusBadgeClasses,
+  type DocType,
+} from '@/lib/status'
 import { MissingScopeEditorSection } from '../../../components/missing-scope-editor-section'
 import { docTypeToMissingScopeType } from '@/lib/missing-scope-client'
 import { DocumentActivityPanel } from '@/app/components/document-activity-panel'
@@ -59,6 +93,44 @@ function formCardClassName(extra?: string) {
   )
 }
 
+function CoImpactCardShell(args: {
+  accentBorder: string
+  iconBg: string
+  iconClass: string
+  icon: ReactNode
+  title: string
+  description: string
+  children: ReactNode
+  footer?: ReactNode
+}) {
+  return (
+    <div
+      className={cn(
+        'flex h-full flex-col rounded-2xl border border-border bg-background p-5 shadow-sm ring-1 ring-border/50',
+        args.accentBorder
+      )}
+    >
+      <div className="mb-4 flex gap-3">
+        <div
+          className={cn(
+            'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl [&>svg]:h-5 [&>svg]:w-5',
+            args.iconBg,
+            args.iconClass
+          )}
+        >
+          {args.icon}
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold leading-snug tracking-tight text-foreground">{args.title}</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{args.description}</p>
+        </div>
+      </div>
+      <div className="min-w-0 flex-1 space-y-1">{args.children}</div>
+      {args.footer ? <div className="mt-4 border-t border-border pt-4">{args.footer}</div> : null}
+    </div>
+  )
+}
+
 type ApiProject = { id: string; name: string; address?: string | null }
 
 type ApiDocVersion = {
@@ -72,7 +144,11 @@ type ApiDocument = {
   id: string
   project_id: string
   doc_type: 'rfi' | 'submittal' | 'change_order'
+  /** Canonical lifecycle status (per `lib/status.ts`). */
+  status: string
+  /** Legacy: kept for back-compat fallback during Phase 1 dual-write. */
   internal_status: string
+  /** Legacy: kept for back-compat fallback during Phase 1 dual-write. */
   external_status: string
   doc_number: string | null
   title: string
@@ -85,13 +161,6 @@ interface LocalAttachment {
   id: string
   name: string
   size: string
-}
-
-interface CostItemDraft {
-  id: string
-  description: string
-  quantity: string
-  unitPrice: string
 }
 
 function formatBytes(bytes: number): string {
@@ -147,6 +216,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     title: '',
     date: '',
     question: '',
+    reasonForRequest: '',
     description: '',
     notes: '',
   })
@@ -154,31 +224,61 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     number: '',
     title: '',
     date: '',
+    submittalType: '',
     specSection: '',
     manufacturer: '',
     productName: '',
     quantity: '',
+    modelNumber: '',
+    detailReferences: '',
+    drawingSheetNumbers: '',
+    relatedRfiNumbers: '',
     description: '',
     notes: '',
   })
-  const [co, setCo] = useState({
+  type ChangeOrderFormState = {
+    changeOrderNumber: string
+    date: string
+    title: string
+    description: string
+    reason: string
+    originalContractAmount: string
+    notes: string
+    schedule: ChangeOrderScheduleState
+    baseline: ChangeOrderBaselineState
+    cost: ChangeOrderCostState
+  }
+
+  const [co, setCo] = useState<ChangeOrderFormState>({
     changeOrderNumber: '',
     date: '',
     title: '',
     description: '',
     reason: 'owner_request',
-    costImpact: '0',
-    scheduleNoImpact: true,
-    scheduleImpactText: '',
+    originalContractAmount: '',
     notes: '',
+    schedule: { enabled: false, duration: '', unit: 'days', dayType: '' },
+    baseline: { value: '', unit: 'days', dayType: '' },
+    cost: {
+      type: 'increase',
+      labor: '',
+      materials: '',
+      equipment: '',
+      subcontractor: '',
+      other: '',
+      markupPercent: '',
+      justificationNote: '',
+    },
   })
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
-  const [costItems, setCostItems] = useState<CostItemDraft[]>([])
+  const [impactErrors, setImpactErrors] = useState<ChangeOrderImpactValidationErrors>({})
 
   const [isSaving, setIsSaving] = useState(false)
   const [openingPdfDetails, setOpeningPdfDetails] = useState(false)
   const [exportingPdf, setExportingPdf] = useState(false)
   const [mainTab, setMainTab] = useState<'details' | 'activity'>('details')
+  const [closing, setClosing] = useState(false)
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -215,24 +315,13 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             title: s.title,
             description: s.description,
             reason: s.reason,
-            costImpact: s.costImpact,
-            scheduleNoImpact: s.scheduleImpact === 'none',
-            scheduleImpactText: scheduleImpactValueToInputText(s.scheduleImpact),
+            originalContractAmount: s.originalContractAmount,
             notes: s.notes,
+            schedule: s.schedule,
+            baseline: s.baseline,
+            cost: s.cost,
           })
           setAttachments(initialAttachments)
-          // Restore cost breakdown line items from metadata
-          const savedItems = Array.isArray(meta.costBreakdownItems) ? meta.costBreakdownItems : []
-          if (savedItems.length) {
-            setCostItems(
-              savedItems.map((item: Record<string, unknown>, i: number) => ({
-                id: `ci-loaded-${i}-${Date.now()}`,
-                description: String(item.description ?? ''),
-                quantity: String(item.quantity ?? '1'),
-                unitPrice: String(item.unitPrice ?? '0'),
-              }))
-            )
-          }
         }
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to load document')
@@ -249,54 +338,41 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
 
   const reasonLabel =
     CO_REASON_OPTIONS.find((r) => r.value === co.reason)?.label ?? co.reason
-  const scheduleLabel = co.scheduleNoImpact
-    ? 'No Impact'
-    : co.scheduleImpactText.trim() || '—'
-  const normalizedCostItems = costItems.map((item) => {
-    const qty = Math.max(0, Number.parseFloat(item.quantity || '0') || 0)
-    const unit = parseMoneyInput(item.unitPrice)
-    return { ...item, qty, unit, lineTotal: qty * unit }
-  })
-  const costBreakdownTotal = normalizedCostItems.reduce((sum, row) => sum + row.lineTotal, 0)
-  const hasCostBreakdown = normalizedCostItems.some(
-    (row) => row.description.trim() || row.qty !== 0 || row.unit !== 0
+  const scheduleLabel = formatScheduleLabel(co.schedule)
+
+  const derived = useMemo(
+    () =>
+      computeDerived({
+        schedule: co.schedule,
+        baseline: co.baseline,
+        cost: co.cost,
+        originalContractAmountRaw: co.originalContractAmount,
+      }),
+    [co.schedule, co.baseline, co.cost, co.originalContractAmount]
   )
-  const costNumeric = hasCostBreakdown ? costBreakdownTotal : parseMoneyInput(co.costImpact)
 
-  useEffect(() => {
-    if (!hasCostBreakdown) return
-    const next = costBreakdownTotal ? formatUsd(costBreakdownTotal) : '0'
-    setCo((prev) => (prev.costImpact === next ? prev : { ...prev, costImpact: next }))
-  }, [costBreakdownTotal, hasCostBreakdown])
-
-  const addCostItem = () =>
-    setCostItems((prev) => [
-      ...prev,
-      { id: `ci-${Date.now()}-${Math.random().toString(16).slice(2)}`, description: '', quantity: '1', unitPrice: '0' },
-    ])
-  const removeCostItem = (id: string) => setCostItems((prev) => prev.filter((i) => i.id !== id))
-  const updateCostItem = (id: string, patch: Partial<CostItemDraft>) =>
-    setCostItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)))
+  const scheduleComputed = useMemo(() => computeSchedule(co.schedule), [co.schedule])
+  const baselineComputed = useMemo(() => computeBaseline(co.baseline), [co.baseline])
 
   const hintClass = 'mt-1.5 text-xs text-muted-foreground'
-  const normalizedStatus =
-    doc?.internal_status === 'in_review' || doc?.internal_status === 'pending_reviewer'
-      ? 'pending_review'
-      : doc?.internal_status === 'revising'
-        ? 'revision_requested'
-        : doc?.internal_status ?? 'draft'
-  const finalStatusLabel =
-    normalizedStatus === 'approved'
-      ? docType === 'rfi'
-        ? 'Answered'
-        : docType === 'change_order'
-          ? 'Approved as Noted'
-          : 'Approved'
-      : normalizedStatus === 'rejected'
-        ? docType === 'submittal' || docType === 'change_order'
-          ? 'Revise and Resubmit'
-          : 'Rejected'
-        : null
+
+  // Canonical status read with legacy-fallback derivation so older rows that
+  // haven't been backfilled yet still produce sensible badges.
+  const canonicalStatus: string = doc
+    ? typeof doc.status === 'string' && doc.status.length
+      ? doc.status
+      : backfillFromLegacy(
+          doc.doc_type as DocType,
+          doc.internal_status,
+          doc.external_status,
+          null
+        )
+    : 'draft'
+  const canonicalDocType: DocType = (doc?.doc_type as DocType) ?? 'rfi'
+  const headerBadge = doc ? statusBadge(canonicalDocType, canonicalStatus) : null
+  const isDocFinal = doc ? isFinal(canonicalDocType, canonicalStatus) : false
+  const isDocLocked = doc ? isLocked(canonicalDocType, canonicalStatus) : false
+  const showCloseButton = doc ? canClose(canonicalDocType, canonicalStatus) : false
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -362,6 +438,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     const latest = getLatestVersion(doc.document_versions)
     const prevMeta = (latest?.metadata as Record<string, unknown>) ?? {}
     const descriptionBody = buildRfiDescriptionBody({
+      reasonForRequest: rfi.reasonForRequest.trim(),
       question: rfi.question.trim(),
       description: rfi.description,
       notes: rfi.notes,
@@ -374,6 +451,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
         ...prevMeta,
         rfiDate: rfi.date || undefined,
         question: rfi.question.trim() || undefined,
+        reasonForRequest: rfi.reasonForRequest.trim() || undefined,
         notes: rfi.notes || undefined,
         attachments: toDocAttachments(attachments),
       },
@@ -398,10 +476,15 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       metadata: {
         ...prevMeta,
         submittalDate: sub.date || undefined,
+        submittalType: sub.submittalType.trim() || undefined,
         specSection: sub.specSection || undefined,
         manufacturer: sub.manufacturer || undefined,
         productName: sub.productName || undefined,
         quantity: sub.quantity || undefined,
+        modelNumber: sub.modelNumber.trim() || undefined,
+        detailReferences: sub.detailReferences.trim() || undefined,
+        drawingSheetNumbers: sub.drawingSheetNumbers.trim() || undefined,
+        relatedRfiNumbers: sub.relatedRfiNumbers.trim() || undefined,
         notes: sub.notes || undefined,
         attachments: toDocAttachments(attachments),
       },
@@ -413,6 +496,41 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       toast.error('Title and description are required')
       return
     }
+
+    setImpactErrors({})
+    const impactValidation = validateChangeOrderImpact({
+      schedule: co.schedule,
+      baseline: co.baseline,
+      cost: co.cost,
+    })
+    if (!impactValidation.ok) {
+      setImpactErrors(impactValidation.errors)
+      toast.error('Please review the schedule/cost impact fields.')
+      const firstKey =
+        (Object.keys(impactValidation.errors)[0] as keyof ChangeOrderImpactValidationErrors | undefined) ?? null
+      const focusId =
+        firstKey === 'scheduleDuration'
+          ? 'co-schedule-duration'
+          : firstKey === 'scheduleDayType'
+            ? 'co-schedule-day-type'
+            : firstKey === 'baselineDuration'
+              ? 'co-baseline-duration'
+              : firstKey === 'baselineDayType'
+                ? 'co-baseline-day-type'
+                : firstKey === 'costJustification'
+                  ? 'co-cost-justification'
+                  : firstKey === 'costAtLeastOne'
+                    ? 'co-cost-labor'
+                    : null
+      if (focusId) {
+        setTimeout(() => {
+          const el = document.getElementById(focusId) as HTMLElement | null
+          el?.focus?.()
+        }, 0)
+      }
+      return
+    }
+
     const html = buildChangeOrderHtml({
       coNumber: co.changeOrderNumber,
       date: co.date,
@@ -420,18 +538,10 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       title: co.title,
       description: co.description,
       reasonLabel,
-      cost: costNumeric,
+      cost: derived.costTotal,
       scheduleLabel,
       notes: co.notes,
     })
-    const costBreakdownRows = normalizedCostItems
-      .filter((r) => r.description.trim() || r.qty !== 0 || r.unit !== 0)
-      .map((r) => ({
-        description: r.description.trim() || '—',
-        quantity: r.qty,
-        unitPrice: r.unit,
-        total: r.lineTotal,
-      }))
 
     await savePatch({
       title: co.title,
@@ -439,13 +549,17 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
       description: html,
       metadata: {
         reason: reasonLabel,
-        proposedAmount: costNumeric,
-        costBreakdownItems: costBreakdownRows.length ? costBreakdownRows : undefined,
         changeOrderNumber: co.changeOrderNumber,
         changeOrderDate: co.date,
-        scheduleImpact: scheduleLabel,
         notes: co.notes || undefined,
         attachments: toDocAttachments(attachments),
+        ...serializeChangeOrderImpactToMetadata({
+          schedule: co.schedule,
+          baseline: co.baseline,
+          cost: co.cost,
+          derived,
+          originalContractAmount: co.originalContractAmount,
+        }),
       },
     })
   }
@@ -475,7 +589,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
   }
 
   const handleExportPdf = () => {
-    if (exportingPdf || normalizedStatus !== 'approved') return
+    if (exportingPdf || !isDocFinal) return
     setExportingPdf(true)
     const opened = window.open(`/api/documents/${id}/pdf?download=1`, '_blank', 'noopener,noreferrer')
     if (!opened) toast.error('Popup blocked. Please allow popups to export PDF.')
@@ -485,6 +599,29 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
   const handleGoSendForReview = useCallback(() => {
     router.push(`/documents/${id}/send-for-review`)
   }, [router, id])
+
+  const handleCloseDocument = useCallback(async () => {
+    if (closing) return
+    if (!doc) return
+    if (!canClose(canonicalDocType, canonicalStatus)) {
+      toast.error('Document is already closed.')
+      return
+    }
+    setClosing(true)
+    try {
+      const res = await apiFetch<{ document: ApiDocument }>(`/api/documents/${id}/close`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
+      if (res.document) setDoc(res.document)
+      toast.success('Document closed')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to close document')
+    } finally {
+      setClosing(false)
+      setCloseDialogOpen(false)
+    }
+  }, [closing, doc, canonicalDocType, canonicalStatus, id])
 
   const pageTitle = useMemo(() => {
     if (!doc) return 'Document'
@@ -513,33 +650,45 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {finalStatusLabel ? (
+            {headerBadge ? (
               <span
                 className={cn(
                   'inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold',
-                  normalizedStatus === 'approved'
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : 'border-rose-200 bg-rose-50 text-rose-700'
+                  statusBadgeClasses(headerBadge.tone)
                 )}
               >
-                {finalStatusLabel}
+                {headerBadge.label}
               </span>
             ) : null}
-            {normalizedStatus === 'approved' ? (
+            {isDocFinal ? (
               <Button onClick={handleExportPdf} disabled={exportingPdf} className="shrink-0 gap-2 rounded-xl px-4">
                 <Download className="h-4 w-4" />
                 {exportingPdf ? 'Exporting...' : 'Export to PDF'}
               </Button>
             ) : null}
-            <Button
-              type="button"
-              onClick={handleGoSendForReview}
-              className="shrink-0 gap-2 rounded-xl px-4"
-              disabled={isSaving}
-            >
-              <Send className="h-4 w-4" />
-              Send for Review
-            </Button>
+            {isDocLocked ? null : (
+              <Button
+                type="button"
+                onClick={handleGoSendForReview}
+                className="shrink-0 gap-2 rounded-xl px-4"
+                disabled={isSaving}
+              >
+                <Send className="h-4 w-4" />
+                Send for Review
+              </Button>
+            )}
+            {showCloseButton ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCloseDialogOpen(true)}
+                disabled={closing}
+                className="shrink-0 gap-2 rounded-xl bg-white px-4 text-foreground hover:bg-muted"
+              >
+                <CheckCircle className="h-4 w-4" />
+                {closing ? 'Closing...' : 'Close'}
+              </Button>
+            ) : null}
             <Button
               variant="outline"
               className="shrink-0 gap-2 rounded-xl bg-white px-4 text-foreground hover:bg-muted"
@@ -552,6 +701,52 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             </Button>
           </div>
         </div>
+
+        <AlertDialog open={closeDialogOpen} onOpenChange={setCloseDialogOpen}>
+          <AlertDialogContent className="max-w-lg rounded-2xl border border-slate-200 bg-white p-0 shadow-xl">
+            <AlertDialogHeader className="space-y-0">
+              <div className="rounded-t-2xl bg-slate-900 px-6 py-5 text-white">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10">
+                    <CheckCircle className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <AlertDialogTitle className="text-lg font-semibold text-white">
+                      Close this document?
+                    </AlertDialogTitle>
+                    <AlertDialogDescription className="mt-1 text-sm text-slate-200">
+                      Closing will mark this document as{' '}
+                      <span className="font-semibold text-white">Closed</span> for everyone. Reviewers
+                      will no longer be able to respond using their links.
+                    </AlertDialogDescription>
+                  </div>
+                </div>
+              </div>
+            </AlertDialogHeader>
+
+            <div className="px-6 py-5">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-sm text-slate-700">
+                  You can still export the PDF and view activity history after closing.
+                </p>
+              </div>
+            </div>
+
+            <AlertDialogFooter className="gap-2 border-t border-slate-100 px-6 py-4">
+              <AlertDialogCancel className="rounded-xl">Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => {
+                  e.preventDefault()
+                  void handleCloseDocument()
+                }}
+                className="rounded-xl bg-slate-900 text-white hover:bg-slate-800"
+                disabled={closing}
+              >
+                {closing ? 'Closing…' : 'Close document'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         <div className="grid grid-cols-1 gap-6 md:gap-7 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
           <div className="min-w-0 space-y-6">
@@ -629,20 +824,65 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
             </div>
 
             <div className={formCardClassName()}>
-              <div className="mb-6">
-                <label className={capLabel}>
-                  {docType === 'change_order' ? 'Change order title' : docType === 'rfi' ? 'RFI title' : 'Submittal title'}{' '}
-                  <span className="text-destructive">*</span>
-                </label>
-                <Input
-                  value={docType === 'rfi' ? rfi.title : docType === 'submittal' ? sub.title : co.title}
-                  onChange={(e) => {
-                    if (docType === 'rfi') setRfi((p) => ({ ...p, title: e.target.value }))
-                    else if (docType === 'submittal') setSub((p) => ({ ...p, title: e.target.value }))
-                    else setCo((p) => ({ ...p, title: e.target.value }))
-                  }}
-                />
-              </div>
+              {docType === 'rfi' ? (
+                <div className="mb-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <label className={capLabel}>
+                        RFI title <span className="text-destructive">*</span>
+                      </label>
+                      <Input
+                        value={rfi.title}
+                        onChange={(e) => setRfi((p) => ({ ...p, title: e.target.value }))}
+                      />
+                    </div>
+                    <div className="w-full shrink-0 space-y-2 sm:w-[min(22rem,40%)] sm:max-w-md">
+                      <label className={capLabel}>Reason for request</label>
+                      <Input
+                        value={rfi.reasonForRequest}
+                        onChange={(e) => setRfi((p) => ({ ...p, reasonForRequest: e.target.value }))}
+                        placeholder="e.g., Drawing conflict, omitted scope..."
+                        className="h-8 w-full text-xs"
+                      />
+                    </div>
+                  </div>
+                  <p className={cn(hintClass, 'mt-2')}>Shown in the RFI PDF summary alongside the title.</p>
+                </div>
+              ) : docType === 'submittal' ? (
+                <div className="mb-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <label className={capLabel}>
+                        Submittal title <span className="text-destructive">*</span>
+                      </label>
+                      <Input
+                        value={sub.title}
+                        onChange={(e) => setSub((p) => ({ ...p, title: e.target.value }))}
+                        placeholder="e.g., Hollow Metal Doors — Series 4500 Submittal Package"
+                      />
+                    </div>
+                    <div className="w-full shrink-0 space-y-2 sm:w-[min(22rem,40%)] sm:max-w-md">
+                      <label className={capLabel}>Submittal type</label>
+                      <Input
+                        value={sub.submittalType}
+                        onChange={(e) => setSub((p) => ({ ...p, submittalType: e.target.value }))}
+                        placeholder="e.g., Shop Drawing, Product Data"
+                        className="h-8 w-full text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mb-6">
+                  <label className={capLabel}>
+                    Change order title <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    value={co.title}
+                    onChange={(e) => setCo((p) => ({ ...p, title: e.target.value }))}
+                  />
+                </div>
+              )}
 
               <div className="mb-3 flex items-center justify-between gap-3">
                 <span className={capLabelRow}>
@@ -705,72 +945,37 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                       placeholder="e.g., 4"
                     />
                   </div>
-                </div>
-              </div>
-            ) : null}
-
-            {docType === 'change_order' ? (
-              <div className={formCardClassName()}>
-                <h2 className="mb-5 text-lg font-semibold text-foreground">Change details</h2>
-                <div className="grid gap-5 sm:grid-cols-3">
                   <div>
-                    <label className={capLabel}>Reason for change</label>
-                    <Select value={co.reason} onValueChange={(v) => setCo((p) => ({ ...p, reason: v }))}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CO_REASON_OPTIONS.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>
-                            {o.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <label className={capLabel}>Model number(s)</label>
+                    <Input
+                      value={sub.modelNumber}
+                      onChange={(e) => setSub((p) => ({ ...p, modelNumber: e.target.value }))}
+                      placeholder="e.g., 601T"
+                    />
                   </div>
                   <div>
-                    <label className={capLabel}>Cost impact</label>
-                    <div className="relative">
-                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                        $
-                      </span>
-                      <Input
-                        value={co.costImpact}
-                        onChange={(e) => setCo((p) => ({ ...p, costImpact: e.target.value }))}
-                        className="pl-7 pr-14"
-                        placeholder="8,750.00"
-                        readOnly={hasCostBreakdown}
-                      />
-                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                        USD
-                      </span>
-                    </div>
+                    <label className={capLabel}>Detail reference(s)</label>
+                    <Input
+                      value={sub.detailReferences}
+                      onChange={(e) => setSub((p) => ({ ...p, detailReferences: e.target.value }))}
+                      placeholder="e.g., A/S-502"
+                    />
                   </div>
                   <div>
-                    <label className={capLabel}>Schedule impact</label>
-                    <div className="flex min-h-10 items-center gap-3">
-                      <label
-                        htmlFor="co-schedule-no-impact"
-                        className="flex shrink-0 cursor-pointer items-center gap-2 text-sm whitespace-nowrap text-foreground"
-                      >
-                        <Checkbox
-                          checked={co.scheduleNoImpact}
-                          onCheckedChange={(checked) =>
-                            setCo((p) => ({ ...p, scheduleNoImpact: checked === true }))
-                          }
-                          id="co-schedule-no-impact"
-                        />
-                        <span>No Impact</span>
-                      </label>
-                      <Input
-                        className="min-w-0 flex-1"
-                        value={co.scheduleImpactText}
-                        onChange={(e) => setCo((p) => ({ ...p, scheduleImpactText: e.target.value }))}
-                        disabled={co.scheduleNoImpact}
-                        placeholder="+ 5 days"
-                        aria-label="Schedule impact description"
-                      />
-                    </div>
+                    <label className={capLabel}>Drawing/sheet number(s)</label>
+                    <Input
+                      value={sub.drawingSheetNumbers}
+                      onChange={(e) => setSub((p) => ({ ...p, drawingSheetNumbers: e.target.value }))}
+                      placeholder="e.g., A-101"
+                    />
+                  </div>
+                  <div>
+                    <label className={capLabel}>Related RFI number(s)</label>
+                    <Input
+                      value={sub.relatedRfiNumbers}
+                      onChange={(e) => setSub((p) => ({ ...p, relatedRfiNumbers: e.target.value }))}
+                      placeholder="e.g., RFI-014"
+                    />
                   </div>
                 </div>
               </div>
@@ -778,82 +983,487 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
 
             {docType === 'change_order' ? (
               <div className={formCardClassName()}>
-                <div className="mb-5 flex items-start justify-between gap-4">
-                  <div>
-                    <h2 className="text-lg font-semibold text-foreground">Cost Breakdown</h2>
-                    <p className="text-sm text-muted-foreground">Update line items for this change order</p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="shrink-0 gap-2"
-                    onClick={addCostItem}
-                  >
-                    <Plus className="h-4 w-4" />
-                    Add Item
-                  </Button>
+                <div className="border-b border-border pb-6">
+                  <h2 className="text-lg font-semibold tracking-tight text-foreground">Change details</h2>
+                  <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                    Set the reason, then capture schedule extension, project baseline length, and cost categories. Totals
+                    below update automatically.
+                  </p>
                 </div>
 
-                <div className="space-y-3">
-                  {normalizedCostItems.map((row) => (
-                    <div key={row.id} className="rounded-lg border border-border bg-background p-4">
-                      <div className="flex items-center gap-3">
-                        <Input
-                          value={row.description}
-                          onChange={(e) => updateCostItem(row.id, { description: e.target.value })}
-                          placeholder="Description"
-                          className="flex-1"
-                        />
+                <div className="mt-6 max-w-xl">
+                  <label className={capLabel}>Reason for change</label>
+                  <Select value={co.reason} onValueChange={(v) => setCo((p) => ({ ...p, reason: v }))}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CO_REASON_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="mt-8">
+                  <p className={capLabel}>Impacts</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Three independent blocks — validate and save separately.
+                  </p>
+                  <div className="mt-5 grid gap-5 lg:grid-cols-3 lg:items-stretch">
+                    <CoImpactCardShell
+                      accentBorder="border-t-[3px] border-t-sky-500"
+                      iconBg="bg-sky-500/10"
+                      iconClass="text-sky-700 dark:text-sky-400"
+                      icon={<CalendarClock aria-hidden />}
+                      title="Schedule impact"
+                      description="Extension to the schedule from this change order (optional)."
+                      footer={
+                        <p className="text-[11px] font-medium leading-relaxed text-muted-foreground">
+                          {!co.schedule.enabled ? (
+                            <span className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-foreground">
+                              No schedule extension
+                            </span>
+                          ) : scheduleComputed.valid ? (
+                            <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-800 dark:text-emerald-300">
+                              Equivalent · {derived.scheduleDaysTotal} calendar day
+                              {derived.scheduleDaysTotal === 1 ? '' : 's'}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2.5 py-1 text-amber-900 dark:text-amber-200">
+                              Enter duration
+                              {co.schedule.unit === 'days' ? ' and day type' : ''} to see equivalent days
+                            </span>
+                          )}
+                        </p>
+                      }
+                    >
+                      <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
-                          onClick={() => removeCostItem(row.id)}
-                          className="rounded-md p-2 text-destructive transition-colors hover:bg-destructive/10"
-                          aria-label="Remove cost item"
+                          onClick={() => setCo((p) => ({ ...p, schedule: { ...p.schedule, enabled: true } }))}
+                          className={cn(
+                            'h-10 rounded-lg border text-sm font-semibold transition-colors',
+                            co.schedule.enabled
+                              ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                              : 'border-border bg-background text-foreground hover:bg-muted'
+                          )}
                         >
-                          <X className="h-4 w-4" />
+                          Yes
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCo((p) => ({
+                              ...p,
+                              schedule: { enabled: false, duration: '', unit: 'days', dayType: '' },
+                            }))
+                          }
+                          className={cn(
+                            'h-10 rounded-lg border text-sm font-semibold transition-colors',
+                            !co.schedule.enabled
+                              ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                              : 'border-border bg-background text-foreground hover:bg-muted'
+                          )}
+                        >
+                          No
                         </button>
                       </div>
-                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        <div>
-                          <label className={capLabel}>Quantity</label>
-                          <Input
-                            inputMode="decimal"
-                            value={row.quantity}
-                            onChange={(e) => updateCostItem(row.id, { quantity: e.target.value })}
-                          />
-                        </div>
-                        <div>
-                          <label className={capLabel}>Unit Price ($)</label>
-                          <Input
-                            inputMode="decimal"
-                            value={row.unitPrice}
-                            onChange={(e) => updateCostItem(row.id, { unitPrice: e.target.value })}
-                          />
-                        </div>
-                        <div>
-                          <label className={capLabel}>Total</label>
-                          <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground">
-                            {row.lineTotal ? `$${formatUsd(row.lineTotal)}` : '$0'}
+
+                      {co.schedule.enabled ? (
+                        <div className="mt-4 space-y-3">
+                          <div>
+                            <label className={capLabel}>Duration</label>
+                            <Input
+                              id="co-schedule-duration"
+                              inputMode="numeric"
+                              value={co.schedule.duration}
+                              onChange={(e) => {
+                                setImpactErrors((p) => ({ ...p, scheduleDuration: undefined }))
+                                setCo((p) => ({ ...p, schedule: { ...p.schedule, duration: e.target.value } }))
+                              }}
+                              placeholder="Whole number, e.g. 5"
+                            />
+                            {impactErrors.scheduleDuration ? (
+                              <p className="mt-1 text-xs text-destructive">{impactErrors.scheduleDuration}</p>
+                            ) : null}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className={capLabel}>Unit</label>
+                              <Select
+                                value={co.schedule.unit}
+                                onValueChange={(v) =>
+                                  setCo((p) => ({
+                                    ...p,
+                                    schedule: {
+                                      ...p.schedule,
+                                      unit: v === 'weeks' ? 'weeks' : 'days',
+                                      dayType: v === 'weeks' ? '' : p.schedule.dayType,
+                                    },
+                                  }))
+                                }
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="days">Days</SelectItem>
+                                  <SelectItem value="weeks">Weeks</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            {co.schedule.unit === 'days' ? (
+                              <div>
+                                <label className={capLabel}>Day type</label>
+                                <Select
+                                  value={co.schedule.dayType}
+                                  onValueChange={(v) => {
+                                    setImpactErrors((p) => ({ ...p, scheduleDayType: undefined }))
+                                    setCo((p) => ({
+                                      ...p,
+                                      schedule: {
+                                        ...p.schedule,
+                                        dayType: v === 'business' ? 'business' : v === 'calendar' ? 'calendar' : '',
+                                      },
+                                    }))
+                                  }}
+                                >
+                                  <SelectTrigger className="w-full" id="co-schedule-day-type">
+                                    <SelectValue placeholder="Select" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="calendar">Calendar</SelectItem>
+                                    <SelectItem value="business">Business</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                {impactErrors.scheduleDayType ? (
+                                  <p className="mt-1 text-xs text-destructive">{impactErrors.scheduleDayType}</p>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </div>
                         </div>
-                      </div>
-                    </div>
-                  ))}
+                      ) : null}
+                    </CoImpactCardShell>
 
-                  {normalizedCostItems.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-border bg-muted/40 p-6 text-center text-sm text-muted-foreground">
-                      No items yet. Click{' '}
-                      <span className="font-semibold text-foreground">Add Item</span> to create your first line item.
-                    </div>
-                  ) : null}
+                    <CoImpactCardShell
+                      accentBorder="border-t-[3px] border-t-muted-foreground"
+                      iconBg="bg-muted"
+                      iconClass="text-foreground"
+                      icon={<Timer aria-hidden />}
+                      title="Original project duration"
+                      description="Baseline length before this change order. Used with schedule impact for revised duration."
+                      footer={
+                        <p className="text-[11px] font-medium leading-relaxed text-muted-foreground">
+                          {baselineComputed.valid ? (
+                            <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-800 dark:text-emerald-300">
+                              Baseline · {derived.baselineDaysTotal} calendar day
+                              {derived.baselineDaysTotal === 1 ? '' : 's'}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2.5 py-1 text-amber-900 dark:text-amber-200">
+                              Enter a numeric duration
+                              {co.baseline.unit === 'days' ? ' and day type' : ''}
+                            </span>
+                          )}
+                        </p>
+                      }
+                    >
+                      <div className="space-y-3">
+                        <div>
+                          <label className={capLabel}>Duration</label>
+                          <Input
+                            id="co-baseline-duration"
+                            inputMode="numeric"
+                            value={co.baseline.value}
+                            onChange={(e) => {
+                              setImpactErrors((p) => ({ ...p, baselineDuration: undefined }))
+                              setCo((p) => ({ ...p, baseline: { ...p.baseline, value: e.target.value } }))
+                            }}
+                            placeholder="Whole number, e.g. 240"
+                          />
+                          {impactErrors.baselineDuration ? (
+                            <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDuration}</p>
+                          ) : null}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className={capLabel}>Unit</label>
+                            <Select
+                              value={co.baseline.unit}
+                              onValueChange={(v) =>
+                                setCo((p) => ({
+                                  ...p,
+                                  baseline: {
+                                    ...p.baseline,
+                                    unit: v === 'weeks' ? 'weeks' : 'days',
+                                    dayType: v === 'weeks' ? '' : p.baseline.dayType,
+                                  },
+                                }))
+                              }
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="days">Days</SelectItem>
+                                <SelectItem value="weeks">Weeks</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {co.baseline.unit === 'days' ? (
+                            <div>
+                              <label className={capLabel}>Day type</label>
+                              <Select
+                                value={co.baseline.dayType}
+                                onValueChange={(v) => {
+                                  setImpactErrors((p) => ({ ...p, baselineDayType: undefined }))
+                                  setCo((p) => ({
+                                    ...p,
+                                    baseline: {
+                                      ...p.baseline,
+                                      dayType:
+                                        v === 'business' ? 'business' : v === 'calendar' ? 'calendar' : '',
+                                    },
+                                  }))
+                                }}
+                              >
+                                <SelectTrigger className="w-full" id="co-baseline-day-type">
+                                  <SelectValue placeholder="Select" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="calendar">Calendar</SelectItem>
+                                  <SelectItem value="business">Business</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              {impactErrors.baselineDayType ? (
+                                <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDayType}</p>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </CoImpactCardShell>
+
+                    <CoImpactCardShell
+                      accentBorder="border-t-[3px] border-t-[#f97316]"
+                      iconBg="bg-orange-500/10"
+                      iconClass="text-orange-700 dark:text-orange-400"
+                      icon={<CircleDollarSign aria-hidden />}
+                      title="Cost impact"
+                      description="Category amounts and optional markup. Credits show as totals in parentheses."
+                    >
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                        {(
+                          [
+                            { value: 'increase', label: 'Increase' },
+                            { value: 'decrease', label: 'Decrease' },
+                            { value: 'none', label: 'No cost' },
+                          ] as const
+                        ).map((opt) => {
+                          const active = co.cost.type === opt.value
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() =>
+                                setCo((p) => ({
+                                  ...p,
+                                  cost: {
+                                    ...p.cost,
+                                    type: opt.value,
+                                    ...(opt.value === 'none'
+                                      ? {
+                                          labor: '',
+                                          materials: '',
+                                          equipment: '',
+                                          subcontractor: '',
+                                          other: '',
+                                          markupPercent: '',
+                                        }
+                                      : { justificationNote: '' }),
+                                  },
+                                }))
+                              }
+                              className={cn(
+                                'min-h-[2.75rem] rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition-colors sm:text-xs',
+                                active
+                                  ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                                  : 'border-border bg-background text-foreground hover:bg-muted'
+                              )}
+                            >
+                              {opt.value === 'decrease' ? (
+                                <>
+                                  Decrease
+                                  <span className="mt-0.5 block text-[10px] font-normal opacity-90">
+                                    (credit)
+                                  </span>
+                                </>
+                              ) : (
+                                opt.label
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
+
+                      {co.cost.type === 'none' ? (
+                        <div className="mt-4">
+                          <label className={capLabel}>
+                            Justification <span className="text-destructive">*</span>
+                          </label>
+                          <Textarea
+                            id="co-cost-justification"
+                            value={co.cost.justificationNote}
+                            onChange={(e) => {
+                              setImpactErrors((p) => ({ ...p, costJustification: undefined }))
+                              setCo((p) => ({ ...p, cost: { ...p.cost, justificationNote: e.target.value } }))
+                            }}
+                            rows={4}
+                            className="resize-none"
+                            placeholder="Explain why there is no cost impact..."
+                          />
+                          {impactErrors.costJustification ? (
+                            <p className="mt-1 text-xs text-destructive">{impactErrors.costJustification}</p>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="mt-4 space-y-4">
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            {(
+                              [
+                                { key: 'labor', label: 'Labor' },
+                                { key: 'materials', label: 'Materials' },
+                                { key: 'equipment', label: 'Equipment' },
+                                { key: 'subcontractor', label: 'Subcontractors' },
+                                { key: 'other', label: 'Other' },
+                              ] as const
+                            ).map((row, idx) => (
+                              <div key={row.key}>
+                                <label className={capLabel}>{row.label}</label>
+                                <div className="relative">
+                                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                                    $
+                                  </span>
+                                  <Input
+                                    id={idx === 0 ? 'co-cost-labor' : undefined}
+                                    inputMode="decimal"
+                                    value={co.cost[row.key]}
+                                    onChange={(e) => {
+                                      setImpactErrors((p) => ({ ...p, costAtLeastOne: undefined }))
+                                      setCo((p) => ({
+                                        ...p,
+                                        cost: { ...p.cost, [row.key]: e.target.value } as any,
+                                      }))
+                                    }}
+                                    className="pl-7 pr-14"
+                                    placeholder="0.00"
+                                  />
+                                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                                    USD
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div>
+                            <label className={capLabel}>Markup % (optional)</label>
+                            <Input
+                              inputMode="decimal"
+                              value={co.cost.markupPercent}
+                              onChange={(e) =>
+                                setCo((p) => ({ ...p, cost: { ...p.cost, markupPercent: e.target.value } }))
+                              }
+                              placeholder="e.g. 10"
+                            />
+                          </div>
+
+                          {impactErrors.costAtLeastOne ? (
+                            <p className="text-xs text-destructive">{impactErrors.costAtLeastOne}</p>
+                          ) : null}
+
+                          <div className="rounded-xl border border-border bg-muted/40 px-4 py-3.5">
+                            <div className="flex items-baseline justify-between gap-3">
+                              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                Subtotal
+                              </p>
+                              <p className="font-mono text-sm font-bold tabular-nums text-foreground">
+                                ${formatUsd(derived.costSubtotal)}
+                              </p>
+                            </div>
+                            <div className="mt-2 flex items-baseline justify-between gap-3 border-t border-border pt-2">
+                              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                Total impact
+                              </p>
+                              <p className="font-mono text-base font-bold tabular-nums text-[#f97316]">
+                                {formatSignedUsd(derived.costTotal, co.cost.type)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </CoImpactCardShell>
+                  </div>
                 </div>
 
-                <div className="mt-4 rounded-lg bg-muted/60 px-4 py-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-foreground">Total Cost</p>
-                    <p className="text-lg font-bold text-[#f97316]">
-                      {costBreakdownTotal ? `$${formatUsd(costBreakdownTotal)}` : '$0'}
-                    </p>
+                <div className="mt-10 rounded-2xl border border-border bg-gradient-to-b from-muted/50 to-muted/30 p-6">
+                  <p className={capLabel}>Contract & duration snapshot</p>
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                    Read-only totals derived from contract amount and impacts above — useful for PDFs and reviewers.
+                  </p>
+                  <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
+                      <label className={capLabel}>Original contract amount</label>
+                      <div className="relative mt-2">
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                          $
+                        </span>
+                        <Input
+                          value={co.originalContractAmount}
+                          onChange={(e) =>
+                            setCo((p) => ({ ...p, originalContractAmount: e.target.value }))
+                          }
+                          className="pl-7 pr-14"
+                          placeholder="0.00"
+                          inputMode="decimal"
+                        />
+                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                          USD
+                        </span>
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
+                      <label className={capLabel}>Revised contract amount</label>
+                      <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-border bg-muted/50 px-3 font-mono text-sm font-semibold tabular-nums text-foreground">
+                        {derived.revisedContractAmount === null
+                          ? '—'
+                          : `$${formatUsd(derived.revisedContractAmount)}`}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
+                      <label className={capLabel}>Original duration (normalized)</label>
+                      <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-border bg-muted/50 px-3 text-sm font-medium tabular-nums text-foreground">
+                        {derived.baselineDaysTotal
+                          ? `${derived.baselineDaysTotal} calendar days`
+                          : '—'}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
+                      <label className={capLabel}>Revised duration (normalized)</label>
+                      <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-border bg-muted/50 px-3 text-sm font-medium tabular-nums text-foreground">
+                        {derived.revisedDaysTotal === null
+                          ? '—'
+                          : `${derived.revisedDaysTotal} calendar days`}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -975,15 +1585,19 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
               <h3 className="mb-5 text-lg font-semibold text-foreground">Summary</h3>
               <div className="space-y-4">
                 <div>
-                  <p className="text-xs text-muted-foreground">Review status</p>
-                  <p className="text-sm font-semibold text-foreground">
-                    {finalStatusLabel ??
-                      (normalizedStatus === 'pending_review'
-                        ? 'Sent'
-                        : normalizedStatus === 'revision_requested'
-                          ? 'Revision Requested'
-                          : 'Draft')}
-                  </p>
+                  <p className="text-xs text-muted-foreground">Status</p>
+                  {headerBadge ? (
+                    <span
+                      className={cn(
+                        'mt-1 inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold',
+                        statusBadgeClasses(headerBadge.tone)
+                      )}
+                    >
+                      {headerBadge.label}
+                    </span>
+                  ) : (
+                    <p className="text-sm font-semibold text-foreground">—</p>
+                  )}
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Project</p>
@@ -1040,7 +1654,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                     <div className="border-t border-border pt-4">
                       <p className="text-xs text-muted-foreground">Cost Impact</p>
                       <p className="text-sm font-semibold text-foreground">
-                        {co.costImpact.trim() ? `$${formatUsd(parseMoneyInput(co.costImpact))}` : '—'}
+                        {co.cost.type === 'none' ? '—' : formatSignedUsd(derived.costTotal, co.cost.type)}
                       </p>
                     </div>
                     <div className="border-t border-border pt-4">

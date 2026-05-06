@@ -61,8 +61,14 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty'
-import type { DocumentStatus } from '@/lib/types'
 import { mockTeamMembers } from '@/lib/mock-data'
+import {
+  backfillFromLegacy,
+  statusBadge,
+  statusBadgeClasses,
+  type DocType,
+} from '@/lib/status'
+import { cn } from '@/lib/utils'
 
 function DocumentsContent() {
   const searchParams = useSearchParams()
@@ -79,6 +85,9 @@ function DocumentsContent() {
       doc_type: 'rfi' | 'submittal' | 'change_order'
       title: string
       description: string
+      /** Canonical lifecycle status (per `lib/status.ts`). */
+      status: string
+      /** Legacy: kept for back-compat fallback during Phase 1 dual-write. */
       internal_status: string
       external_status: string
       current_version_no: number
@@ -100,6 +109,7 @@ function DocumentsContent() {
             doc_type: 'rfi' | 'submittal' | 'change_order'
             title: string
             description: string
+            status: string
             internal_status: string
             external_status: string
             current_version_no: number
@@ -128,20 +138,47 @@ function DocumentsContent() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [documentToDelete, setDocumentToDelete] = useState<{ id: string; title: string } | null>(null)
 
+  /**
+   * Resolve the canonical status of a row, falling back to a legacy-derived
+   * value for documents whose `status` column hasn't been backfilled yet.
+   */
+  const resolveCanonicalStatus = (doc: {
+    doc_type: 'rfi' | 'submittal' | 'change_order'
+    status?: string
+    internal_status?: string
+    external_status?: string
+  }): string => {
+    if (typeof doc.status === 'string' && doc.status.length) return doc.status
+    return backfillFromLegacy(
+      doc.doc_type as DocType,
+      doc.internal_status ?? null,
+      doc.external_status ?? null,
+      null
+    )
+  }
+
+  /** Bucket the canonical status into a coarse filter group used by the quick chips. */
+  const statusBucket = (canonical: string): 'draft' | 'pending_review' | 'approved' | 'rejected' | 'closed' | 'other' => {
+    if (canonical === 'draft') return 'draft'
+    if (canonical === 'pending' || canonical === 'pending_review' || canonical === 'under_review') {
+      return 'pending_review'
+    }
+    if (canonical === 'approved' || canonical === 'approved_as_noted' || canonical === 'answered') {
+      return 'approved'
+    }
+    if (canonical === 'rejected' || canonical === 'revise_and_resubmit') return 'rejected'
+    if (canonical === 'closed') return 'closed'
+    return 'other'
+  }
+
   const filteredDocuments = documents.filter((doc) => {
     const matchesSearch =
       doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       doc.description.toLowerCase().includes(searchQuery.toLowerCase())
-    const normalizedStatus: DocumentStatus =
-      doc.internal_status === 'in_review'
-        ? 'pending_review'
-        : doc.internal_status === 'pending_reviewer'
-          ? 'pending_review'
-          : doc.internal_status === 'revising'
-            ? 'revision_requested'
-            : (doc.internal_status as DocumentStatus)
+    const canonical = resolveCanonicalStatus(doc)
+    const bucket = statusBucket(canonical)
     const matchesType = typeFilter === 'all' || doc.doc_type === typeFilter
-    const matchesStatus = statusFilter === 'all' || normalizedStatus === statusFilter
+    const matchesStatus = statusFilter === 'all' || bucket === statusFilter
     const matchesProject = projectFilter === 'all' || doc.project_id === projectFilter
     return matchesSearch && matchesType && matchesStatus && matchesProject
   })
@@ -249,18 +286,17 @@ function DocumentsContent() {
     setDocumentToDelete(null)
   }
 
-  const tableStatusBadge = (status: DocumentStatus) => {
-    const map: Record<DocumentStatus, { label: string; className: string }> = {
-      draft: { label: 'Draft', className: 'bg-slate-100 text-slate-600' },
-      pending_review: { label: 'In Review', className: 'bg-violet-100 text-violet-600' },
-      approved: { label: 'Approved', className: 'bg-emerald-100 text-emerald-700' },
-      rejected: { label: 'Rejected', className: 'bg-rose-100 text-rose-700' },
-      revision_requested: { label: 'Revision', className: 'bg-amber-100 text-amber-700' },
-    }
-    const style = map[status] ?? map.draft
+  const tableStatusBadge = (docType: DocType, canonicalStatus: string) => {
+    const badge = statusBadge(docType, canonicalStatus)
     return (
-      <Badge className={`rounded-full border-0 px-2.5 py-1 text-[10px] font-medium tracking-wide ${style.className}`}>
-        {style.label}
+      <Badge
+        variant="outline"
+        className={cn(
+          'rounded-full px-2.5 py-1 text-[10px] font-medium tracking-wide',
+          statusBadgeClasses(badge.tone)
+        )}
+      >
+        {badge.label}
       </Badge>
     )
   }
@@ -292,6 +328,7 @@ function DocumentsContent() {
     { key: 'pending_review', label: 'In Review' },
     { key: 'approved', label: 'Approved' },
     { key: 'rejected', label: 'Rejected' },
+    { key: 'closed', label: 'Closed' },
   ]
 
   return (
@@ -470,14 +507,7 @@ function DocumentsContent() {
               </TableHeader>
               <TableBody>
                 {paginatedDocuments.map((doc, index) => {
-                  const normalizedRowStatus: DocumentStatus =
-                    doc.internal_status === 'in_review'
-                      ? 'pending_review'
-                      : doc.internal_status === 'pending_reviewer'
-                        ? 'pending_review'
-                        : doc.internal_status === 'revising'
-                          ? 'revision_requested'
-                          : (doc.internal_status as DocumentStatus)
+                  const canonicalRowStatus = resolveCanonicalStatus(doc)
                   return (
                   <TableRow
                     key={doc.id}
@@ -509,7 +539,7 @@ function DocumentsContent() {
                       <p className="text-sm font-medium text-foreground">{formatRelativeUpdate(doc.updated_at)}</p>
                     </TableCell>
                     <TableCell className="hidden py-3.5 xl:table-cell">
-                      {tableStatusBadge(normalizedRowStatus)}
+                      {tableStatusBadge(doc.doc_type as DocType, canonicalRowStatus)}
                     </TableCell>
                     <TableCell className="py-3.5">
                       <div className="flex items-center justify-start gap-1.5">

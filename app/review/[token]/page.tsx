@@ -2,7 +2,15 @@
 
 import { use, useEffect, useMemo, useRef, useState } from 'react'
 import SignaturePad from 'signature_pad'
-import { CheckCircle2, Download, Paperclip, XCircle } from 'lucide-react'
+import {
+  CheckCircle2,
+  Download,
+  FileEdit,
+  Paperclip,
+  Send,
+  XCircle,
+} from 'lucide-react'
+import type { ReviewerOutcome } from '@/lib/status'
 
 type ReviewAttachment = {
   id: string
@@ -30,6 +38,18 @@ type ReviewPayload = {
   }
 }
 
+const OUTCOME_LABELS: Record<ReviewerOutcome, string> = {
+  approved: 'Approved',
+  approved_as_noted: 'Approved as Noted',
+  revise_and_resubmit: 'Revise & Resubmit',
+  rejected: 'Rejected',
+  answered: 'Answered',
+}
+
+function isPositiveOutcome(outcome: ReviewerOutcome): boolean {
+  return outcome === 'approved' || outcome === 'approved_as_noted' || outcome === 'answered'
+}
+
 const DOC_TYPE_LABELS: Record<string, string> = {
   rfi: 'Request for Information',
   submittal: 'Product Submittal',
@@ -53,6 +73,8 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
   const [submitting, setSubmitting] = useState(false)
   const [submitMessage, setSubmitMessage] = useState<string | null>(null)
   const [pdfLoaded, setPdfLoaded] = useState(false)
+  /** Local copy of the outcome the reviewer just submitted (for the post-submit banner). */
+  const [submittedOutcome, setSubmittedOutcome] = useState<ReviewerOutcome | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const signaturePadRef = useRef<SignaturePad | null>(null)
@@ -183,7 +205,13 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
     setSignatureUrl(null)
   }
 
-  async function submitDecision(nextDecision: 'approve' | 'reject') {
+  /**
+   * Submit a canonical reviewer outcome. The validator on the server now
+   * accepts the full `ReviewerOutcome` union; for back-compat the page also
+   * stores a coarse approve/reject in the payload's reviewStatus so existing
+   * banner branches keep functioning.
+   */
+  async function submitDecision(outcome: ReviewerOutcome) {
     if (!canSubmitActions) return
     try {
       setSubmitting(true)
@@ -193,7 +221,7 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           token,
-          decision: nextDecision === 'approve' ? 'approved' : 'rejected',
+          decision: outcome,
           notes: notes.trim() || undefined,
           signature_name: typedName.trim(),
           signature_image: signatureUrl || undefined,
@@ -202,6 +230,7 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data?.error || 'Failed to submit review')
       setSubmitMessage('Review submitted successfully.')
+      setSubmittedOutcome(outcome)
       setPayload((prev) =>
         prev
           ? {
@@ -209,7 +238,7 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
               reviewStatus: {
                 ...prev.reviewStatus,
                 state: 'submitted',
-                decision: nextDecision,
+                decision: isPositiveOutcome(outcome) ? 'approve' : 'reject',
                 decided_at: new Date().toISOString(),
                 message: 'This review has already been submitted.',
               },
@@ -304,28 +333,40 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
 
         <div className="flex flex-1 flex-col gap-6 p-6">
 
-          {/* Status banner */}
-          {alreadyDecided && (
-            <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 ${
-              payload.reviewStatus.decision === 'approve'
-                ? 'border-emerald-200 bg-emerald-50'
-                : 'border-red-200 bg-red-50'
-            }`}>
-              {payload.reviewStatus.decision === 'approve' ? (
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-              ) : (
-                <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
-              )}
-              <div>
-                <p className={`text-sm font-semibold ${payload.reviewStatus.decision === 'approve' ? 'text-emerald-800' : 'text-red-800'}`}>
-                  {payload.reviewStatus.decision === 'approve' ? 'Approved' : 'Rejected'}
-                </p>
-                <p className={`text-xs mt-0.5 ${payload.reviewStatus.decision === 'approve' ? 'text-emerald-700' : 'text-red-700'}`}>
-                  {payload.reviewStatus.message || 'This review has already been submitted.'}
-                </p>
+          {/* Status banner — uses the canonical reviewer outcome label when available. */}
+          {alreadyDecided && (() => {
+            const isApprove = payload.reviewStatus.decision === 'approve'
+            const outcomeLabel = submittedOutcome
+              ? OUTCOME_LABELS[submittedOutcome]
+              : isApprove
+                ? 'Approved'
+                : 'Rejected'
+            return (
+              <div
+                className={`flex items-start gap-3 rounded-xl border px-4 py-3 ${
+                  isApprove ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50'
+                }`}
+              >
+                {isApprove ? (
+                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                ) : (
+                  <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
+                )}
+                <div>
+                  <p
+                    className={`text-sm font-semibold ${
+                      isApprove ? 'text-emerald-800' : 'text-red-800'
+                    }`}
+                  >
+                    {outcomeLabel}
+                  </p>
+                  <p className={`text-xs mt-0.5 ${isApprove ? 'text-emerald-700' : 'text-red-700'}`}>
+                    {payload.reviewStatus.message || 'This review has already been submitted.'}
+                  </p>
+                </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {isExpired && !alreadyDecided && (
             <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
@@ -442,27 +483,86 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
                 <p className="mt-2 text-xs text-slate-400">Draw your signature using your mouse or touchscreen.</p>
               </div>
 
-              {/* Approve / Reject — submit immediately */}
-              <div className="grid grid-cols-2 gap-4">
-                <button
-                  type="button"
-                  onClick={() => void submitDecision('approve')}
-                  disabled={!canSubmitActions}
-                  className="flex items-center justify-center gap-2.5 rounded-2xl bg-emerald-600 py-4 text-base font-semibold text-white transition-all hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <CheckCircle2 className="h-5 w-5 shrink-0" />
-                  {submitting ? 'Submitting…' : 'Approve'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void submitDecision('reject')}
-                  disabled={!canSubmitActions}
-                  className="flex items-center justify-center gap-2.5 rounded-2xl bg-red-600 py-4 text-base font-semibold text-white transition-all hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <XCircle className="h-5 w-5 shrink-0" />
-                  {submitting ? 'Submitting…' : 'Reject'}
-                </button>
-              </div>
+              {/*
+                Per-doc-type decision buttons:
+                  • RFI         → single "Submit answer" (canonical outcome `answered`)
+                  • Submittal   → 4 buttons (Approved / Approved as Noted /
+                                  Revise & Resubmit / Rejected)
+                  • Change order → binary (Approved / Rejected)
+              */}
+              {payload.documentContent.type === 'rfi' ? (
+                <div className="grid grid-cols-1 gap-4">
+                  <button
+                    type="button"
+                    onClick={() => void submitDecision('answered')}
+                    disabled={!canSubmitActions}
+                    className="flex items-center justify-center gap-2.5 rounded-2xl bg-slate-900 py-4 text-base font-semibold text-white transition-all hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Send className="h-5 w-5 shrink-0" />
+                    {submitting ? 'Submitting…' : 'Submit answer'}
+                  </button>
+                </div>
+              ) : payload.documentContent.type === 'submittal' ? (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => void submitDecision('approved')}
+                    disabled={!canSubmitActions}
+                    className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 py-3.5 text-base font-semibold text-white transition-all hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="h-5 w-5 shrink-0" />
+                    Approved
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void submitDecision('approved_as_noted')}
+                    disabled={!canSubmitActions}
+                    className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-700 py-3.5 text-base font-semibold text-white transition-all hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="h-5 w-5 shrink-0" />
+                    Approved as Noted
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void submitDecision('revise_and_resubmit')}
+                    disabled={!canSubmitActions}
+                    className="flex items-center justify-center gap-2 rounded-2xl bg-amber-500 py-3.5 text-base font-semibold text-white transition-all hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <FileEdit className="h-5 w-5 shrink-0" />
+                    Revise &amp; Resubmit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void submitDecision('rejected')}
+                    disabled={!canSubmitActions}
+                    className="flex items-center justify-center gap-2 rounded-2xl bg-red-600 py-3.5 text-base font-semibold text-white transition-all hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <XCircle className="h-5 w-5 shrink-0" />
+                    Rejected
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    type="button"
+                    onClick={() => void submitDecision('approved')}
+                    disabled={!canSubmitActions}
+                    className="flex items-center justify-center gap-2.5 rounded-2xl bg-emerald-600 py-4 text-base font-semibold text-white transition-all hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="h-5 w-5 shrink-0" />
+                    {submitting ? 'Submitting…' : 'Approve'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void submitDecision('rejected')}
+                    disabled={!canSubmitActions}
+                    className="flex items-center justify-center gap-2.5 rounded-2xl bg-red-600 py-4 text-base font-semibold text-white transition-all hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <XCircle className="h-5 w-5 shrink-0" />
+                    {submitting ? 'Submitting…' : 'Reject'}
+                  </button>
+                </div>
+              )}
 
               {submitMessage && (
                 <p className={`rounded-xl px-4 py-3 text-sm ${

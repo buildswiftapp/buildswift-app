@@ -6,7 +6,11 @@ import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 import { improveSubmittalSchema } from '@/lib/server/validators'
 
-const SYSTEM_PROMPT = `You are a construction submittal reviewer. Expand and enhance the item description as if it were part of a formal submittal. Use precise technical language, mention likely specification sections if appropriate, and ensure the description clearly states the intended use. Return only the improved description text.`
+const SYSTEM_PROMPT = `You are a construction submittal reviewer. Improve and professionalize the submittal description for a formal submission: use precise technical language, state the intended use clearly, and weave in product/material context when the user hints at it.
+
+When applicable, note or align with likely specification sections (CSI format) and drawing/sheet references inferred from the input—only when reasonable, do not invent bid-specific section numbers.
+
+Ensure completeness of what is being submitted relative to the text given. Return only the improved description text (plain text, no markdown).`
 
 export async function POST(req: Request) {
   const auth = await getAuthContext(req)

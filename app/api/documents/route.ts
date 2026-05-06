@@ -8,6 +8,7 @@ import {
   assertCanCreateDocument,
   incrementMonthlyDocumentUsage,
 } from '@/lib/server/billing'
+import { initialStatus } from '@/lib/status'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 import { createDocumentSchema } from '@/lib/server/validators'
@@ -76,6 +77,7 @@ export async function POST(req: Request) {
   const permission = await assertCanCreateDocument(supabase as any, auth.accountId)
   if (!permission.ok) return badRequest(permission.reason)
 
+  const canonicalInitialStatus = initialStatus(body.doc_type, body.save_as_draft)
   const { data: doc, error } = await insertDocument({
     supabase,
     docType: body.doc_type,
@@ -85,6 +87,9 @@ export async function POST(req: Request) {
       doc_number: docNumber,
       title: body.title,
       description: body.description,
+      // Canonical status (single source of truth read by UI/PDF).
+      status: canonicalInitialStatus,
+      // Legacy dual-write so older readers keep functioning during Phase 1.
       internal_status: body.save_as_draft ? 'draft' : 'in_review',
       external_status: body.save_as_draft ? 'draft' : 'sent',
       created_by: auth.user.id,
@@ -142,7 +147,11 @@ export async function POST(req: Request) {
       eventType: 'document.created',
       documentId: doc.id,
       projectId: doc.project_id,
-      eventData: { doc_type: doc.doc_type, title: doc.title },
+      eventData: {
+        doc_type: doc.doc_type,
+        title: doc.title,
+        status: canonicalInitialStatus,
+      },
     },
     supabase
   )

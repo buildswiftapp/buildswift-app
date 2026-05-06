@@ -6,6 +6,12 @@ import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 import { reviewDecisionSchema } from '@/lib/server/validators'
 import { writeAuditLog } from '@/lib/server/audit'
 import { isDocumentReviewFinal, isReviewCycleTerminal } from '@/lib/server/review-token-policy'
+import {
+  legacyDecisionForOutcome,
+  normalizeReviewerOutcome,
+  statusOnReviewerOutcome,
+  type DocType,
+} from '@/lib/status'
 
 type Params = { params: Promise<{ token: string }> }
 type DocumentType = 'rfi' | 'submittal' | 'change_order'
@@ -55,16 +61,28 @@ export async function POST(req: Request, { params }: Params) {
   if (isDocumentReviewFinal(docInfo) || isReviewCycleTerminal(cycleData.status)) {
     return badRequest('This review is closed. The document is no longer accepting responses.')
   }
-  const docType = docInfo.doc_type
+  const docType = docInfo.doc_type as DocType
   if (docType === 'change_order' && !payload.data.signature_url) {
     return badRequest('Signature is required for change orders')
   }
+
+  // Normalize the incoming decision into the canonical outcome for this doc type.
+  const canonicalOutcome = normalizeReviewerOutcome(docType, payload.data.decision)
+  if (!canonicalOutcome) {
+    return badRequest(
+      `Invalid decision "${payload.data.decision}" for ${docType}. Allowed reviewer outcomes vary by document type.`
+    )
+  }
+  const legacyDecision = legacyDecisionForOutcome(canonicalOutcome)
 
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null
   const { error: updateError } = await privilegedDb
     .from('review_requests')
     .update({
-      decision: payload.data.decision,
+      // Legacy binary column (kept for back-compat / cycle rollup).
+      decision: legacyDecision,
+      // Canonical reviewer outcome (used by lib/status to compute doc status).
+      outcome: canonicalOutcome,
       decision_notes: payload.data.decision_notes ?? null,
       full_name: payload.data.full_name,
       signature_url: payload.data.signature_url ?? null,
@@ -74,7 +92,7 @@ export async function POST(req: Request, { params }: Params) {
     .eq('id', requestRow.id)
   if (updateError) return serverError(updateError.message)
 
-  // Rollup review status.
+  // Cycle rollup uses the legacy binary `decision` column (unchanged behaviour).
   const { data: allRequests, error: allReqError } = await privilegedDb
     .from('review_requests')
     .select('decision,is_overridden')
@@ -96,12 +114,26 @@ export async function POST(req: Request, { params }: Params) {
     .eq('id', requestRow.review_cycle_id)
   if (cycleUpdateError) return serverError(cycleUpdateError.message)
 
-  const internalStatus = cycleStatus === 'approved' ? 'approved' : cycleStatus === 'rejected' ? 'rejected' : 'pending_reviewer'
-  const externalStatus = cycleStatus === 'approved' ? 'approved' : cycleStatus === 'rejected' ? 'rejected' : 'pending_reviewer'
+  // Legacy dual-write for back-compat.
+  const internalStatus =
+    cycleStatus === 'approved' ? 'approved' : cycleStatus === 'rejected' ? 'rejected' : 'pending_reviewer'
+  const externalStatus =
+    cycleStatus === 'approved' ? 'approved' : cycleStatus === 'rejected' ? 'rejected' : 'pending_reviewer'
+
+  // Canonical document status: derived from the most recent reviewer outcome
+  // (this reviewer's), not from the rollup. Reviewers NEVER write `closed`.
+  const previousDocStatus = (docInfo as { status?: string | null }).status ?? null
+  const canonicalDocStatus = statusOnReviewerOutcome(docType, canonicalOutcome)
 
   const { error: docError } = await privilegedDb
     .from(DOCUMENT_TABLE_BY_TYPE[docInfo.doc_type as DocumentType])
-    .update({ internal_status: internalStatus, external_status: externalStatus })
+    .update({
+      // Canonical (single source of truth).
+      status: canonicalDocStatus,
+      // Legacy dual-write for Phase 1.
+      internal_status: internalStatus,
+      external_status: externalStatus,
+    })
     .eq('id', cycleData.document_id)
   if (docError) return serverError(docError.message)
 
@@ -113,10 +145,38 @@ export async function POST(req: Request, { params }: Params) {
       actorEmail: requestRow.reviewer_email,
       eventType: 'reviewer.decision_submitted',
       documentId: cycleData.document_id,
-      eventData: { decision: payload.data.decision, review_request_id: requestRow.id },
+      eventData: {
+        decision: legacyDecision,
+        outcome: canonicalOutcome,
+        review_request_id: requestRow.id,
+        from_status: previousDocStatus,
+        to_status: canonicalDocStatus,
+      },
       ip,
     })
+
+    if (previousDocStatus !== canonicalDocStatus) {
+      await writeAuditLog({
+        accountId,
+        actorType: 'reviewer',
+        actorEmail: requestRow.reviewer_email,
+        eventType: 'document.status_changed',
+        documentId: cycleData.document_id,
+        eventData: {
+          from_status: previousDocStatus,
+          to_status: canonicalDocStatus,
+          reason: 'reviewer_decision',
+          outcome: canonicalOutcome,
+        },
+        ip,
+      })
+    }
   }
 
-  return ok({ success: true, cycle_status: cycleStatus })
+  return ok({
+    success: true,
+    cycle_status: cycleStatus,
+    outcome: canonicalOutcome,
+    document_status: canonicalDocStatus,
+  })
 }

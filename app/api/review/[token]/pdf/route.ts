@@ -313,6 +313,13 @@ export async function GET(_req: Request, { params }: Params) {
       (typeof metadata.date === 'string' && metadata.date.trim()) ||
       null
     submissionLogNotes = 'Submittal created'
+  } else if (document.doc_type === 'change_order') {
+    submissionDateRaw =
+      (typeof metadata.changeOrderDate === 'string' && metadata.changeOrderDate.trim()) ||
+      (typeof metadata.documentDate === 'string' && metadata.documentDate.trim()) ||
+      (typeof metadata.date === 'string' && metadata.date.trim()) ||
+      null
+    submissionLogNotes = 'Change Order Submitted'
   }
 
   const formattedSubmissionIssued =
@@ -337,11 +344,14 @@ export async function GET(_req: Request, { params }: Params) {
     'Not Provided'
 
   const submissionRow =
-    document.doc_type === 'rfi' || document.doc_type === 'submittal'
+    document.doc_type === 'rfi' || document.doc_type === 'submittal' || document.doc_type === 'change_order'
       ? [
           {
             title: submissionName,
-            role: 'Submitter',
+            role:
+              document.doc_type === 'change_order'
+                ? 'Contractor'
+                : 'Submitter',
             action: 'Submitted',
             signature: 'pending' as const,
             signatureName: null,
@@ -352,7 +362,10 @@ export async function GET(_req: Request, { params }: Params) {
         ]
       : []
 
-  const approvalRows = reviewerRows
+  const approvalRows =
+    document.doc_type === 'submittal' || document.doc_type === 'rfi' || document.doc_type === 'change_order'
+      ? [...submissionRow, ...reviewerRows]
+      : reviewerRows
 
   const priority = typeof metadata.priority === 'string' ? metadata.priority : null
   const specSection =
@@ -362,6 +375,8 @@ export async function GET(_req: Request, { params }: Params) {
 
   const pdf = isSubmittal
     ? await generateSubmittalPdfBuffer({
+        documentId: document.id,
+        brandingLogoDataUri: brandingLogoDataUri || null,
         title: document.title,
         projectName,
         descriptionHtml,
@@ -419,6 +434,7 @@ export async function GET(_req: Request, { params }: Params) {
           null,
         specificationSections: specSection,
         drawingSheetNumbers:
+          (typeof metadata.drawingSheetNumbers === 'string' && metadata.drawingSheetNumbers) ||
           (typeof metadata.drawingNumber === 'string' && metadata.drawingNumber) ||
           (typeof metadata.sheetNumber === 'string' && metadata.sheetNumber) ||
           null,
@@ -427,6 +443,7 @@ export async function GET(_req: Request, { params }: Params) {
           (typeof metadata.detailReferences === 'string' && metadata.detailReferences) ||
           null,
         relatedRfiNumbers:
+          (typeof metadata.relatedRfiNumbers === 'string' && metadata.relatedRfiNumbers) ||
           (typeof metadata.rfiNo === 'string' && metadata.rfiNo) ||
           (typeof metadata.relatedRfi === 'string' && metadata.relatedRfi) ||
           null,
@@ -554,10 +571,21 @@ export async function GET(_req: Request, { params }: Params) {
           (typeof metadata.projectAddress === 'string' && metadata.projectAddress) ||
           (typeof metadata.project_address === 'string' && metadata.project_address) ||
           projectNo,
+        toOwner:
+          (typeof metadata.to === 'string' && metadata.to) ||
+          (typeof metadata.toOwner === 'string' && metadata.toOwner) ||
+          (typeof metadata.owner === 'string' && metadata.owner) ||
+          (typeof metadata.recipient === 'string' && metadata.recipient) ||
+          null,
         fromContractor:
           (typeof metadata.from === 'string' && metadata.from) ||
           (typeof metadata.contractor === 'string' && metadata.contractor) ||
           (typeof metadata.sender === 'string' && metadata.sender) ||
+          null,
+        originalContractNumber:
+          (typeof metadata.originalContractNumber === 'string' && metadata.originalContractNumber) ||
+          (typeof metadata.contractNumber === 'string' && metadata.contractNumber) ||
+          (typeof metadata.primeContractNumber === 'string' && metadata.primeContractNumber) ||
           null,
         submittedBy,
         requiredReviewDate:
@@ -576,15 +604,19 @@ export async function GET(_req: Request, { params }: Params) {
                   ? metadata.changeOrderQty
                   : null,
         primeContractValue:
-          typeof metadata.contractAmount === 'number'
-            ? metadata.contractAmount
-            : typeof metadata.contractAmount === 'string'
-              ? metadata.contractAmount
-              : typeof metadata.primeContractValue === 'number'
-                ? metadata.primeContractValue
-                : typeof metadata.primeContractValue === 'string'
-                  ? metadata.primeContractValue
-                  : null,
+          typeof metadata.originalContractAmount === 'number'
+            ? metadata.originalContractAmount
+            : typeof metadata.originalContractAmount === 'string'
+              ? metadata.originalContractAmount
+              : typeof metadata.contractAmount === 'number'
+                ? metadata.contractAmount
+                : typeof metadata.contractAmount === 'string'
+                  ? metadata.contractAmount
+                  : typeof metadata.primeContractValue === 'number'
+                    ? metadata.primeContractValue
+                    : typeof metadata.primeContractValue === 'string'
+                      ? metadata.primeContractValue
+                      : null,
         changeType: typeof metadata.changeType === 'string' ? metadata.changeType : null,
         priority,
         reason: (typeof metadata.reason === 'string' && metadata.reason) || null,
@@ -599,6 +631,30 @@ export async function GET(_req: Request, { params }: Params) {
           typeof metadata.scheduleDays === 'number' || typeof metadata.scheduleDays === 'string'
             ? metadata.scheduleDays
             : null,
+        originalProjectDurationDays:
+          typeof metadata.originalProjectDurationDays === 'number' ||
+          typeof metadata.originalProjectDurationDays === 'string'
+            ? metadata.originalProjectDurationDays
+            : typeof metadata.originalDurationDays === 'number' ||
+                typeof metadata.originalDurationDays === 'string'
+              ? metadata.originalDurationDays
+              : null,
+        proposedProjectDurationDays:
+          typeof metadata.proposedProjectDurationDays === 'number' ||
+          typeof metadata.proposedProjectDurationDays === 'string'
+            ? metadata.proposedProjectDurationDays
+            : typeof metadata.proposedDurationDays === 'number' ||
+                typeof metadata.proposedDurationDays === 'string'
+              ? metadata.proposedDurationDays
+              : null,
+        revisedProjectDurationDays:
+          typeof metadata.revisedProjectDurationDays === 'number' ||
+          typeof metadata.revisedProjectDurationDays === 'string'
+            ? metadata.revisedProjectDurationDays
+            : typeof metadata.revisedDurationDays === 'number' ||
+                typeof metadata.revisedDurationDays === 'string'
+              ? metadata.revisedDurationDays
+              : null,
         totalCost:
           typeof metadata.proposedAmount === 'number'
             ? metadata.proposedAmount
@@ -618,65 +674,65 @@ export async function GET(_req: Request, { params }: Params) {
             ? metadata.laborCost
             : typeof metadata.laborCost === 'string'
               ? metadata.laborCost
+              : typeof metadata.labor_cost === 'number'
+                ? metadata.labor_cost
+                : typeof metadata.labor_cost === 'string'
+                  ? metadata.labor_cost
               : null,
         materialCost:
           typeof metadata.materialCost === 'number'
             ? metadata.materialCost
             : typeof metadata.materialCost === 'string'
               ? metadata.materialCost
+              : typeof metadata.materials_cost === 'number'
+                ? metadata.materials_cost
+                : typeof metadata.materials_cost === 'string'
+                  ? metadata.materials_cost
               : null,
         equipmentCost:
           typeof metadata.equipmentCost === 'number'
             ? metadata.equipmentCost
             : typeof metadata.equipmentCost === 'string'
               ? metadata.equipmentCost
+              : typeof metadata.equipment_cost === 'number'
+                ? metadata.equipment_cost
+                : typeof metadata.equipment_cost === 'string'
+                  ? metadata.equipment_cost
               : null,
         subcontractorCost:
           typeof metadata.subcontractorCost === 'number'
             ? metadata.subcontractorCost
             : typeof metadata.subcontractorCost === 'string'
               ? metadata.subcontractorCost
+              : typeof metadata.subcontractor_cost === 'number'
+                ? metadata.subcontractor_cost
+                : typeof metadata.subcontractor_cost === 'string'
+                  ? metadata.subcontractor_cost
               : null,
         overheadProfit:
           typeof metadata.overheadProfit === 'number'
             ? metadata.overheadProfit
             : typeof metadata.overheadProfit === 'string'
               ? metadata.overheadProfit
-              : null,
+              : typeof metadata.other_cost === 'number'
+                ? metadata.other_cost
+                : typeof metadata.other_cost === 'string'
+                  ? metadata.other_cost
+                  : null,
+        costImpactType:
+          typeof metadata.cost_impact_type === 'string' ? metadata.cost_impact_type : null,
+        markupPercent:
+          typeof metadata.markup_percent === 'number' || typeof metadata.markup_percent === 'string'
+            ? metadata.markup_percent
+            : null,
+        justificationNote:
+          typeof metadata.justification_note === 'string' ? metadata.justification_note : null,
         updatedContractValue:
           typeof metadata.updatedContractValue === 'number'
             ? metadata.updatedContractValue
             : typeof metadata.updatedContractValue === 'string'
               ? metadata.updatedContractValue
               : null,
-        drawingSheetNumbers:
-          (typeof metadata.drawingNumber === 'string' && metadata.drawingNumber) ||
-          (typeof metadata.sheetNumber === 'string' && metadata.sheetNumber) ||
-          (typeof metadata.drawingSheetNumbers === 'string' && metadata.drawingSheetNumbers) ||
-          null,
-        specificationSections:
-          (typeof metadata.specSection === 'string' && metadata.specSection) ||
-          (typeof metadata.specificationSections === 'string' && metadata.specificationSections) ||
-          null,
-        detailReferences:
-          (typeof metadata.detailReference === 'string' && metadata.detailReference) ||
-          (typeof metadata.detailReferences === 'string' && metadata.detailReferences) ||
-          null,
-        relatedRfiNumbers:
-          (typeof metadata.rfiNo === 'string' && metadata.rfiNo) ||
-          (typeof metadata.relatedRfiNumbers === 'string' && metadata.relatedRfiNumbers) ||
-          (typeof metadata.relatedRfi === 'string' && metadata.relatedRfi) ||
-          null,
-        relatedSubmittalNumbers:
-          (typeof metadata.submittalNumber === 'string' && metadata.submittalNumber) ||
-          (typeof metadata.relatedSubmittalNumbers === 'string' && metadata.relatedSubmittalNumbers) ||
-          null,
-        reviewerComments:
-          (typeof metadata.reviewerComments === 'string' && metadata.reviewerComments) ||
-          (typeof metadata.comments === 'string' && metadata.comments) ||
-          null,
-        reviewedBy: (typeof metadata.reviewedBy === 'string' && metadata.reviewedBy) || null,
-        reviewDate: (typeof metadata.reviewDate === 'string' && metadata.reviewDate) || null,
         attachments:
           Array.isArray(metadata.attachments) && metadata.attachments.length > 0
             ? (metadata.attachments as Array<Record<string, unknown>>)

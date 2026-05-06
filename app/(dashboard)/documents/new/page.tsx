@@ -86,11 +86,17 @@ function NewDocumentContent() {
     title: '',
     date: new Date().toISOString().slice(0, 10),
     dueDate: '',
+    reasonForRequest: '',
     description: '',
+    submittalType: '',
     specSection: '',
     manufacturer: '',
     productName: '',
     quantity: '',
+    modelNumber: '',
+    detailReferences: '',
+    drawingSheetNumbers: '',
+    relatedRfiNumbers: '',
     notes: '',
     priority: 'normal' as 'low' | 'normal' | 'urgent',
   })
@@ -203,6 +209,7 @@ function NewDocumentContent() {
       const descriptionBody =
         formData.type === 'rfi'
           ? buildRfiDescriptionBody({
+              reasonForRequest: formData.reasonForRequest.trim(),
               question: '',
               description: formData.description,
               notes: formData.notes,
@@ -225,12 +232,34 @@ function NewDocumentContent() {
           save_as_draft: true,
           metadata: {
             rfiDate: formData.type === 'rfi' ? formData.date : undefined,
+            reasonForRequest:
+              formData.type === 'rfi' && formData.reasonForRequest.trim()
+                ? formData.reasonForRequest.trim()
+                : undefined,
             submittalDate: formData.type === 'submittal' ? formData.date : undefined,
             actionNeededBy: formData.dueDate ? formData.dueDate : undefined,
+            submittalType:
+              formData.type === 'submittal' && formData.submittalType.trim()
+                ? formData.submittalType.trim()
+                : undefined,
             specSection: formData.type === 'submittal' ? formData.specSection : undefined,
             manufacturer: formData.type === 'submittal' ? formData.manufacturer : undefined,
             productName: formData.type === 'submittal' ? formData.productName : undefined,
             quantity: formData.type === 'submittal' ? formData.quantity : undefined,
+            modelNumber:
+              formData.type === 'submittal' && formData.modelNumber.trim() ? formData.modelNumber.trim() : undefined,
+            detailReferences:
+              formData.type === 'submittal' && formData.detailReferences.trim()
+                ? formData.detailReferences.trim()
+                : undefined,
+            drawingSheetNumbers:
+              formData.type === 'submittal' && formData.drawingSheetNumbers.trim()
+                ? formData.drawingSheetNumbers.trim()
+                : undefined,
+            relatedRfiNumbers:
+              formData.type === 'submittal' && formData.relatedRfiNumbers.trim()
+                ? formData.relatedRfiNumbers.trim()
+                : undefined,
             notes: formData.notes || undefined,
             attachments: docAttachments,
             priority: formData.priority,
@@ -387,20 +416,56 @@ function NewDocumentContent() {
 
             {/* Title + description */}
             <div className={formCardClassName()}>
-              <div className="mb-6">
-                <label className={capLabel}>
-                  {formData.type === 'rfi' ? 'RFI title' : 'Submittal title'} <span className="text-destructive">*</span>
-                </label>
-                <Input
-                  value={formData.title}
-                  onChange={(e) => setFormData((p) => ({ ...p, title: e.target.value }))}
-                  placeholder={
-                    formData.type === 'rfi'
-                      ? 'e.g., Structural Clearance Issue at Grid Line C-12'
-                      : 'e.g., Hollow Metal Doors — Series 4500 Submittal Package'
-                  }
-                />
-              </div>
+              {formData.type === 'rfi' ? (
+                <div className="mb-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <label className={capLabel}>
+                        RFI title <span className="text-destructive">*</span>
+                      </label>
+                      <Input
+                        value={formData.title}
+                        onChange={(e) => setFormData((p) => ({ ...p, title: e.target.value }))}
+                        placeholder="e.g., Structural Clearance Issue at Grid Line C-12"
+                      />
+                    </div>
+                    <div className="w-full shrink-0 space-y-2 sm:w-[min(22rem,40%)] sm:max-w-md">
+                      <label className={capLabel}>Reason for request</label>
+                      <Input
+                        value={formData.reasonForRequest}
+                        onChange={(e) => setFormData((p) => ({ ...p, reasonForRequest: e.target.value }))}
+                        placeholder="e.g., Spec vs. drawing mismatch..."
+                        className="h-8 w-full text-xs"
+                      />
+                    </div>
+                  </div>
+                  <p className={cn(hintClass, 'mt-2')}>Appears on the RFI PDF in the summary next to the title.</p>
+                </div>
+              ) : (
+                <div className="mb-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <label className={capLabel}>
+                        Submittal title <span className="text-destructive">*</span>
+                      </label>
+                      <Input
+                        value={formData.title}
+                        onChange={(e) => setFormData((p) => ({ ...p, title: e.target.value }))}
+                        placeholder="e.g., Hollow Metal Doors — Series 4500 Submittal Package"
+                      />
+                    </div>
+                    <div className="w-full shrink-0 space-y-2 sm:w-[min(22rem,40%)] sm:max-w-md">
+                      <label className={capLabel}>Submittal type</label>
+                      <Input
+                        value={formData.submittalType}
+                        onChange={(e) => setFormData((p) => ({ ...p, submittalType: e.target.value }))}
+                        placeholder="e.g., Shop Drawing, Product Data"
+                        className="h-8 w-full text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="mb-3 flex items-center justify-between gap-3">
                 <span className={capLabelRow}>
@@ -453,6 +518,38 @@ function NewDocumentContent() {
                       value={formData.quantity}
                       onChange={(e) => setFormData((p) => ({ ...p, quantity: e.target.value }))}
                       placeholder="e.g., 4"
+                    />
+                  </div>
+                  <div>
+                    <label className={capLabel}>Model number(s)</label>
+                    <Input
+                      value={formData.modelNumber}
+                      onChange={(e) => setFormData((p) => ({ ...p, modelNumber: e.target.value }))}
+                      placeholder="e.g., 601T"
+                    />
+                  </div>
+                  <div>
+                    <label className={capLabel}>Detail reference(s)</label>
+                    <Input
+                      value={formData.detailReferences}
+                      onChange={(e) => setFormData((p) => ({ ...p, detailReferences: e.target.value }))}
+                      placeholder="e.g., A/S-502"
+                    />
+                  </div>
+                  <div>
+                    <label className={capLabel}>Drawing/sheet number(s)</label>
+                    <Input
+                      value={formData.drawingSheetNumbers}
+                      onChange={(e) => setFormData((p) => ({ ...p, drawingSheetNumbers: e.target.value }))}
+                      placeholder="e.g., A-101"
+                    />
+                  </div>
+                  <div>
+                    <label className={capLabel}>Related RFI number(s)</label>
+                    <Input
+                      value={formData.relatedRfiNumbers}
+                      onChange={(e) => setFormData((p) => ({ ...p, relatedRfiNumbers: e.target.value }))}
+                      placeholder="e.g., RFI-014"
                     />
                   </div>
                 </div>

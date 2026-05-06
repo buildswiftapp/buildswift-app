@@ -34,7 +34,12 @@ type ReviewPdfInput = {
     date: string
     notes: string
   }>
-  reviewStatus?: 'PENDING' | 'APPROVED' | 'REJECTED'
+  /**
+   * Visual status label rendered in the top summary card. Any uppercase
+   * canonical label (e.g. 'PENDING', 'APPROVED', 'UNDER REVIEW',
+   * 'REVISE & RESUBMIT', 'CLOSED') produced by `pdfStatusLabel(...)`.
+   */
+  reviewStatus?: string
   /** When true, use account branding / neutral export styling instead of default BuildSwift theme. */
   applyAccountBranding?: boolean
   brandingCompanyName?: string | null

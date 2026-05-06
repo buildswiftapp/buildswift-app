@@ -11,6 +11,12 @@ import {
   resolveReviewTokenExpiresAtMs,
 } from '@/lib/server/review-token-policy'
 import { reviewSubmitSchema } from '@/lib/server/validators'
+import {
+  legacyDecisionForOutcome,
+  normalizeReviewerOutcome,
+  statusOnReviewerOutcome,
+  type DocType,
+} from '@/lib/status'
 type DocumentType = 'rfi' | 'submittal' | 'change_order'
 
 const DOCUMENT_TABLE_BY_TYPE: Record<DocumentType, string> = {
@@ -141,11 +147,23 @@ export async function POST(req: Request) {
     signatureImageUrl = uploaded.url
   }
 
-  const mappedDecision = payload.data.decision === 'approved' ? 'approve' : 'reject'
+  // Normalize the canonical outcome from the validator union.
+  const docTypeForOutcome = (docForGuard?.doc_type ?? 'submittal') as DocType
+  const canonicalOutcome = normalizeReviewerOutcome(docTypeForOutcome, payload.data.decision)
+  if (!canonicalOutcome) {
+    return badRequest(
+      `Invalid decision "${payload.data.decision}" for ${docTypeForOutcome}. Allowed reviewer outcomes vary by document type.`
+    )
+  }
+  const mappedDecision = legacyDecisionForOutcome(canonicalOutcome)
+
   const { data: updatedRequest, error: updateError } = await privilegedDb
     .from('review_requests')
     .update({
+      // Legacy binary column (kept for back-compat / cycle rollup).
       decision: mappedDecision,
+      // Canonical reviewer outcome.
+      outcome: canonicalOutcome,
       decision_notes: payload.data.notes ?? null,
       full_name: payload.data.signature_name,
       signature_url: signatureImageUrl,
@@ -194,32 +212,39 @@ export async function POST(req: Request) {
     .eq('id', requestRow.review_cycle_id)
   if (cycleUpdateError) return serverError(cycleUpdateError.message)
 
-  // Rule 3: if not all responded yet and no rejection, keep current "sent/in_review" state.
+  // Canonical document status update: based on this reviewer's outcome.
+  // Reviewers NEVER write `closed`. Status updates apply on every reviewer
+  // submission (so the doc reflects the latest reviewer's outcome immediately).
+  const previousDocStatus = (docInfo as { status?: string | null }).status ?? null
+  const canonicalDocStatus = statusOnReviewerOutcome(
+    docInfo.doc_type as DocType,
+    canonicalOutcome
+  )
+
+  // Legacy dual-write: only flip internal/external once the cycle has settled
+  // (preserves prior behaviour for older readers during Phase 1).
   if (cycleStatus !== 'pending') {
     const internalStatus = cycleStatus === 'approved' ? 'approved' : 'rejected'
     const externalStatus = cycleStatus === 'approved' ? 'approved' : 'rejected'
     const { error: docError } = await privilegedDb
       .from(DOCUMENT_TABLE_BY_TYPE[docInfo.doc_type as DocumentType])
-      .update({ internal_status: internalStatus, external_status: externalStatus })
+      .update({
+        // Canonical (single source of truth).
+        status: canonicalDocStatus,
+        // Legacy dual-write.
+        internal_status: internalStatus,
+        external_status: externalStatus,
+      })
       .eq('id', cycleData.document_id)
     if (docError) return serverError(docError.message)
-
-    // Status history equivalent in this codebase: audit log transition row.
-    await writeAuditLog({
-      accountId: docInfo.account_id,
-      actorType: 'reviewer',
-      actorEmail: requestRow.reviewer_email,
-      eventType: 'document.status_changed',
-      documentId: cycleData.document_id,
-      eventData: {
-        from_internal_status: docInfo.internal_status,
-        from_external_status: docInfo.external_status,
-        to_internal_status: internalStatus,
-        to_external_status: externalStatus,
-        note: cycleStatus === 'approved' ? 'All reviewers approved' : 'At least one reviewer rejected',
-      },
-      ip,
-    })
+  } else {
+    // Cycle still pending overall, but persist canonical status anyway so the
+    // UI reflects the latest reviewer's outcome.
+    const { error: docError } = await privilegedDb
+      .from(DOCUMENT_TABLE_BY_TYPE[docInfo.doc_type as DocumentType])
+      .update({ status: canonicalDocStatus })
+      .eq('id', cycleData.document_id)
+    if (docError) return serverError(docError.message)
   }
 
   if (docInfo?.account_id) {
@@ -229,15 +254,40 @@ export async function POST(req: Request) {
       actorEmail: requestRow.reviewer_email,
       eventType: 'reviewer.decision_submitted',
       documentId: cycleData.document_id,
-      eventData: { decision: mappedDecision, review_request_id: requestRow.id },
+      eventData: {
+        decision: mappedDecision,
+        outcome: canonicalOutcome,
+        review_request_id: requestRow.id,
+        from_status: previousDocStatus,
+        to_status: canonicalDocStatus,
+      },
       ip,
     })
+
+    if (previousDocStatus !== canonicalDocStatus) {
+      await writeAuditLog({
+        accountId: docInfo.account_id,
+        actorType: 'reviewer',
+        actorEmail: requestRow.reviewer_email,
+        eventType: 'document.status_changed',
+        documentId: cycleData.document_id,
+        eventData: {
+          from_status: previousDocStatus,
+          to_status: canonicalDocStatus,
+          reason: 'reviewer_decision',
+          outcome: canonicalOutcome,
+          cycle_status: cycleStatus,
+        },
+        ip,
+      })
+    }
   }
 
   return ok({
     success: true,
     cycle_status: cycleStatus,
-    document_status: cycleStatus === 'pending' ? 'sent' : 'final',
+    document_status: canonicalDocStatus,
+    outcome: canonicalOutcome,
     signature_image_url: signatureImageUrl,
   })
 }

@@ -111,6 +111,18 @@ function stripHtmlToText(html: string): string {
 const NA = 'N/A'
 const NOT_PROVIDED = 'Not Provided'
 
+function isBlankRfiResponseField(v: string | null | undefined): boolean {
+  const t = (v ?? '').trim()
+  return !t || t === NOT_PROVIDED || t === NA || t === '—'
+}
+
+function pickSourceApprovalRowForResponse(rows: RfiApprovalRow[]): RfiApprovalRow | null {
+  if (!rows.length) return null
+  const decided = rows.filter((r) => r.reviewDecision === 'approved' || r.reviewDecision === 'rejected')
+  const pool = decided.length ? decided : rows
+  return pool[pool.length - 1] ?? null
+}
+
 const aiRfiShape = z.object({
   summaryTitle: z.string(),
   questionDetails: z.object({
@@ -158,8 +170,7 @@ async function composeRfiWithAi(input: {
       messages: [
         {
           role: 'system',
-          content:
-            'You are a construction document specialist. Return only valid JSON. Standardize and professionalize text for an RFI PDF. Never invent project facts. If information is missing, keep the provided fallback values.',
+          content: `You are a construction document specialist. Return only valid JSON (no markdown). The JSON shape must match the Improve RFI "structured" output: summaryTitle; questionDetails { detailedQuestion, reasonForRequest, conflictIdentification, missingInformation, clarificationRequired }; reference { drawingSheetNumber, specificationSection, specificReference, location }; impacts { costImpact, scheduleImpact, description }. Use "None" | "Potential" | "Yes" for costImpact and scheduleImpact when appropriate. Use "${NA}" or "${NOT_PROVIDED}" for missing categorical or narrative fields. Never invent project facts not present in the input.`,
         },
         {
           role: 'user',
@@ -212,21 +223,24 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
     input.title ||
     NOT_PROVIDED
 
-  const aiComposed = await composeRfiWithAi({
-    title: input.title?.trim() || NOT_PROVIDED,
-    descriptionText: baseDescription,
-    reasonForRequest: input.reasonForRequest?.trim() || NA,
-    conflictIdentification: input.conflictIdentification?.trim() || NA,
-    missingInformation: input.missingInformation?.trim() || NA,
-    clarificationRequired: input.clarificationRequired?.trim() || NA,
-    drawingSheetNumber: input.drawingNumber?.trim() || NA,
-    specificationSection: input.specificationSection?.trim() || NA,
-    specificReference: input.specificReference?.trim() || NA,
-    location: input.location?.trim() || NA,
-    costImpact: input.costImpact?.trim() || NA,
-    scheduleImpact: input.scheduleImpact?.trim() || NA,
-    impactDescription: input.impactDescription?.trim() || NA,
-  })
+  const aiComposed =
+    process.env.RFI_PDF_SKIP_AI === '1'
+      ? null
+      : await composeRfiWithAi({
+          title: input.title?.trim() || NOT_PROVIDED,
+          descriptionText: baseDescription,
+          reasonForRequest: input.reasonForRequest?.trim() || NA,
+          conflictIdentification: input.conflictIdentification?.trim() || NA,
+          missingInformation: input.missingInformation?.trim() || NA,
+          clarificationRequired: input.clarificationRequired?.trim() || NA,
+          drawingSheetNumber: input.drawingNumber?.trim() || NA,
+          specificationSection: input.specificationSection?.trim() || NA,
+          specificReference: input.specificReference?.trim() || NA,
+          location: input.location?.trim() || NA,
+          costImpact: input.costImpact?.trim() || NA,
+          scheduleImpact: input.scheduleImpact?.trim() || NA,
+          impactDescription: input.impactDescription?.trim() || NA,
+        })
 
   const attachments = (input.attachments ?? []).map((a) => ({
     fileName: a.fileName?.trim() || NOT_PROVIDED,
@@ -234,37 +248,55 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
     notes: a.notes?.trim() || NA,
   }))
 
-  // ── Approval rows ───────────────────────────────────────────────────────────
-
-  const approvalRowsMapped: RfiApprovalRow[] = (input.approvalRows ?? []).map((r) => ({
-    name: (r.reviewerEmail || '').trim() || r.signatureName || r.title || NOT_PROVIDED,
-    role: r.role || 'Reviewer',
-    action:
-      r.action ||
-      (r.signature === 'approved' ? 'Approved' : r.signature === 'rejected' ? 'Rejected' : 'Pending review'),
-    reference: r.reference || r.notes || NA,
-    signatureName: r.signatureName || null,
-    signatureUrl: r.signatureUrl || null,
-    date: r.date || NOT_PROVIDED,
-  }))
-
-  const approvalRows = approvalRowsMapped.filter(
-    (row) => (row.role || '').trim().toLowerCase() === 'reviewer'
-  )
+  // ── Approval rows (reviewers only; name prefers signature / non-email title) ─
 
   function looksLikeEmail(value: string): boolean {
     const t = (value || '').trim()
     return Boolean(t) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t)
   }
 
+  const approvalRowsMapped: RfiApprovalRow[] = (input.approvalRows ?? []).map((r) => {
+    const title = (r.title || '').trim()
+    const email = (r.reviewerEmail || '').trim()
+    const sig = (r.signatureName || '').trim()
+    const displayName =
+      sig || (title && !looksLikeEmail(title) ? title : '') || email || NOT_PROVIDED
+    const notesRaw = (r.notes || '').trim() || (r.reference || '').trim() || NA
+    const sigRaw = typeof r.signatureUrl === 'string' ? r.signatureUrl.trim() : ''
+    const signatureImageUri =
+      sigRaw && (sigRaw.startsWith('data:') || /^https?:\/\//i.test(sigRaw)) ? sigRaw : null
+    const actionLabel =
+      r.action ||
+      (r.signature === 'approved' ? 'Approved' : r.signature === 'rejected' ? 'Rejected' : 'Pending review')
+    const signatureTextFallback =
+      signatureImageUri ? '' : (r.signatureName || '').trim() || actionLabel
+    return {
+      name: displayName,
+      role: (r.role || 'Reviewer').trim() || 'Reviewer',
+      signatureImageUri,
+      signatureTextFallback,
+      reviewDecision: r.signature,
+      notes: notesRaw,
+      date: r.date || NOT_PROVIDED,
+    }
+  })
+
+  const approvalRows = approvalRowsMapped.filter(
+    (row) => (row.role || '').trim().toLowerCase() === 'reviewer'
+  )
+
   const rawReviewerRows = (input.approvalRows ?? []).filter(
     (r) => (r.role || '').trim().toLowerCase() === 'reviewer'
   )
   const lastReviewerRaw = rawReviewerRows[rawReviewerRows.length - 1]
-  const reviewedByDisplay =
-    (lastReviewerRaw?.signatureName || '').trim() ||
-    (!looksLikeEmail((lastReviewerRaw?.title || '').trim()) ? (lastReviewerRaw?.title || '').trim() : '') ||
-    NOT_PROVIDED
+  const reviewedByDisplay = (() => {
+    if (!lastReviewerRaw) return '—'
+    const fromSig = (lastReviewerRaw.signatureName || '').trim()
+    if (fromSig) return fromSig
+    const t = (lastReviewerRaw.title || '').trim()
+    if (t && !looksLikeEmail(t)) return t
+    return '—'
+  })()
 
   // ── Footer ──────────────────────────────────────────────────────────────────
 
@@ -294,6 +326,50 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
   // Suppress unused resolveLogoDataUri — kept for future custom branding support
   void resolveLogoDataUri()
 
+  const responseSourceRow = pickSourceApprovalRowForResponse(approvalRows)
+
+  const trimmedResponseContent = input.responseContent?.trim() ?? ''
+  const responseContentResolved = !isBlankRfiResponseField(trimmedResponseContent)
+    ? trimmedResponseContent
+    : responseSourceRow && !isBlankRfiResponseField(responseSourceRow.notes)
+      ? responseSourceRow.notes
+      : NOT_PROVIDED
+
+  const trimmedResponder = input.responder?.trim() ?? ''
+  const responderResolved = !isBlankRfiResponseField(trimmedResponder)
+    ? trimmedResponder
+    : responseSourceRow && !isBlankRfiResponseField(responseSourceRow.name)
+      ? responseSourceRow.name
+      : NOT_PROVIDED
+
+  const responseDateResolved = (() => {
+    if (input.responseDate?.trim()) {
+      const formatted = fmtLongDate(input.responseDate)
+      if (!isBlankRfiResponseField(formatted)) return formatted
+    }
+    if (responseSourceRow?.date && !isBlankRfiResponseField(responseSourceRow.date)) {
+      return responseSourceRow.date
+    }
+    return '—'
+  })()
+
+  const trimmedRecipient = input.recipient?.trim() ?? ''
+  const recipientResolved = !isBlankRfiResponseField(trimmedRecipient)
+    ? trimmedRecipient
+    : !isBlankRfiResponseField(reviewedByDisplay)
+      ? reviewedByDisplay
+      : NOT_PROVIDED
+
+  const reviewerEmailFromRow = (lastReviewerRaw?.reviewerEmail ?? '').trim()
+  const recipientWithReviewerEmail = (() => {
+    const email = reviewerEmailFromRow
+    const b = recipientResolved.trim()
+    if (!email) return b || NOT_PROVIDED
+    if (!b || isBlankRfiResponseField(b)) return email
+    if (b.toLowerCase().includes(email.toLowerCase())) return b
+    return `${b}\n${email}`
+  })()
+
   const viewModel: RfiPdfViewModel = {
     logoDataUri,
     brand,
@@ -308,7 +384,7 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
     projectAddress: input.projectNo || NOT_PROVIDED,
     issueDate: fmtLongDate(input.date),
     requiredResponseDate: fmtLongDate(input.contractDate),
-    recipient: input.recipient?.trim() || NOT_PROVIDED,
+    recipient: recipientWithReviewerEmail,
     sender: input.sender?.trim() || input.submittedBy?.trim() || NOT_PROVIDED,
     summaryTitle: aiComposed?.summaryTitle || input.title || NOT_PROVIDED,
     priority: normalizePriority(input.priority),
@@ -325,9 +401,9 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
     specificReference: aiComposed?.reference.specificReference || input.specificReference || NA,
     location: aiComposed?.reference.location || input.location || NA,
     attachments,
-    responseContent: input.responseContent?.trim() || NOT_PROVIDED,
-    responder: input.responder?.trim() || NOT_PROVIDED,
-    responseDate: fmtLongDate(input.responseDate),
+    responseContent: responseContentResolved,
+    responder: responderResolved,
+    responseDate: responseDateResolved,
     costImpact: toImpactFlag(aiComposed?.impacts.costImpact || input.costImpact || input.scopeImpact || ''),
     scheduleImpact: toImpactFlag(aiComposed?.impacts.scheduleImpact || input.scheduleImpact || ''),
     impactDescription:

@@ -2,27 +2,41 @@ import React from 'react'
 import { Document, Image, Page, Text, View } from '@react-pdf/renderer'
 import { stripHtmlToPlainParagraphs } from '@/lib/document-html'
 
-export type ChangeOrderAttachmentRow = { fileName: string; fileType: string; notes: string }
-
 export type ChangeOrderApprovalPdfRow = {
   name: string
-  reviewerEmail: string
+  role: string
   action: string
   date: string
-  signatureName: string | null
-  signatureUrl?: string | null
+  notes: string
 }
 
-export type ChangeOrderCostBreakdownPdfRow = {
-  description: string
-  qty: string
-  unitPrice: string
-  calculation: string
-  /** Line total (typically extension). */
-  amount: string
+export type ChangeOrderAttachmentRow = { fileName: string; fileType: string; notes: string }
+
+/** Legacy row shape used only while assembling cost breakdown cards in `change-order-pdf.ts`. */
+export type ChangeOrderCostLinePdfRow = {
+  lineDescription: string
+  qtyDisplay: string
+  unitCostDisplay: string
+  subtotalDisplay: string
+  justificationText?: string | null
 }
 
-/** Spec: Change Order PDF — all display strings should be defaulted upstream (N/A, Not Provided). */
+export type ChangeOrderCostBreakdownCardPdf = {
+  title: string
+  sublabel: string
+  amountDisplay: string
+}
+
+export type ChangeOrderCostBreakdownPdf =
+  | { kind: 'justification'; body: string; totalImpactDisplay: string }
+  | {
+      kind: 'cards'
+      cards: ChangeOrderCostBreakdownCardPdf[]
+      /** Shown beside “Total Cost Impact” (formatted dollars; credits may append “credit”). */
+      totalImpactDisplay: string
+    }
+
+/** Layout aligned with RFI-style PDFs; primary accents use original BuildSwift CO purple */
 export type ChangeOrderPdfViewModel = {
   logoDataUri: string
   brand: string
@@ -32,64 +46,97 @@ export type ChangeOrderPdfViewModel = {
   contactPhone: string
   contactEmail: string
 
+  /** Full legal name under logo / in contact block */
+  companyLegalName: string
+
   projectName: string
   projectAddress: string
   changeOrderNumber: string
   dateIssuedDisplay: string
-  requiredReviewDateDisplay: string
-  /** Primary contact / signer line(s) shown under FROM — may include newlines */
+  /** Shown only when not N/A */
+  requiredReviewDateDisplayOptional: string
+
+  toOwner: string
   fromContractor: string
 
   changeTitle: string
   summaryStatus: string
   priorityDisplay: string
 
-  detailedDescription: string
+  /** Change Order Summary — title + reason only */
   reasonForChangeDisplay: string
-  reasonCategoryDisplay: string
 
-  drawingSheetNumbers: string
-  specificationSections: string
-  detailReferences: string
-  relatedRfiNumbers: string
-  relatedSubmittalNumbers: string
+  detailedDescription: string
 
-  costBreakdownRows: ChangeOrderCostBreakdownPdfRow[]
-  totalChangeAmount: string
+  costBreakdown: ChangeOrderCostBreakdownPdf
+  /** Cost strip: prime / signed CO delta / revised total */
+  originalContractAmountDisplay: string
+  changeOrderAmountDisplay: string
+  revisedContractAmountDisplay: string
 
-  /** Consolidated schedule impact sentence for PDF (days + optional completion). */
-  scheduleImpactDisplay: string
+  /** Schedule impact — original / proposed (impact or explicit) / new total */
+  originalDurationDisplay: string
+  proposedDurationDisplay: string
+  newDurationDisplay: string
 
   attachments: ChangeOrderAttachmentRow[]
-
-  reviewerComments: string
-  reviewedBy: string
-  reviewDate: string
 
   finalAuthorizationStatus: string
   approvalRows: ChangeOrderApprovalPdfRow[]
 }
 
 const BORDER = '#d9e0ea'
-const CARD_BG = '#ffffff'
-const PURPLE = '#4b2b5b'
-const PURPLE_DARK = '#3f234d'
+/** Outer page frame — deep purple */
+const PAGE_BORDER = '#3f234d'
+/** Cards / sections — muted lavender outline */
 const PURPLE_BORDER = '#b9a7c8'
+const PURPLE_DARK = '#3f234d'
+const PURPLE_LABEL = '#4b2b5b'
+const CARD_BG = '#ffffff'
 const TEXT_DARK = '#1f2937'
 const MUTED = '#5b6471'
 const TABLE_HEAD = '#edf1f6'
-const COST_SECTION_HEADER_BG = '#dfe8f9'
-const COST_SECTION_TOTAL_BG = '#fef0e8'
-const BASE_FONT = 7.6
-const LABEL_FONT = 6.2
-/** Tight spacing so letter-size + wrap=false fits typical CO content on one sheet. */
-const SECTION_GAP = 4
+const COST_TOTAL_BG = '#fef0e8'
+const COST_CARD_SURFACE = '#ffffff'
+/** Total impact strip — muted gray-blue (matches printable card-style breakdown) */
+const COST_IMPACT_TOTAL_BG = '#eef2f7'
+
+/** Portrait — width 1.2× nominal 6in, height 13in; matches RFI/Submittal; one sheet (wrap=false) */
+const PAGE_WIDTH_PT = 6 * 72 * 1.2
+const PAGE_HEIGHT_PT = 13 * 72
+const PAGE_MARGIN_PT = 11
+
+/** Clamps tuned so a full CO layout fits one page without overflow */
+const MAX_DESCRIPTION_CHARS = 455
+const MAX_FIELD_CELL_CHARS = 52
+const MAX_ATTACHMENTS_ROWS = 3
+const MAX_APPROVAL_ROWS = 3
+const MAX_LINE_DESC_CHARS = 36
+const MAX_SUMMARY_TITLE_CHARS = 58
+const MAX_REASON_IN_SUMMARY_CHARS = 92
+const PARTY_LINES_MAX = 2
+
+const BASE_FONT = 7.35
+const LABEL_FONT = 6.05
+const BODY_LINE_HEIGHT = 1.25
+/** Looser line height for multi-line description body copy */
+const DESC_LINE_HEIGHT = 1.34
+const SECTION_GAP = 6.25
+const FRAME_INNER_PADDING = 10
 
 function statusBadgeStyle(status: string): { backgroundColor: string; color: string } {
   const s = (status || '').toUpperCase()
   if (s === 'APPROVED') return { backgroundColor: '#16a34a', color: '#ffffff' }
   if (s === 'REJECTED') return { backgroundColor: '#dc2626', color: '#ffffff' }
   return { backgroundColor: '#f2c94c', color: '#111827' }
+}
+
+function priorityStyle(raw: string): { color: string } {
+  const t = (raw || '').trim()
+  const u = t.toUpperCase()
+  if (u === 'HIGH' || /\bhigh\b/i.test(t) || /\burgent\b/i.test(t)) return { color: '#dc2626' }
+  if (u === 'LOW' || /\blow\b/i.test(t)) return { color: '#16a34a' }
+  return { color: TEXT_DARK }
 }
 
 function clampText(value: string, maxChars: number) {
@@ -115,470 +162,719 @@ function formatAddressLines(value: string): string[] {
   return [raw]
 }
 
-function CardTitle({ title }: { title: string }) {
+/** Section title overlaps top border (fieldset / legend), matching RFI PDF pattern */
+function SectionWithLegend({ legend, children }: { legend: string; children: React.ReactNode }) {
   return (
-    <Text
-      style={{
-        fontSize: 7.4,
-        fontWeight: 800,
-        color: PURPLE_DARK,
-        textTransform: 'uppercase',
-        letterSpacing: 0.35,
-        marginBottom: 3,
-      }}
-    >
-      {title}
-    </Text>
-  )
-}
-
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View
-      style={{
-        borderWidth: 1,
-        borderColor: PURPLE_BORDER,
-        borderRadius: 8,
-        backgroundColor: CARD_BG,
-        marginBottom: SECTION_GAP,
-      }}
-    >
-      <View style={{ paddingHorizontal: 8, paddingTop: 6, paddingBottom: 6 }}>
-        <CardTitle title={title} />
+    <View style={{ marginBottom: SECTION_GAP }}>
+      <View
+        style={{
+          position: 'relative',
+          borderWidth: 1,
+          borderColor: PURPLE_BORDER,
+          borderRadius: 8,
+          backgroundColor: CARD_BG,
+          paddingTop: 14,
+          paddingHorizontal: FRAME_INNER_PADDING,
+          paddingBottom: 10,
+        }}
+      >
+        <View
+          style={{
+            position: 'absolute',
+            top: -6,
+            left: 10,
+            backgroundColor: CARD_BG,
+            paddingHorizontal: 6,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: LABEL_FONT + 1.75,
+              fontWeight: 800,
+              color: PURPLE_LABEL,
+              textTransform: 'uppercase',
+              letterSpacing: 0.3,
+            }}
+          >
+            {legend}
+          </Text>
+        </View>
         {children}
       </View>
     </View>
   )
 }
 
-function FieldCol({ label, value }: { label: string; value: string }) {
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
+  return <SectionWithLegend legend={title}>{children}</SectionWithLegend>
+}
+
+function ChangeOrderCostBreakdownSection({
+  breakdown,
+  originalContractAmountDisplay,
+  changeOrderAmountDisplay,
+  revisedContractAmountDisplay,
+}: {
+  breakdown: ChangeOrderCostBreakdownPdf
+  originalContractAmountDisplay: string
+  changeOrderAmountDisplay: string
+  revisedContractAmountDisplay: string
+}) {
+  const totalImpactDisplay = breakdown.totalImpactDisplay
+
   return (
-    <View style={{ flex: 1, paddingRight: 6 }}>
-      <Text style={{ fontSize: LABEL_FONT, color: MUTED, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}>
-        {label}
-      </Text>
-      <Text style={{ fontSize: 7.8, color: TEXT_DARK, fontWeight: 600, lineHeight: 1.2 }}>{value}</Text>
+    <View style={{ borderWidth: 1, borderColor: PURPLE_BORDER, borderRadius: 7, overflow: 'hidden', backgroundColor: COST_CARD_SURFACE }}>
+      {breakdown.kind === 'justification' ? (
+        <View style={{ padding: 9, backgroundColor: '#faf8fc', borderBottomWidth: 1, borderBottomColor: BORDER }}>
+          <Text style={{ fontSize: BASE_FONT, lineHeight: DESC_LINE_HEIGHT, color: TEXT_DARK, fontWeight: 700 }}>
+            {clampText(breakdown.body, 520)}
+          </Text>
+        </View>
+      ) : (
+        <View
+          style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            paddingHorizontal: 4,
+            paddingTop: 6,
+            paddingBottom: 2,
+            backgroundColor: '#faf8fc',
+            borderBottomWidth: 1,
+            borderBottomColor: BORDER,
+          }}
+        >
+          {breakdown.cards.map((card, idx) => {
+            const basis = breakdown.cards.length <= 5 ? '20%' : '25%'
+            return (
+              <View key={`co-cost-card-${idx}`} style={{ width: basis, paddingHorizontal: 3, paddingBottom: 5 }}>
+                <View
+                  style={{
+                    borderWidth: 1,
+                    borderColor: BORDER,
+                    borderRadius: 5,
+                    backgroundColor: COST_CARD_SURFACE,
+                    paddingHorizontal: 5,
+                    paddingVertical: 6,
+                    minHeight: 54,
+                  }}
+                >
+                  <Text style={{ fontSize: BASE_FONT - 0.85, fontWeight: 900, color: TEXT_DARK }}>
+                    {clampText(card.title, 24)}
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: LABEL_FONT - 0.55,
+                      fontWeight: 700,
+                      color: MUTED,
+                      marginTop: 3,
+                      lineHeight: 1.25,
+                    }}
+                  >
+                    {clampText(card.sublabel, 36)}
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: BASE_FONT + 2.2,
+                      fontWeight: 900,
+                      color: TEXT_DARK,
+                      marginTop: 6,
+                      letterSpacing: 0.15,
+                    }}
+                  >
+                    {card.amountDisplay}
+                  </Text>
+                </View>
+              </View>
+            )
+          })}
+        </View>
+      )}
+
+      <View
+        style={{
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          backgroundColor: COST_IMPACT_TOTAL_BG,
+          paddingVertical: 7,
+          paddingHorizontal: 10,
+          borderBottomWidth: 1,
+          borderBottomColor: BORDER,
+        }}
+      >
+        <Text style={{ fontSize: BASE_FONT - 0.3, fontWeight: 900, color: TEXT_DARK }}>Total Cost Impact</Text>
+        <Text style={{ fontSize: BASE_FONT + 2, fontWeight: 900, color: TEXT_DARK }}>{totalImpactDisplay}</Text>
+      </View>
+
+      <View
+        style={{
+          flexDirection: 'row',
+          backgroundColor: COST_TOTAL_BG,
+          borderTopWidth: 0,
+          paddingVertical: 8,
+          paddingHorizontal: 6,
+        }}
+      >
+        <View style={{ flex: 1, paddingHorizontal: 4 }}>
+          <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800 }}>
+            ORIGINAL CONTRACT AMOUNT
+          </Text>
+          <Text style={{ fontSize: BASE_FONT - 0.2, fontWeight: 900, marginTop: 4, color: TEXT_DARK }}>
+            {originalContractAmountDisplay}
+          </Text>
+        </View>
+        <View style={{ flex: 1, paddingHorizontal: 4 }}>
+          <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800 }}>
+            CHANGE ORDER AMOUNT
+          </Text>
+          <Text style={{ fontSize: BASE_FONT - 0.2, fontWeight: 900, marginTop: 4, color: TEXT_DARK }}>
+            {changeOrderAmountDisplay}
+          </Text>
+        </View>
+        <View style={{ flex: 1, paddingHorizontal: 4 }}>
+          <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800 }}>
+            REVISED CONTRACT AMOUNT
+          </Text>
+          <Text style={{ fontSize: BASE_FONT - 0.2, fontWeight: 900, marginTop: 4, color: TEXT_DARK }}>
+            {revisedContractAmountDisplay}
+          </Text>
+        </View>
+      </View>
     </View>
+  )
+}
+
+function PartyBlock({ lines }: { lines: string[] }) {
+  const show = lines.length ? lines.slice(0, PARTY_LINES_MAX) : ['Not Provided']
+  return (
+    <>
+      {show.map((line, idx) => (
+        <Text
+          key={`p-${idx}`}
+          style={{
+            fontSize: 7.2,
+            color: TEXT_DARK,
+            fontWeight: idx === 0 ? 800 : 500,
+            lineHeight: BODY_LINE_HEIGHT,
+          }}
+        >
+          {clampText(line, MAX_FIELD_CELL_CHARS + 10)}
+        </Text>
+      ))}
+    </>
   )
 }
 
 export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel }) {
   const statusStyle = statusBadgeStyle(data.summaryStatus)
-  const authStyle = statusBadgeStyle(data.finalAuthorizationStatus)
-  const appr = (
-    data.approvalRows.length
-      ? data.approvalRows
-      : [{ name: '', reviewerEmail: '', action: '', date: '', signatureName: null, signatureUrl: null }]
-  ).slice(0, 3)
+  const priorityUpper = (data.priorityDisplay || '').toUpperCase()
+  const pStyle = priorityStyle(data.priorityDisplay)
 
-  const fromSplit = splitLines(data.fromContractor)
-  const fromDisplayLines = fromSplit.length ? fromSplit.slice(0, 4) : ['Not Provided']
+  const fromLines = splitLines(data.fromContractor)
+  const toLines = splitLines(data.toOwner)
+
+  const approvalRowsDisplayed: ChangeOrderApprovalPdfRow[] = (() => {
+    const trimmed = data.approvalRows.slice(0, MAX_APPROVAL_ROWS)
+    if (trimmed.length > 0) return trimmed
+    return [
+      {
+        name: '—',
+        role: '—',
+        action: '—',
+        date: '—',
+        notes: 'No reviewer responses recorded yet.',
+      },
+    ]
+  })()
+
+  const attachmentRowsTruncated =
+    data.attachments.length > MAX_ATTACHMENTS_ROWS
+      ? data.attachments.slice(0, MAX_ATTACHMENTS_ROWS)
+      : data.attachments
+
+  const descPlainClamped = clampText(stripHtmlToPlainParagraphs(data.detailedDescription), MAX_DESCRIPTION_CHARS)
+
+  const requiredResponseDateDisplay =
+    (data.requiredReviewDateDisplayOptional || '').trim() && data.requiredReviewDateDisplayOptional !== 'N/A'
+      ? data.requiredReviewDateDisplayOptional
+      : 'N/A'
 
   return (
     <Document>
       <Page
-        size="LETTER"
+        size={[PAGE_WIDTH_PT, PAGE_HEIGHT_PT]}
         wrap={false}
         style={{
           fontFamily: 'Helvetica',
           fontSize: BASE_FONT,
           color: TEXT_DARK,
           backgroundColor: '#ffffff',
-          padding: 8,
+          padding: PAGE_MARGIN_PT,
         }}
       >
         <View
           style={{
             borderWidth: 2,
-            borderColor: PURPLE_DARK,
-            borderRadius: 4,
+            borderColor: PAGE_BORDER,
+            borderRadius: 8,
             backgroundColor: '#ffffff',
-            padding: 7,
+            padding: FRAME_INNER_PADDING,
           }}
         >
-          {/* Top purple bars */}
-          <View style={{ flexDirection: 'row', marginBottom: 6 }}>
+          <View style={{ flexDirection: 'row', marginBottom: SECTION_GAP + 1 }}>
             <View
               style={{
                 flex: 1,
                 backgroundColor: PURPLE_DARK,
-                borderTopLeftRadius: 10,
-                borderBottomLeftRadius: 6,
-                height: 32,
+                borderRadius: 7,
+                minHeight: 28,
                 justifyContent: 'center',
-                alignItems: 'center',
-                marginRight: 6,
+                paddingVertical: 5,
+                paddingHorizontal: 11,
+                marginRight: 7,
               }}
             >
-              <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: 900, letterSpacing: 0.6, textTransform: 'uppercase' }}>
-                Change Order
+              <Text style={{ color: '#ffffff', textAlign: 'center' }}>
+                <Text style={{ fontWeight: 800, fontSize: 11, letterSpacing: 0.22 }}>CHANGE ORDER </Text>
+                <Text style={{ fontWeight: 700, fontSize: 9.5, letterSpacing: 0.22 }}>CONTRACT MODIFICATION</Text>
               </Text>
             </View>
             <View
               style={{
-                width: 130,
+                width: 94,
                 backgroundColor: PURPLE_DARK,
-                borderTopRightRadius: 10,
-                borderBottomRightRadius: 6,
-                height: 32,
+                borderRadius: 7,
+                minHeight: 28,
+                paddingVertical: 5,
+                paddingHorizontal: 7,
                 justifyContent: 'center',
-                alignItems: 'center',
               }}
             >
-              <Text style={{ color: '#ffffff', fontSize: 6.2, fontWeight: 800, textTransform: 'uppercase' }}>Change Order #</Text>
-              <Text style={{ color: '#ffffff', fontSize: 10.2, fontWeight: 900, marginTop: 1 }}>{data.changeOrderNumber}</Text>
-            </View>
-          </View>
-
-          {/* Header (no account/project branding) — match simple strip style */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SECTION_GAP }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 10 }}>
-              {data.logoDataUri ? <Image src={data.logoDataUri} style={{ width: 62, height: 62, objectFit: 'contain' }} /> : null}
-              <View style={{ marginLeft: data.logoDataUri ? 12 : 0, flexShrink: 1 }}>
-                <Text style={{ fontSize: 15, fontWeight: 900, color: PURPLE_DARK, letterSpacing: 0.25 }}>
-                  {(data.brand || 'BUILDSWIFT').toUpperCase()}
-                </Text>
-                {data.brandSub ? (
-                  <Text style={{ fontSize: 8.2, color: MUTED, letterSpacing: 2.2, marginTop: 1, fontWeight: 700 }}>
-                    {data.brandSub.toUpperCase()}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={{ fontSize: 6.2, fontWeight: 800, color: MUTED, textTransform: 'uppercase', marginBottom: 3 }}>
-                STATUS
-              </Text>
               <Text
                 style={{
-                  fontSize: 7.8,
-                  fontWeight: 900,
-                  paddingVertical: 4,
-                  paddingHorizontal: 14,
-                  borderRadius: 10,
+                  color: '#ffffff',
+                  fontSize: LABEL_FONT + 0.2,
+                  textAlign: 'center',
                   textTransform: 'uppercase',
-                  ...statusStyle,
+                  fontWeight: 700,
                 }}
               >
-                {data.summaryStatus}
+                CHANGE ORDER #
+              </Text>
+              <Text style={{ color: '#ffffff', fontWeight: 800, fontSize: 9.8, textAlign: 'center', marginTop: 0 }}>
+                {clampText(data.changeOrderNumber, 22)}
               </Text>
             </View>
           </View>
 
-          {/* Date issued / due / from — aligns with Submittal PDF */}
-          <View
-            style={{
-              marginTop: 8,
-              marginBottom: SECTION_GAP,
-              borderWidth: 1,
-              borderColor: BORDER,
-              borderRadius: 7,
-              overflow: 'hidden',
-              backgroundColor: '#fafbfb',
-            }}
-          >
-            <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: BORDER }}>
-              <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8, borderRightWidth: 1, borderRightColor: BORDER }}>
-                <Text
-                  style={{ fontSize: LABEL_FONT, color: PURPLE_DARK, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}
-                >
-                  DATE ISSUED
-                </Text>
-                <Text style={{ fontSize: 9.6, fontWeight: 900, color: TEXT_DARK }}>{data.dateIssuedDisplay}</Text>
-              </View>
-              <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8 }}>
-                <Text
-                  style={{ fontSize: LABEL_FONT, color: PURPLE_DARK, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}
-                >
-                  REQUIRED REVIEW DATE
-                </Text>
-                <Text style={{ fontSize: 9.6, fontWeight: 900, color: TEXT_DARK }}>{data.requiredReviewDateDisplay}</Text>
-              </View>
-            </View>
-            <View style={{ flexDirection: 'row' }}>
-              <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8 }}>
-                <Text
-                  style={{ fontSize: LABEL_FONT, color: PURPLE_DARK, textTransform: 'uppercase', fontWeight: 800, marginBottom: 2 }}
-                >
-                  FROM
-                </Text>
-                {fromDisplayLines.map((line, idx) => (
-                  <Text
-                    key={`from-${idx}`}
-                    style={{
-                      fontSize: 8.8,
-                      color: TEXT_DARK,
-                      fontWeight: idx === 0 ? 900 : 500,
-                      lineHeight: 1.25,
-                    }}
-                  >
-                    {line}
-                  </Text>
-                ))}
-              </View>
-            </View>
-          </View>
-
-        <Card title="Change Order Summary">
-          <View style={{ borderWidth: 1, borderColor: PURPLE_BORDER, borderRadius: 8, overflow: 'hidden' }}>
-            <View style={{ flexDirection: 'row' }}>
-              {[
-                { label: 'Change title', value: clampText(data.changeTitle, 72), flex: 1.6 },
-                { label: 'Priority', value: data.priorityDisplay, flex: 0.55 },
-                { label: 'Status', value: data.summaryStatus, flex: 0.55 },
-              ].map((c, idx) => (
-                <View
-                  key={`sum-${idx}`}
-                  style={{
-                    flex: c.flex as any,
-                    paddingHorizontal: 6,
-                    paddingVertical: 6,
-                    borderRightWidth: idx === 2 ? 0 : 1,
-                    borderRightColor: PURPLE_BORDER,
-                  }}
-                >
-                  <Text style={{ fontSize: LABEL_FONT, color: MUTED, textTransform: 'uppercase', fontWeight: 900, marginBottom: 2 }}>
-                    {c.label}
-                  </Text>
-                  {c.label === 'Status' ? (
-                    <Text
-                      style={{
-                        alignSelf: 'flex-start',
-                        fontSize: 7.1,
-                        fontWeight: 900,
-                        paddingVertical: 3,
-                        paddingHorizontal: 12,
-                        borderRadius: 10,
-                        textTransform: 'uppercase',
-                        ...statusStyle,
-                      }}
-                    >
-                      {c.value}
-                    </Text>
-                  ) : c.label === 'Priority' ? (
-                    <Text style={{ fontSize: 7.6, fontWeight: 900, color: '#b45309', textTransform: 'uppercase' }}>{c.value}</Text>
-                  ) : (
-                    <Text style={{ fontSize: 7.4, fontWeight: 800 }}>{c.value}</Text>
-                  )}
-                </View>
-              ))}
-            </View>
-          </View>
-        </Card>
-
-        <Card title="Change Description">
-          <View style={{ borderWidth: 1, borderColor: PURPLE_BORDER, borderRadius: 8, overflow: 'hidden' }}>
-            <View style={{ paddingHorizontal: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: PURPLE_BORDER }}>
-              <Text style={{ fontSize: LABEL_FONT, color: MUTED, textTransform: 'uppercase', fontWeight: 900, marginBottom: 2 }}>
-                Detailed description of change
-              </Text>
-              <Text style={{ fontSize: 7.3, lineHeight: 1.25 }}>
-                {stripHtmlToPlainParagraphs(data.detailedDescription)}
-              </Text>
-            </View>
-            <View style={{ paddingHorizontal: 8, paddingVertical: 6 }}>
-              <Text style={{ fontSize: LABEL_FONT, color: MUTED, textTransform: 'uppercase', fontWeight: 900, marginBottom: 2 }}>
-                Reason for change
-              </Text>
-              <Text style={{ fontSize: 7.2, fontWeight: 800, marginBottom: 2, color: TEXT_DARK }}>
-                {data.reasonCategoryDisplay}
-              </Text>
-            </View>
-          </View>
-        </Card>
-
-        <Card title="Breakdown of costs">
-          <View style={{ borderWidth: 1, borderColor: PURPLE_BORDER, borderRadius: 8, overflow: 'hidden', marginTop: 2 }}>
-            <View
-              style={{
-                flexDirection: 'row',
-                backgroundColor: COST_SECTION_HEADER_BG,
-                borderBottomWidth: 1,
-                borderBottomColor: PURPLE_BORDER,
-              }}
-            >
-              {(
-                [
-                  ['DESCRIPTION', { flex: 2.08 }, {}],
-                  ['QTY', { flex: 0.74 }, {}],
-                  ['UNIT PRICE', { flex: 1.06 }, {}],
-                  ['CALCULATION', { flex: 1.32 }, {}],
-                  ['AMOUNT', { flex: 1.86 }, { textAlign: 'right' as const }],
-                ] as const
-              ).map(([label, wrap, extra], idx) => (
-                <View
-                  key={`co-cost-h-${idx}`}
-                  style={{
-                    ...wrap,
-                    paddingHorizontal: 5,
-                    paddingVertical: 5,
-                    borderRightWidth: idx === 4 ? 0 : 1,
-                    borderRightColor: PURPLE_BORDER,
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 5.85,
-                      fontWeight: 900,
-                      color: PURPLE_DARK,
-                      textTransform: 'uppercase',
-                      letterSpacing: 0.2,
-                      ...extra,
-                    }}
-                  >
-                    {label}
-                  </Text>
-                </View>
-              ))}
-            </View>
-            {data.costBreakdownRows.map((row, ri) => (
-              <View
-                key={`co-cost-${ri}`}
-                style={{
-                  flexDirection: 'row',
-                  backgroundColor: CARD_BG,
-                  borderBottomWidth: 1,
-                  borderBottomColor: PURPLE_BORDER,
-                }}
-              >
-                {[
-                  [row.description, { flex: 2.08 }, { fontWeight: 600 }],
-                  [row.qty, { flex: 0.74 }, {}],
-                  [row.unitPrice, { flex: 1.06 }, {}],
-                  [row.calculation, { flex: 1.32 }, {}],
-                  [row.amount, { flex: 1.86 }, { fontWeight: 900, textAlign: 'right' as const }],
-                ].map(([cellText, wrap, sx], ci) => {
-                  const ws = wrap as { flex?: number }
-                  const textSx = sx as { fontWeight?: number; textAlign?: 'left' | 'right' | 'center' }
-                  return (
-                    <View
-                      key={`co-cost-cell-${ri}-${ci}`}
-                      style={{
-                        ...ws,
-                        paddingHorizontal: 5,
-                        paddingVertical: 5,
-                        borderRightWidth: ci === 4 ? 0 : 1,
-                        borderRightColor: PURPLE_BORDER,
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <Text style={{ fontSize: 7.05, color: TEXT_DARK, ...textSx }}>{String(cellText)}</Text>
-                    </View>
-                  )
-                })}
-              </View>
-            ))}
-            <View style={{ flexDirection: 'row', backgroundColor: COST_SECTION_TOTAL_BG }}>
-              <View
-                style={{
-                  flex: 2.08 + 0.74 + 1.06 + 1.32,
-                  paddingHorizontal: 5,
-                  paddingVertical: 6,
-                  borderRightWidth: 1,
-                  borderRightColor: PURPLE_BORDER,
-                  justifyContent: 'center',
-                }}
-              >
-                <Text
-                  style={{
-                    fontSize: 6,
-                    fontWeight: 900,
-                    color: PURPLE_DARK,
-                    textTransform: 'uppercase',
-                    letterSpacing: 0.25,
-                  }}
-                >
-                  Total change order sum
-                </Text>
-              </View>
-              <View
-                style={{
-                  flex: 1.86,
-                  paddingHorizontal: 5,
-                  paddingVertical: 6,
-                  justifyContent: 'center',
-                }}
-              >
-                <Text style={{ fontSize: 7.2, fontWeight: 900, color: TEXT_DARK, textAlign: 'right' }}>{data.totalChangeAmount}</Text>
-              </View>
-            </View>
-          </View>
-        </Card>
-
-        <Card title="Schedule Impact">
           <View
             style={{
               borderWidth: 1,
               borderColor: PURPLE_BORDER,
               borderRadius: 8,
-              paddingHorizontal: 10,
+              paddingHorizontal: FRAME_INNER_PADDING - 1,
               paddingVertical: 9,
-              backgroundColor: CARD_BG,
+              marginBottom: SECTION_GAP + 1,
             }}
           >
-            <Text style={{ fontSize: 9.5, fontWeight: 900, color: TEXT_DARK, lineHeight: 1.35 }}>{data.scheduleImpactDisplay}</Text>
-          </View>
-        </Card>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1, paddingRight: 10 }}>
+                {data.logoDataUri ? (
+                  <Image src={data.logoDataUri} style={{ width: 40, height: 40, objectFit: 'contain' }} />
+                ) : null}
+                <View style={{ marginLeft: data.logoDataUri ? 8 : 0, flexShrink: 1 }}>
+                  <Text style={{ fontSize: BASE_FONT + 3.2, fontWeight: 800, color: PURPLE_DARK, letterSpacing: 0.25 }}>
+                    {(data.brand || 'BUILDSWIFT').toUpperCase()}
+                  </Text>
+                  {data.brandSub ? (
+                    <Text style={{ fontSize: LABEL_FONT + 0.2, color: MUTED, letterSpacing: 1.4, marginTop: 2 }}>
+                      {data.brandSub.toUpperCase()}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
 
-        <Card title="Approval / Authorization">
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-            <Text style={{ fontSize: LABEL_FONT, color: MUTED, textTransform: 'uppercase', fontWeight: 800, marginRight: 8 }}>
-              Final status
-            </Text>
-            <Text
-              style={{
-                fontSize: 7.2,
-                fontWeight: 800,
-                paddingVertical: 3,
-                paddingHorizontal: 10,
-                borderRadius: 8,
-                textTransform: 'uppercase',
-                ...authStyle,
-              }}
-            >
-              {data.finalAuthorizationStatus}
-            </Text>
-          </View>
-          <View style={{ borderWidth: 1, borderColor: PURPLE_BORDER, borderRadius: 8, overflow: 'hidden' }}>
-            <View style={{ flexDirection: 'row', backgroundColor: TABLE_HEAD }}>
-              {['Reviewer Email', 'Signature', 'Action', 'Date'].map((h, i) => (
+              <View
+                style={{
+                  alignItems: 'flex-end',
+                  borderWidth: 1,
+                  borderColor: BORDER,
+                  borderRadius: 10,
+                  backgroundColor: '#f8fafc',
+                  paddingVertical: 6,
+                  paddingHorizontal: 10,
+                  minWidth: 104,
+                }}
+              >
                 <Text
-                  key={h}
                   style={{
-                    width: i === 0 ? '28%' : i === 1 ? '24%' : i === 2 ? '28%' : '20%',
-                    fontSize: 6.2,
-                    fontWeight: 800,
-                    paddingHorizontal: 4,
-                    paddingVertical: 3,
+                    fontSize: LABEL_FONT - 0.15,
+                    fontWeight: 900,
+                    color: MUTED,
                     textTransform: 'uppercase',
+                    letterSpacing: 0.35,
                   }}
                 >
-                  {h}
+                  Status
                 </Text>
+                <Text
+                  style={{
+                    marginTop: 4,
+                    alignSelf: 'flex-end',
+                    fontSize: BASE_FONT - 0.1,
+                    fontWeight: 900,
+                    paddingVertical: 4,
+                    paddingHorizontal: 11,
+                    borderRadius: 999,
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.2,
+                    ...statusStyle,
+                  }}
+                >
+                  {data.summaryStatus}
+                </Text>
+              </View>
+            </View>
+            <View style={{ marginTop: 10, flexDirection: 'row' }}>
+              <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text style={{ fontSize: BASE_FONT + 0.5, fontWeight: 800, color: TEXT_DARK, marginBottom: 3 }}>
+                  {clampText(data.companyLegalName, 48)}
+                </Text>
+                {formatAddressLines(data.contactAddress)
+                  .slice(0, 2)
+                  .map((line, idx) => (
+                    <Text key={`c-${idx}`} style={{ fontSize: BASE_FONT, color: TEXT_DARK, lineHeight: BODY_LINE_HEIGHT }}>
+                      {clampText(line, MAX_FIELD_CELL_CHARS + 8)}
+                    </Text>
+                  ))}
+                <Text style={{ fontSize: BASE_FONT - 0.35, color: TEXT_DARK, marginTop: 5 }}>
+                  {clampText(`${data.contactPhone} | ${data.contactEmail}`, 72)}
+                </Text>
+              </View>
+              <View style={{ width: 1, backgroundColor: BORDER }} />
+              <View style={{ flex: 1, paddingLeft: 10 }}>
+                <Text
+                  style={{
+                    fontSize: LABEL_FONT,
+                    color: PURPLE_LABEL,
+                    textTransform: 'uppercase',
+                    marginBottom: 3,
+                    fontWeight: 800,
+                  }}
+                >
+                  PROJECT
+                </Text>
+                <Text style={{ fontSize: BASE_FONT + 0.35, fontWeight: 900, color: PURPLE_DARK, marginBottom: 3 }}>
+                  {clampText(data.projectName, 56)}
+                </Text>
+                {formatAddressLines(data.projectAddress)
+                  .slice(0, 2)
+                  .map((line, idx) => (
+                    <Text
+                      key={`pr-${idx}`}
+                      style={{ fontSize: BASE_FONT, color: TEXT_DARK, lineHeight: BODY_LINE_HEIGHT, marginTop: idx === 0 ? 1 : 0 }}
+                    >
+                      {clampText(line, MAX_FIELD_CELL_CHARS + 8)}
+                    </Text>
+                  ))}
+              </View>
+            </View>
+
+            <View
+              style={{
+                marginTop: 10,
+                borderWidth: 1,
+                borderColor: PURPLE_BORDER,
+                borderRadius: 7,
+                overflow: 'hidden',
+                backgroundColor: CARD_BG,
+              }}
+            >
+              <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: BORDER }}>
+                <View style={{ flex: 1, paddingHorizontal: 8, paddingVertical: 6, borderRightWidth: 1, borderRightColor: BORDER }}>
+                  <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 3 }}>
+                    Sent From
+                  </Text>
+                  <PartyBlock lines={fromLines.length ? fromLines : ['Not Provided']} />
+                </View>
+                <View style={{ flex: 1, paddingHorizontal: 8, paddingVertical: 6 }}>
+                  <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 3 }}>
+                    Date Issued
+                  </Text>
+                  <Text style={{ fontSize: BASE_FONT + 0.2, fontWeight: 800, color: TEXT_DARK }}>{data.dateIssuedDisplay}</Text>
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row' }}>
+                <View style={{ flex: 1, paddingHorizontal: 8, paddingVertical: 6, borderRightWidth: 1, borderRightColor: BORDER }}>
+                  <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 3 }}>
+                    Sent To
+                  </Text>
+                  <PartyBlock lines={toLines.length ? toLines : ['Not Provided']} />
+                </View>
+                <View style={{ flex: 1, paddingHorizontal: 8, paddingVertical: 6, borderRightWidth: 1, borderRightColor: BORDER }}>
+                  <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 3 }}>
+                    Required Response Date
+                  </Text>
+                  <Text style={{ fontSize: BASE_FONT + 0.2, fontWeight: 800, color: TEXT_DARK }}>{requiredResponseDateDisplay}</Text>
+                </View>
+                <View style={{ flex: 1, paddingHorizontal: 8, paddingVertical: 6 }}>
+                  <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 3 }}>
+                    Priority
+                  </Text>
+                  <Text style={{ fontSize: BASE_FONT + 0.2, fontWeight: 800, textTransform: 'uppercase', ...pStyle }}>
+                    {priorityUpper || data.priorityDisplay || '—'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
+
+          <Card title="CHANGE ORDER SUMMARY">
+            <View style={{ flexDirection: 'row' }}>
+              <View style={{ flex: 1.12, paddingRight: 10, borderRightWidth: 1, borderRightColor: BORDER }}>
+                <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 4 }}>
+                  CHANGE TITLE
+                </Text>
+                <Text style={{ fontSize: BASE_FONT + 0.5, fontWeight: 700, color: TEXT_DARK, lineHeight: BODY_LINE_HEIGHT }}>
+                  {clampText(data.changeTitle, MAX_SUMMARY_TITLE_CHARS)}
+                </Text>
+              </View>
+              <View style={{ flex: 0.88, paddingLeft: 10 }}>
+                <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 4 }}>
+                  REASON FOR CHANGE
+                </Text>
+                <Text style={{ fontSize: BASE_FONT + 0.5, fontWeight: 700, color: TEXT_DARK, lineHeight: BODY_LINE_HEIGHT }}>
+                  {clampText(data.reasonForChangeDisplay, MAX_REASON_IN_SUMMARY_CHARS)}
+                </Text>
+              </View>
+            </View>
+          </Card>
+
+          <Card title="CHANGE DESCRIPTION">
+            <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 4 }}>
+              DETAILED DESCRIPTION
+            </Text>
+            <Text style={{ fontSize: BASE_FONT, lineHeight: DESC_LINE_HEIGHT }}>{descPlainClamped}</Text>
+          </Card>
+
+          <Card title="COST BREAKDOWN">
+            <ChangeOrderCostBreakdownSection
+              breakdown={data.costBreakdown}
+              originalContractAmountDisplay={data.originalContractAmountDisplay}
+              changeOrderAmountDisplay={data.changeOrderAmountDisplay}
+              revisedContractAmountDisplay={data.revisedContractAmountDisplay}
+            />
+          </Card>
+
+          <Card title="SCHEDULE IMPACT">
+            <View style={{ flexDirection: 'row', paddingVertical: 4 }}>
+              {(
+                [
+                  { label: 'ORIGINAL DURATION', value: data.originalDurationDisplay },
+                  { label: 'PROPOSED DURATION', value: data.proposedDurationDisplay },
+                  { label: 'NEW DURATION', value: data.newDurationDisplay },
+                ] as const
+              ).map((col) => (
+                <View key={col.label} style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 4 }}>
+                  <Text
+                    style={{
+                      fontSize: LABEL_FONT,
+                      color: PURPLE_LABEL,
+                      textTransform: 'uppercase',
+                      fontWeight: 800,
+                    }}
+                  >
+                    {col.label}
+                  </Text>
+                  <Text style={{ fontSize: BASE_FONT - 0.2, fontWeight: 800, marginTop: 5, color: TEXT_DARK }}>{col.value}</Text>
+                </View>
               ))}
             </View>
-            {appr.map((r, idx) => (
-              <View key={`ap-${idx}`} style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: PURPLE_BORDER }}>
-                <Text style={{ width: '28%', fontSize: 6.8, paddingHorizontal: 4, paddingVertical: 3 }}>{r.reviewerEmail}</Text>
-                <View style={{ width: '24%', paddingHorizontal: 4, paddingVertical: 3 }}>
-                  {r.signatureUrl ? (
-                    <Image src={r.signatureUrl} style={{ width: 64, height: 14, objectFit: 'contain' }} />
-                  ) : r.signatureName ? (
-                    <Text style={{ fontSize: 6.9, fontFamily: 'Helvetica-Oblique', color: TEXT_DARK }}>{r.signatureName}</Text>
-                  ) : (
-                    <View style={{ height: 0.8, backgroundColor: '#94a3b8', marginTop: 8 }} />
-                  )}
-                </View>
-                <Text style={{ width: '28%', fontSize: 6.8, paddingHorizontal: 4, paddingVertical: 3 }}>{r.action}</Text>
-                <Text style={{ width: '20%', fontSize: 6.8, paddingHorizontal: 4, paddingVertical: 3 }}>{r.date}</Text>
-              </View>
-            ))}
-          </View>
-        </Card>
+          </Card>
 
-          <View style={{ backgroundColor: PURPLE_DARK, borderRadius: 10, marginTop: 4, paddingVertical: 6, alignItems: 'center' }}>
-            <Text style={{ color: '#ffffff', fontSize: 8, fontWeight: 900, letterSpacing: 0.2 }}>
+          <Card title="ATTACHMENTS">
+            <View style={{ borderWidth: 1, borderColor: PURPLE_BORDER, borderRadius: 7, overflow: 'hidden' }}>
+              <View style={{ flexDirection: 'row', backgroundColor: TABLE_HEAD, borderBottomWidth: 1, borderBottomColor: PURPLE_BORDER }}>
+                {(['FILE NAME', 'FILE TYPE'] as const).map((h, idx) => (
+                  <Text
+                    key={h}
+                    style={{
+                      width: idx === 0 ? '68%' : '32%',
+                      fontSize: LABEL_FONT,
+                      fontWeight: 700,
+                      paddingHorizontal: 8,
+                      paddingVertical: 6,
+                      textTransform: 'uppercase',
+                      color: PURPLE_DARK,
+                      borderRightWidth: idx === 1 ? 0 : 1,
+                      borderRightColor: BORDER,
+                    }}
+                  >
+                    {h}
+                  </Text>
+                ))}
+              </View>
+              {attachmentRowsTruncated.map((row, ri) => (
+                <View
+                  key={`att-${ri}`}
+                  style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: PURPLE_BORDER, backgroundColor: '#ffffff' }}
+                >
+                  <Text
+                    style={{
+                      width: '68%',
+                      fontSize: BASE_FONT - 0.5,
+                      paddingHorizontal: 7,
+                      paddingVertical: 6,
+                      borderRightWidth: 1,
+                      borderRightColor: BORDER,
+                      lineHeight: BODY_LINE_HEIGHT,
+                    }}
+                  >
+                    {clampText(row.fileName, 44)}
+                  </Text>
+                  <Text
+                    style={{
+                      width: '32%',
+                      fontSize: BASE_FONT - 0.5,
+                      paddingHorizontal: 7,
+                      paddingVertical: 6,
+                      lineHeight: BODY_LINE_HEIGHT,
+                    }}
+                  >
+                    {row.fileType}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+
+          <Card title="APPROVAL / AUTHORIZATION">
+            <View style={{ borderWidth: 1, borderColor: PURPLE_BORDER, borderRadius: 7, overflow: 'hidden', backgroundColor: '#ffffff' }}>
+              {/*
+                Status badge intentionally omitted here — per the canonical
+                status rule, the document badge appears only in the top
+                summary card (the metadata grid above). This section is a
+                chronological record of reviewer activity only.
+              */}
+              <View style={{ flexDirection: 'row' }}>
+                <View style={{ flex: 1, paddingHorizontal: 8, paddingVertical: 6 }}>
+                  <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 4 }}>
+                    REVIEWED BY
+                  </Text>
+                  <Text style={{ fontSize: BASE_FONT + 0.2, fontWeight: 700, color: TEXT_DARK }}>—</Text>
+                </View>
+              </View>
+
+              <View style={{ height: 1, backgroundColor: BORDER }} />
+
+              <View style={{ paddingHorizontal: 8, paddingVertical: 6 }}>
+                <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800 }}>
+                  APPROVAL / RESPONSE LOG
+                </Text>
+              </View>
+
+              <View style={{ borderTopWidth: 1, borderTopColor: BORDER }}>
+                <View style={{ flexDirection: 'row', backgroundColor: TABLE_HEAD }}>
+                  {['Name', 'Role', 'Action', 'Date', 'Notes'].map((h, idx) => (
+                    <Text
+                      key={h}
+                      style={{
+                        width: idx === 0 ? '22%' : idx === 1 ? '16%' : idx === 2 ? '18%' : idx === 3 ? '14%' : '30%',
+                        fontSize: LABEL_FONT - 0.12,
+                        fontWeight: 700,
+                        paddingHorizontal: 6,
+                        paddingVertical: 5,
+                        textTransform: 'uppercase',
+                        color: PURPLE_DARK,
+                        borderRightWidth: idx === 4 ? 0 : 1,
+                        borderRightColor: BORDER,
+                      }}
+                    >
+                      {h}
+                    </Text>
+                  ))}
+                </View>
+                {approvalRowsDisplayed.map((r, idx) => (
+                  <View
+                    key={`ap-${idx}`}
+                    style={{
+                      flexDirection: 'row',
+                      borderTopWidth: 1,
+                      borderTopColor: PURPLE_BORDER,
+                      backgroundColor: '#ffffff',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        width: '22%',
+                        fontSize: BASE_FONT - 0.5,
+                        paddingHorizontal: 6,
+                        paddingVertical: 5,
+                        borderRightWidth: 1,
+                        borderRightColor: PURPLE_BORDER,
+                        lineHeight: BODY_LINE_HEIGHT,
+                      }}
+                    >
+                      {clampText(r.name, 28)}
+                    </Text>
+                    <Text
+                      style={{
+                        width: '16%',
+                        fontSize: BASE_FONT - 0.5,
+                        paddingHorizontal: 6,
+                        paddingVertical: 5,
+                        borderRightWidth: 1,
+                        borderRightColor: PURPLE_BORDER,
+                        lineHeight: BODY_LINE_HEIGHT,
+                      }}
+                    >
+                      {clampText(r.role, 22)}
+                    </Text>
+                    <Text
+                      style={{
+                        width: '18%',
+                        fontSize: BASE_FONT - 0.5,
+                        paddingHorizontal: 6,
+                        paddingVertical: 5,
+                        borderRightWidth: 1,
+                        borderRightColor: PURPLE_BORDER,
+                        lineHeight: BODY_LINE_HEIGHT,
+                      }}
+                    >
+                      {r.action}
+                    </Text>
+                    <Text
+                      style={{
+                        width: '14%',
+                        fontSize: BASE_FONT - 0.5,
+                        paddingHorizontal: 6,
+                        paddingVertical: 5,
+                        borderRightWidth: 1,
+                        borderRightColor: PURPLE_BORDER,
+                        lineHeight: BODY_LINE_HEIGHT,
+                      }}
+                    >
+                      {clampText(r.date, 18)}
+                    </Text>
+                    <Text style={{ width: '30%', fontSize: BASE_FONT - 0.5, paddingHorizontal: 6, paddingVertical: 5, lineHeight: BODY_LINE_HEIGHT }}>
+                      {clampText(r.notes, 52)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </Card>
+
+          <View
+            style={{
+              backgroundColor: PURPLE_DARK,
+              borderRadius: 7,
+              marginTop: 4,
+              paddingVertical: 8,
+              alignItems: 'center',
+            }}
+          >
+            <Text style={{ color: '#ffffff', fontSize: BASE_FONT, fontWeight: 700 }}>
               Construction Documentation.
             </Text>
           </View>

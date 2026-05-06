@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useMemo, useState } from 'react'
-import { AlertCircle, Brain, RefreshCw, Sparkles, X } from 'lucide-react'
+import { AlertCircle, RefreshCw, Sparkles, X } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -9,12 +9,13 @@ import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import type { MissingScopeApiType } from '@/lib/missing-scope-client'
+import type { RfiStructuredImprovement } from '@/lib/server/rfi-ai-schema'
 
 const MIN_DESCRIPTION_LENGTH = 10
 const HELPER_TEXT = 'Enter a brief description first so AI can improve it.'
 const API_FAILURE_MESSAGE = 'AI request failed. Please try again.'
 
-type ImproveResponse = { improvedDescription: string }
+type ImproveResponse = { improvedDescription: string; structured?: RfiStructuredImprovement }
 type AnalyzeChangeOrderResponse = {
   missingScope: string[]
   unclearAreas: string[]
@@ -23,7 +24,7 @@ type AnalyzeChangeOrderResponse = {
 
 type ImprovementResult =
   | null
-  | { kind: 'text'; improvedDescription: string }
+  | { kind: 'text'; improvedDescription: string; structured?: RfiStructuredImprovement }
   | {
       kind: 'change-order'
       missingScope: string[]
@@ -49,10 +50,10 @@ function getUiConfig(documentApiType: MissingScopeApiType) {
     }
   }
   return {
-    prompt: 'Want AI to review this for missing scope or unclear details?',
-    buttonLabel: '🧠 Analyze Scope with AI',
-    runningLabel: 'Analyzing…',
-    icon: Brain,
+    prompt: 'Want AI to improve and standardize this change description, reason, and references?',
+    buttonLabel: '✨ Improve with AI',
+    runningLabel: 'Improving…',
+    icon: Sparkles,
   }
 }
 
@@ -60,6 +61,8 @@ export function MissingScopeEditorSection(props: {
   documentApiType: MissingScopeApiType
   value: string
   onChange: (next: string) => void
+  /** When user applies RFI improvement; merge into document metadata via parent. */
+  onRfiStructuredImprove?: (structured: RfiStructuredImprovement) => void
   rows?: number
   textareaClassName?: string
   placeholder?: string
@@ -72,6 +75,7 @@ export function MissingScopeEditorSection(props: {
     documentApiType,
     value,
     onChange,
+    onRfiStructuredImprove,
     rows = 5,
     textareaClassName,
     placeholder,
@@ -130,7 +134,11 @@ export function MissingScopeEditorSection(props: {
           setError(API_FAILURE_MESSAGE)
           return
         }
-        setImprovementResult({ kind: 'text', improvedDescription })
+        setImprovementResult({
+          kind: 'text',
+          improvedDescription,
+          structured: result.structured,
+        })
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : API_FAILURE_MESSAGE)
@@ -142,8 +150,11 @@ export function MissingScopeEditorSection(props: {
   const applyTextImprovement = useCallback(() => {
     if (improvementResult?.kind !== 'text') return
     onChange(improvementResult.improvedDescription)
+    if (documentApiType === 'RFI' && improvementResult.structured && onRfiStructuredImprove) {
+      onRfiStructuredImprove(improvementResult.structured)
+    }
     setImprovementResult(null)
-  }, [improvementResult, onChange])
+  }, [documentApiType, improvementResult, onChange, onRfiStructuredImprove])
 
   const applyChangeOrderSuggestion = useCallback(() => {
     if (improvementResult?.kind !== 'change-order') return

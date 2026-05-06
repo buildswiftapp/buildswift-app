@@ -93,8 +93,22 @@ export const sendForReviewSchema = z.object({
     .default(7),
 })
 
+/**
+ * Canonical reviewer outcomes (matches `ReviewerOutcome` in `lib/status.ts`).
+ * The legacy enum values `approve` / `reject` are still accepted as aliases
+ * during Phase 1 dual-write so older clients keep working; routes normalize
+ * the value into a canonical outcome before persisting.
+ */
+export const reviewerOutcomeEnum = z.enum([
+  'approved',
+  'approved_as_noted',
+  'revise_and_resubmit',
+  'rejected',
+  'answered',
+])
+
 export const reviewDecisionSchema = z.object({
-  decision: z.enum(['approve', 'reject']),
+  decision: z.union([z.enum(['approve', 'reject']), reviewerOutcomeEnum]),
   decision_notes: z.string().max(3000).optional(),
   full_name: z.string().trim().min(1),
   signature_url: z.string().url().optional(),
@@ -102,10 +116,15 @@ export const reviewDecisionSchema = z.object({
 
 export const reviewSubmitSchema = z.object({
   token: z.string().trim().min(16).max(512),
-  decision: z.enum(['approved', 'rejected']),
+  decision: reviewerOutcomeEnum,
   notes: z.string().max(3000).optional(),
   signature_name: z.string().trim().min(1).max(200),
   signature_image: z.string().min(1).max(2_000_000).optional(),
+})
+
+/** POST /api/documents/:id/close — manual contractor closure of a document. */
+export const closeDocumentSchema = z.object({
+  note: z.string().trim().max(2000).optional(),
 })
 
 const aiDescriptionInputSchema = z.string().trim().min(10).max(6000)

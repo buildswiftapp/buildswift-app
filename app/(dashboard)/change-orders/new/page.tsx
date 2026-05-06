@@ -1,18 +1,20 @@
 'use client'
 
-import { useState, useRef, useCallback, Suspense, useEffect } from 'react'
+import type { ReactNode } from 'react'
+import { useState, useRef, useCallback, Suspense, useEffect, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft,
+  CalendarClock,
+  CircleDollarSign,
+  Save,
+  Timer,
   Upload,
   X,
   FileText,
-  Save,
-  Plus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -32,6 +34,19 @@ import {
 import { MissingScopeEditorSection } from '../../../components/missing-scope-editor-section'
 import { docTypeToMissingScopeType } from '@/lib/missing-scope-client'
 import { apiFetch } from '@/lib/api'
+import {
+  computeBaseline,
+  computeDerived,
+  computeSchedule,
+  formatScheduleLabel,
+  formatSignedUsd,
+  serializeChangeOrderImpactToMetadata,
+  validateChangeOrderImpact,
+  type ChangeOrderBaselineState,
+  type ChangeOrderCostState,
+  type ChangeOrderImpactValidationErrors,
+  type ChangeOrderScheduleState,
+} from '@/lib/co-impact'
 
 const PAGE_BG = '#f1f5f9'
 const NAVY = '#0f172a'
@@ -42,6 +57,45 @@ function formCardClassName(extra?: string) {
   return cn(
     'rounded-xl border border-[#e2e8f0] bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.06)] sm:p-6 lg:p-7 xl:p-8',
     extra
+  )
+}
+
+/** Impact pillar cards — accent is a top border color (Tailwind). */
+function CoImpactCardShell(args: {
+  accentBorder: string
+  iconBg: string
+  iconClass: string
+  icon: ReactNode
+  title: string
+  description: string
+  children: ReactNode
+  footer?: ReactNode
+}) {
+  return (
+    <div
+      className={cn(
+        'flex h-full flex-col rounded-2xl border border-[#e2e8f0] bg-white p-5 shadow-sm ring-1 ring-[#f1f5f9]',
+        args.accentBorder
+      )}
+    >
+      <div className="mb-4 flex gap-3">
+        <div
+          className={cn(
+            'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl [&>svg]:h-5 [&>svg]:w-5',
+            args.iconBg,
+            args.iconClass
+          )}
+        >
+          {args.icon}
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold leading-snug tracking-tight text-[#0f172a]">{args.title}</p>
+          <p className="mt-1 text-xs leading-relaxed text-[#64748b]">{args.description}</p>
+        </div>
+      </div>
+      <div className="min-w-0 flex-1 space-y-1">{args.children}</div>
+      {args.footer ? <div className="mt-4 border-t border-[#f1f5f9] pt-4">{args.footer}</div> : null}
+    </div>
   )
 }
 
@@ -60,13 +114,6 @@ interface LocalAttachment {
   size: string
   file?: File
   url?: string
-}
-
-type CostItemDraft = {
-  id: string
-  description: string
-  quantity: string
-  unitPrice: string
 }
 
 type ApiProject = {
@@ -140,16 +187,35 @@ function NewChangeOrderContent() {
     date: '',
     description: '',
     reason: 'owner_request',
-    costImpact: '',
-    scheduleNoImpact: false,
-    scheduleImpactText: '',
+    originalContractAmount: '',
     priority: 'normal' as 'low' | 'normal' | 'urgent',
     dueDate: '',
     notes: '',
   })
 
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
-  const [costItems, setCostItems] = useState<CostItemDraft[]>([])
+  const [schedule, setSchedule] = useState<ChangeOrderScheduleState>({
+    enabled: false,
+    duration: '',
+    unit: 'days',
+    dayType: '',
+  })
+  const [baseline, setBaseline] = useState<ChangeOrderBaselineState>({
+    value: '',
+    unit: 'days',
+    dayType: '',
+  })
+  const [cost, setCost] = useState<ChangeOrderCostState>({
+    type: 'increase',
+    labor: '',
+    materials: '',
+    equipment: '',
+    subcontractor: '',
+    other: '',
+    markupPercent: '',
+    justificationNote: '',
+  })
+  const [impactErrors, setImpactErrors] = useState<ChangeOrderImpactValidationErrors>({})
 
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -177,53 +243,21 @@ function NewChangeOrderContent() {
 
   const reasonLabel =
     REASON_OPTIONS.find((r) => r.value === formData.reason)?.label ?? formData.reason
-  const scheduleLabel = formData.scheduleNoImpact
-    ? 'No Impact'
-    : formData.scheduleImpactText.trim() || '—'
+  const scheduleLabel = formatScheduleLabel(schedule)
 
-  const normalizedCostItems = costItems.map((item) => {
-    const qty = Math.max(0, Number.parseFloat(item.quantity || '0') || 0)
-    const unit = parseMoneyInput(item.unitPrice)
-    return {
-      ...item,
-      qty,
-      unit,
-      lineTotal: qty * unit,
-    }
-  })
-  const costBreakdownTotal = normalizedCostItems.reduce((sum, row) => sum + row.lineTotal, 0)
+  const derived = useMemo(
+    () =>
+      computeDerived({
+        schedule,
+        baseline,
+        cost,
+        originalContractAmountRaw: formData.originalContractAmount,
+      }),
+    [schedule, baseline, cost, formData.originalContractAmount]
+  )
 
-  const hasCostBreakdown =
-    normalizedCostItems.some(
-      (row) =>
-        row.description.trim() ||
-        (row.qty !== 0 || row.unit !== 0)
-    )
-
-  const costNumeric = hasCostBreakdown ? costBreakdownTotal : parseMoneyInput(formData.costImpact)
-
-  useEffect(() => {
-    if (!hasCostBreakdown) return
-    const next = costBreakdownTotal ? formatUsd(costBreakdownTotal) : '0'
-    setFormData((prev) => (prev.costImpact === next ? prev : { ...prev, costImpact: next }))
-  }, [costBreakdownTotal, hasCostBreakdown])
-
-  const addCostItem = () => {
-    setCostItems((prev) => [
-      ...prev,
-      {
-        id: `ci-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        description: '',
-        quantity: '1',
-        unitPrice: '0',
-      },
-    ])
-  }
-
-  const removeCostItem = (id: string) => setCostItems((prev) => prev.filter((i) => i.id !== id))
-
-  const updateCostItem = (id: string, patch: Partial<CostItemDraft>) =>
-    setCostItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)))
+  const scheduleComputed = useMemo(() => computeSchedule(schedule), [schedule])
+  const baselineComputed = useMemo(() => computeBaseline(baseline), [baseline])
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -288,6 +322,7 @@ function NewChangeOrderContent() {
   }
 
   const validateForm = () => {
+    setImpactErrors({})
     if (!formData.projectId) {
       toast.error('Please select a project')
       return false
@@ -304,6 +339,37 @@ function NewChangeOrderContent() {
       toast.error('Please enter a description of change')
       return false
     }
+
+    const impactValidation = validateChangeOrderImpact({ schedule, baseline, cost })
+    if (!impactValidation.ok) {
+      setImpactErrors(impactValidation.errors)
+      const firstKey =
+        (Object.keys(impactValidation.errors)[0] as keyof ChangeOrderImpactValidationErrors | undefined) ??
+        null
+      toast.error('Please review the schedule/cost impact fields.')
+      const focusId =
+        firstKey === 'scheduleDuration'
+          ? 'co-schedule-duration'
+          : firstKey === 'scheduleDayType'
+            ? 'co-schedule-day-type'
+            : firstKey === 'baselineDuration'
+              ? 'co-baseline-duration'
+              : firstKey === 'baselineDayType'
+                ? 'co-baseline-day-type'
+                : firstKey === 'costJustification'
+                  ? 'co-cost-justification'
+                  : firstKey === 'costAtLeastOne'
+                    ? 'co-cost-labor'
+                    : null
+      if (focusId) {
+        setTimeout(() => {
+          const el = document.getElementById(focusId) as HTMLElement | null
+          el?.focus?.()
+        }, 0)
+      }
+      return false
+    }
+
     return true
   }
 
@@ -327,19 +393,10 @@ function NewChangeOrderContent() {
       title: formData.title,
       description: formData.description,
       reasonLabel,
-      cost: costNumeric,
+      cost: derived.costTotal,
       scheduleLabel,
       notes: formData.notes,
     })
-
-    const costBreakdownRows = normalizedCostItems
-      .filter((r) => r.description.trim() || r.qty !== 0 || r.unit !== 0)
-      .map((r) => ({
-        description: r.description.trim() || '—',
-        quantity: r.qty,
-        unitPrice: r.unit,
-        total: r.lineTotal,
-      }))
 
     const created = await apiFetch<{ document: { id: string } }>('/api/documents', {
       method: 'POST',
@@ -352,15 +409,19 @@ function NewChangeOrderContent() {
         save_as_draft: asDraft,
         metadata: {
           reason: reasonLabel,
-          proposedAmount: costNumeric,
-          costBreakdownItems: costBreakdownRows.length ? costBreakdownRows : undefined,
           changeOrderNumber: formData.changeOrderNumber,
           changeOrderDate: formData.date,
-          scheduleImpact: scheduleLabel,
           priority: formData.priority,
           actionNeededBy: formData.dueDate || undefined,
           notes: formData.notes || undefined,
           attachments: docAttachments,
+          ...serializeChangeOrderImpactToMetadata({
+            schedule,
+            baseline,
+            cost,
+            derived,
+            originalContractAmount: formData.originalContractAmount,
+          }),
         },
       },
     })
@@ -535,152 +596,457 @@ function NewChangeOrderContent() {
             </div>
 
             <div className={formCardClassName()}>
-              <h2 className="mb-5 text-lg font-semibold text-[#0f172a]">Change details</h2>
-              <div className="grid gap-5 sm:grid-cols-3">
-                <div>
-                  <label className={capLabel}>Reason for change</label>
-                  <Select
-                    value={formData.reason}
-                    onValueChange={(value) => setFormData((p) => ({ ...p, reason: value }))}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select reason" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {REASON_OPTIONS.map((o) => (
-                        <SelectItem key={o.value} value={o.value}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <label className={capLabel}>Cost impact</label>
-                  <div className="relative">
-                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                      $
-                    </span>
-                    <Input
-                      value={formData.costImpact}
-                      onChange={(e) => setFormData((p) => ({ ...p, costImpact: e.target.value }))}
-                      className="pl-7 pr-14"
-                      placeholder="8,750.00"
-                      readOnly={hasCostBreakdown}
-                    />
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                      USD
-                    </span>
-                  </div>
-                </div>
-                <div>
-                  <label className={capLabel}>Schedule impact</label>
-                  <div className="flex min-h-10 items-center gap-3">
-                    <label
-                      htmlFor="new-co-schedule-no-impact"
-                      className="flex shrink-0 cursor-pointer items-center gap-2 text-sm whitespace-nowrap text-[#0f172a]"
-                    >
-                      <Checkbox
-                        checked={formData.scheduleNoImpact}
-                        onCheckedChange={(checked) =>
-                          setFormData((p) => ({ ...p, scheduleNoImpact: checked === true }))
-                        }
-                        id="new-co-schedule-no-impact"
-                      />
-                      <span>No Impact</span>
-                    </label>
-                    <Input
-                      className="min-w-0 flex-1"
-                      value={formData.scheduleImpactText}
-                      onChange={(e) =>
-                        setFormData((p) => ({ ...p, scheduleImpactText: e.target.value }))
-                      }
-                      disabled={formData.scheduleNoImpact}
-                      placeholder="+ 5 days"
-                      aria-label="Schedule impact description"
-                    />
-                  </div>
-                </div>
+              <div className="border-b border-[#f1f5f9] pb-6">
+                <h2 className="text-lg font-semibold tracking-tight text-[#0f172a]">Change details</h2>
+                <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-[#64748b]">
+                  Set the reason, then capture schedule extension, project baseline length, and cost categories. Totals
+                  below update automatically.
+                </p>
               </div>
-            </div>
 
-            <div className={formCardClassName()}>
-              <div className="mb-5 flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-semibold text-[#0f172a]">Cost Breakdown</h2>
-                  <p className="text-sm text-[#64748b]">Update line items for this change order</p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="shrink-0 gap-2 rounded-lg border-[#e2e8f0] bg-white px-4 text-[#0f172a] shadow-sm hover:bg-[#f8fafc]"
-                  onClick={addCostItem}
+              <div className="mt-6 max-w-xl">
+                <label className={capLabel}>Reason for change</label>
+                <Select
+                  value={formData.reason}
+                  onValueChange={(value) => setFormData((p) => ({ ...p, reason: value }))}
                 >
-                  <Plus className="h-4 w-4" />
-                  Add Item
-                </Button>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select reason" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REASON_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
-              <div className="space-y-3">
-                {normalizedCostItems.map((row) => (
-                  <div key={row.id} className="rounded-lg border border-[#e2e8f0] bg-white p-4">
-                    <div className="flex items-center gap-3">
-                      <Input
-                        value={row.description}
-                        onChange={(e) => updateCostItem(row.id, { description: e.target.value })}
-                        placeholder="Description"
-                        className="flex-1"
-                      />
+              <div className="mt-8">
+                <p className={capLabel}>Impacts</p>
+                <p className="mt-1 text-sm text-[#64748b]">Three independent blocks — validate and save separately.</p>
+                <div className="mt-5 grid gap-5 lg:grid-cols-3 lg:items-stretch">
+                  <CoImpactCardShell
+                    accentBorder="border-t-[3px] border-t-sky-500"
+                    iconBg="bg-sky-50"
+                    iconClass="text-sky-700"
+                    icon={<CalendarClock aria-hidden />}
+                    title="Schedule impact"
+                    description="Extension to the schedule from this change order (optional)."
+                    footer={
+                      <p className="text-[11px] font-medium leading-relaxed text-[#64748b]">
+                        {!schedule.enabled ? (
+                          <span className="inline-flex items-center rounded-full bg-[#f1f5f9] px-2.5 py-1 text-[#475569]">
+                            No schedule extension
+                          </span>
+                        ) : scheduleComputed.valid ? (
+                          <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-800">
+                            Equivalent · {derived.scheduleDaysTotal} calendar day
+                            {derived.scheduleDaysTotal === 1 ? '' : 's'}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-amber-900">
+                            Enter duration
+                            {schedule.unit === 'days' ? ' and day type' : ''} to see equivalent days
+                          </span>
+                        )}
+                      </p>
+                    }
+                  >
+                    <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
-                        onClick={() => removeCostItem(row.id)}
-                        className="rounded-md p-2 text-[#ef4444] transition-colors hover:bg-red-50"
-                        aria-label="Remove cost item"
+                        onClick={() => setSchedule((p) => ({ ...p, enabled: true }))}
+                        className={cn(
+                          'h-10 rounded-lg border text-sm font-semibold transition-colors',
+                          schedule.enabled
+                            ? 'border-[#0f172a] bg-[#0f172a] text-white shadow-sm'
+                            : 'border-[#e2e8f0] bg-white text-[#334155] hover:bg-[#f8fafc]'
+                        )}
                       >
-                        <X className="h-4 w-4" />
+                        Yes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSchedule({ enabled: false, duration: '', unit: 'days', dayType: '' })}
+                        className={cn(
+                          'h-10 rounded-lg border text-sm font-semibold transition-colors',
+                          !schedule.enabled
+                            ? 'border-[#0f172a] bg-[#0f172a] text-white shadow-sm'
+                            : 'border-[#e2e8f0] bg-white text-[#334155] hover:bg-[#f8fafc]'
+                        )}
+                      >
+                        No
                       </button>
                     </div>
 
-                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                      <div>
-                        <label className={capLabel}>Quantity</label>
-                        <Input
-                          inputMode="decimal"
-                          value={row.quantity}
-                          onChange={(e) => updateCostItem(row.id, { quantity: e.target.value })}
-                        />
-                      </div>
-                      <div>
-                        <label className={capLabel}>Unit Price ($)</label>
-                        <Input
-                          inputMode="decimal"
-                          value={row.unitPrice}
-                          onChange={(e) => updateCostItem(row.id, { unitPrice: e.target.value })}
-                        />
-                      </div>
-                      <div>
-                        <label className={capLabel}>Total</label>
-                        <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground">
-                          {row.lineTotal ? `$${formatUsd(row.lineTotal)}` : '$0'}
+                    {schedule.enabled ? (
+                      <div className="mt-4 space-y-3">
+                        <div>
+                          <label className={capLabel}>Duration</label>
+                          <Input
+                            id="co-schedule-duration"
+                            inputMode="numeric"
+                            value={schedule.duration}
+                            onChange={(e) => {
+                              setImpactErrors((p) => ({ ...p, scheduleDuration: undefined }))
+                              setSchedule((p) => ({ ...p, duration: e.target.value }))
+                            }}
+                            placeholder="Whole number, e.g. 5"
+                            className="bg-white"
+                          />
+                          {impactErrors.scheduleDuration ? (
+                            <p className="mt-1 text-xs text-destructive">{impactErrors.scheduleDuration}</p>
+                          ) : null}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className={capLabel}>Unit</label>
+                            <Select
+                              value={schedule.unit}
+                              onValueChange={(v) =>
+                                setSchedule((p) => ({
+                                  ...p,
+                                  unit: v === 'weeks' ? 'weeks' : 'days',
+                                  dayType: v === 'weeks' ? '' : p.dayType,
+                                }))
+                              }
+                            >
+                              <SelectTrigger className="w-full bg-white">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="days">Days</SelectItem>
+                                <SelectItem value="weeks">Weeks</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {schedule.unit === 'days' ? (
+                            <div>
+                              <label className={capLabel}>Day type</label>
+                              <Select
+                                value={schedule.dayType}
+                                onValueChange={(v) => {
+                                  setImpactErrors((p) => ({ ...p, scheduleDayType: undefined }))
+                                  setSchedule((p) => ({
+                                    ...p,
+                                    dayType: v === 'business' ? 'business' : v === 'calendar' ? 'calendar' : '',
+                                  }))
+                                }}
+                              >
+                                <SelectTrigger className="w-full bg-white" id="co-schedule-day-type">
+                                  <SelectValue placeholder="Select" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="calendar">Calendar</SelectItem>
+                                  <SelectItem value="business">Business</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              {impactErrors.scheduleDayType ? (
+                                <p className="mt-1 text-xs text-destructive">{impactErrors.scheduleDayType}</p>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
-                    </div>
-                  </div>
-                ))}
+                    ) : null}
+                  </CoImpactCardShell>
 
-                {normalizedCostItems.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-[#cbd5e1] bg-[#f8fafc] p-6 text-center text-sm text-[#64748b]">
-                    No items yet. Click <span className="font-semibold text-[#0f172a]">Add Item</span> to create your first line item.
-                  </div>
-                ) : null}
+                  <CoImpactCardShell
+                    accentBorder="border-t-[3px] border-t-slate-400"
+                    iconBg="bg-slate-100"
+                    iconClass="text-slate-700"
+                    icon={<Timer aria-hidden />}
+                    title="Original project duration"
+                    description="Baseline length before this change order. Used with schedule impact for revised duration."
+                    footer={
+                      <p className="text-[11px] font-medium leading-relaxed text-[#64748b]">
+                        {baselineComputed.valid ? (
+                          <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-800">
+                            Baseline · {derived.baselineDaysTotal} calendar day
+                            {derived.baselineDaysTotal === 1 ? '' : 's'}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-amber-900">
+                            Enter a numeric duration
+                            {baseline.unit === 'days' ? ' and day type' : ''}
+                          </span>
+                        )}
+                      </p>
+                    }
+                  >
+                    <div className="space-y-3">
+                      <div>
+                        <label className={capLabel}>Duration</label>
+                        <Input
+                          id="co-baseline-duration"
+                          inputMode="numeric"
+                          value={baseline.value}
+                          onChange={(e) => {
+                            setImpactErrors((p) => ({ ...p, baselineDuration: undefined }))
+                            setBaseline((p) => ({ ...p, value: e.target.value }))
+                          }}
+                          placeholder="Whole number, e.g. 240"
+                          className="bg-white"
+                        />
+                        {impactErrors.baselineDuration ? (
+                          <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDuration}</p>
+                        ) : null}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className={capLabel}>Unit</label>
+                          <Select
+                            value={baseline.unit}
+                            onValueChange={(v) =>
+                              setBaseline((p) => ({
+                                ...p,
+                                unit: v === 'weeks' ? 'weeks' : 'days',
+                                dayType: v === 'weeks' ? '' : p.dayType,
+                              }))
+                            }
+                          >
+                            <SelectTrigger className="w-full bg-white">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="days">Days</SelectItem>
+                              <SelectItem value="weeks">Weeks</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {baseline.unit === 'days' ? (
+                          <div>
+                            <label className={capLabel}>Day type</label>
+                            <Select
+                              value={baseline.dayType}
+                              onValueChange={(v) => {
+                                setImpactErrors((p) => ({ ...p, baselineDayType: undefined }))
+                                setBaseline((p) => ({
+                                  ...p,
+                                  dayType: v === 'business' ? 'business' : v === 'calendar' ? 'calendar' : '',
+                                }))
+                              }}
+                            >
+                              <SelectTrigger className="w-full bg-white" id="co-baseline-day-type">
+                                <SelectValue placeholder="Select" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="calendar">Calendar</SelectItem>
+                                <SelectItem value="business">Business</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {impactErrors.baselineDayType ? (
+                              <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDayType}</p>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </CoImpactCardShell>
+
+                  <CoImpactCardShell
+                    accentBorder="border-t-[3px] border-t-[#f97316]"
+                    iconBg="bg-orange-50"
+                    iconClass="text-[#c2410c]"
+                    icon={<CircleDollarSign aria-hidden />}
+                    title="Cost impact"
+                    description="Category amounts and optional markup. Credits show as totals in parentheses."
+                  >
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      {(
+                        [
+                          { value: 'increase', label: 'Increase' },
+                          { value: 'decrease', label: 'Decrease' },
+                          { value: 'none', label: 'No cost' },
+                        ] as const
+                      ).map((opt) => {
+                        const active = cost.type === opt.value
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() =>
+                              setCost((p) => ({
+                                ...p,
+                                type: opt.value,
+                                ...(opt.value === 'none'
+                                  ? {
+                                      labor: '',
+                                      materials: '',
+                                      equipment: '',
+                                      subcontractor: '',
+                                      other: '',
+                                      markupPercent: '',
+                                    }
+                                  : { justificationNote: '' }),
+                              }))
+                            }
+                            className={cn(
+                              'min-h-[2.75rem] rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition-colors sm:text-xs',
+                              active
+                                ? 'border-[#0f172a] bg-[#0f172a] text-white shadow-sm'
+                                : 'border-[#e2e8f0] bg-white text-[#334155] hover:bg-[#f8fafc]'
+                            )}
+                          >
+                            {opt.value === 'decrease' ? (
+                              <>
+                                Decrease
+                                <span className="mt-0.5 block text-[10px] font-normal opacity-90">(credit)</span>
+                              </>
+                            ) : (
+                              opt.label
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {cost.type === 'none' ? (
+                      <div className="mt-4">
+                        <label className={capLabel}>
+                          Justification <span className="text-destructive">*</span>
+                        </label>
+                        <Textarea
+                          id="co-cost-justification"
+                          value={cost.justificationNote}
+                          onChange={(e) => {
+                            setImpactErrors((p) => ({ ...p, costJustification: undefined }))
+                            setCost((p) => ({ ...p, justificationNote: e.target.value }))
+                          }}
+                          rows={4}
+                          className="resize-none bg-white"
+                          placeholder="Explain why there is no cost impact..."
+                        />
+                        {impactErrors.costJustification ? (
+                          <p className="mt-1 text-xs text-destructive">{impactErrors.costJustification}</p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="mt-4 space-y-4">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {(
+                            [
+                              { key: 'labor', label: 'Labor' },
+                              { key: 'materials', label: 'Materials' },
+                              { key: 'equipment', label: 'Equipment' },
+                              { key: 'subcontractor', label: 'Subcontractors' },
+                              { key: 'other', label: 'Other' },
+                            ] as const
+                          ).map((row, idx) => (
+                            <div key={row.key}>
+                              <label className={capLabel}>{row.label}</label>
+                              <div className="relative">
+                                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">
+                                  $
+                                </span>
+                                <Input
+                                  id={idx === 0 ? 'co-cost-labor' : undefined}
+                                  inputMode="decimal"
+                                  value={cost[row.key]}
+                                  onChange={(e) => {
+                                    setImpactErrors((p) => ({ ...p, costAtLeastOne: undefined }))
+                                    setCost((p) => ({ ...p, [row.key]: e.target.value } as any))
+                                  }}
+                                  className="bg-white pl-7 pr-14"
+                                  placeholder="0.00"
+                                />
+                                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#94a3b8]">
+                                  USD
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div>
+                          <label className={capLabel}>Markup % (optional)</label>
+                          <Input
+                            inputMode="decimal"
+                            value={cost.markupPercent}
+                            onChange={(e) => setCost((p) => ({ ...p, markupPercent: e.target.value }))}
+                            placeholder="e.g. 10"
+                            className="bg-white"
+                          />
+                        </div>
+
+                        {impactErrors.costAtLeastOne ? (
+                          <p className="text-xs text-destructive">{impactErrors.costAtLeastOne}</p>
+                        ) : null}
+
+                        <div className="rounded-xl border border-[#e2e8f0] bg-[#fafafa] px-4 py-3.5">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">
+                              Subtotal
+                            </p>
+                            <p className="font-mono text-sm font-bold tabular-nums text-[#0f172a]">
+                              ${formatUsd(derived.costSubtotal)}
+                            </p>
+                          </div>
+                          <div className="mt-2 flex items-baseline justify-between gap-3 border-t border-[#e2e8f0] pt-2">
+                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">
+                              Total impact
+                            </p>
+                            <p className="font-mono text-base font-bold tabular-nums text-[#f97316]">
+                              {formatSignedUsd(derived.costTotal, cost.type)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </CoImpactCardShell>
+                </div>
               </div>
 
-              <div className="mt-4 rounded-lg bg-[#f1f5f9] px-4 py-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-[#0f172a]">Total Cost</p>
-                  <p className="text-lg font-bold text-[#f97316]">
-                    {costBreakdownTotal ? `$${formatUsd(costBreakdownTotal)}` : '$0'}
-                  </p>
+              <div className="mt-10 rounded-2xl border border-[#e2e8f0] bg-gradient-to-b from-[#f8fafc] to-[#f1f5f9]/80 p-6">
+                <p className={capLabel}>Contract & duration snapshot</p>
+                <p className="mt-1 text-sm leading-relaxed text-[#64748b]">
+                  Read-only totals derived from contract amount and impacts above — useful for PDFs and reviewers.
+                </p>
+                <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-sm">
+                    <label className={capLabel}>Original contract amount</label>
+                    <div className="relative mt-2">
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">
+                        $
+                      </span>
+                      <Input
+                        value={formData.originalContractAmount}
+                        onChange={(e) =>
+                          setFormData((p) => ({ ...p, originalContractAmount: e.target.value }))
+                        }
+                        className="pl-7 pr-14"
+                        placeholder="0.00"
+                        inputMode="decimal"
+                      />
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#94a3b8]">
+                        USD
+                      </span>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-sm">
+                    <label className={capLabel}>Revised contract amount</label>
+                    <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-[#e2e8f0] bg-[#fafafa] px-3 font-mono text-sm font-semibold tabular-nums text-[#0f172a]">
+                      {derived.revisedContractAmount === null ? '—' : `$${formatUsd(derived.revisedContractAmount)}`}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-sm">
+                    <label className={capLabel}>Original duration (normalized)</label>
+                    <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-[#e2e8f0] bg-[#fafafa] px-3 text-sm font-medium tabular-nums text-[#334155]">
+                      {derived.baselineDaysTotal ? `${derived.baselineDaysTotal} calendar days` : '—'}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-sm">
+                    <label className={capLabel}>Revised duration (normalized)</label>
+                    <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-[#e2e8f0] bg-[#fafafa] px-3 text-sm font-medium tabular-nums text-[#334155]">
+                      {derived.revisedDaysTotal === null ? '—' : `${derived.revisedDaysTotal} calendar days`}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -871,9 +1237,7 @@ function NewChangeOrderContent() {
                 <div className="border-t border-slate-100 pt-4">
                   <p className="text-xs text-muted-foreground">Cost Impact</p>
                   <p className="text-2xl font-bold tracking-tight" style={{ color: NAVY }}>
-                    {formData.costImpact.trim()
-                      ? `$${formatUsd(parseMoneyInput(formData.costImpact))}`
-                      : '—'}
+                    {cost.type === 'none' ? '—' : formatSignedUsd(derived.costTotal, cost.type)}
                   </p>
                 </div>
 
