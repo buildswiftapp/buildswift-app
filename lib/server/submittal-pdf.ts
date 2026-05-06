@@ -315,11 +315,25 @@ export async function generateSubmittalPdfBuffer(
     signatureUrl: r.signatureUrl || null,
   }))
 
-  const reviewerOnlyRows = approvalRows.filter((r) => (r.role || '').toLowerCase().includes('reviewer'))
-  const reviewerActivityRow = pickSubmittalReviewerActivityRow(reviewerOnlyRows)
+  function isReviewActivityRole(role: string | null | undefined): boolean {
+    const t = (role ?? '').trim().toLowerCase()
+    if (!t) return true
+    // Exclude obvious non-review activity rows.
+    if (t.includes('contractor') || t.includes('submitter')) return false
+    return true
+  }
+
+  const reviewActivityRows = approvalRows.filter((r) => isReviewActivityRole(r.role))
+  const reviewerActivityRow = pickSubmittalReviewerActivityRow(reviewActivityRows)
 
   const fromDisplay = input.from?.trim() || input.contactAddress?.trim() || NOT_PROVIDED
-  const toDisplay = input.to?.trim() || NOT_PROVIDED
+  const toDisplay = (() => {
+    const explicit = input.to?.trim() || ''
+    if (!isBlankSubmittalReviewDisplay(explicit) && explicit !== NOT_PROVIDED) return explicit
+    const inferred = (reviewerActivityRow?.name ?? '').trim()
+    if (!isBlankSubmittalReviewDisplay(inferred) && inferred !== NOT_PROVIDED) return inferred
+    return NOT_PROVIDED
+  })()
 
   /** Full workflow log on PDF (submitters + reviewers) per product spec */
   const ensuredApprovalRows = approvalRows
@@ -331,7 +345,7 @@ export async function generateSubmittalPdfBuffer(
       .reverse()
       .find(
         (r) =>
-          (r.role || '').toLowerCase().includes('reviewer') &&
+          isReviewActivityRole(r.role) &&
           ((r.signatureUrl || '').trim().length > 0 || !!(r.signatureName || '').trim().length),
       )
     if (reviewerMatch) {

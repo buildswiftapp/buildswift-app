@@ -626,7 +626,7 @@ function NewChangeOrderContent() {
               <div className="mt-8">
                 <p className={capLabel}>Impacts</p>
                 <p className="mt-1 text-sm text-[#64748b]">Three independent blocks — validate and save separately.</p>
-                <div className="mt-5 grid gap-5 lg:grid-cols-3 lg:items-stretch">
+                <div className="mt-5 grid grid-cols-1 gap-5">
                   <CoImpactCardShell
                     accentBorder="border-t-[3px] border-t-sky-500"
                     iconBg="bg-sky-50"

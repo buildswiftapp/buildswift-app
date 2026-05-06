@@ -1,7 +1,17 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Building2, Palette, RotateCcw, RotateCw, User, ZoomIn, ZoomOut } from 'lucide-react'
+import {
+  Bell,
+  Building2,
+  Camera,
+  Palette,
+  RotateCcw,
+  RotateCw,
+  Save,
+  Shield,
+  User,
+} from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { parseBrandingPrimaryColor } from '@/lib/branding-utils'
 import { createSupabaseBrowserClient } from '@/lib/supabase/client'
@@ -18,6 +28,7 @@ import {
 } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 
 type BrandingPayload = {
@@ -72,7 +83,7 @@ async function authHeaders(): Promise<HeadersInit> {
 }
 
 export default function SettingsPage() {
-  const [subscriptionTier, setSubscriptionTier] = useState<string>('free')
+  const [settingsTab, setSettingsTab] = useState('profile')
   const [profileForm, setProfileForm] = useState({
     full_name: '',
     email: '',
@@ -80,6 +91,7 @@ export default function SettingsPage() {
     role: '',
   })
   const [profileLoading, setProfileLoading] = useState(false)
+  const [profileSaving, setProfileSaving] = useState(false)
 
   const [companyLoading, setCompanyLoading] = useState(false)
   const [companySaving, setCompanySaving] = useState(false)
@@ -331,6 +343,7 @@ export default function SettingsPage() {
 
   const handleSaveProfile = async () => {
     try {
+      setProfileSaving(true)
       await apiFetch('/api/settings/profile', {
         method: 'PUT',
         json: {
@@ -342,8 +355,52 @@ export default function SettingsPage() {
       toast.success('Profile updated successfully')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to update profile')
+    } finally {
+      setProfileSaving(false)
     }
   }
+
+  const handleHeaderSave = async () => {
+    switch (settingsTab) {
+      case 'profile':
+        await handleSaveProfile()
+        break
+      case 'company':
+        await handleSaveCompany()
+        break
+      case 'appearance':
+        await handleSaveBranding()
+        break
+      case 'notifications':
+      case 'security':
+        toast.message('Coming soon', {
+          description: 'This section is not available yet.',
+        })
+        break
+      default:
+        break
+    }
+  }
+
+  const headerSaveDisabled =
+    settingsTab === 'notifications' || settingsTab === 'security'
+      ? true
+      : settingsTab === 'profile'
+        ? profileLoading || profileSaving
+        : settingsTab === 'company'
+          ? companyLoading || companySaving
+          : settingsTab === 'appearance'
+            ? brandingLoading || brandingSaving
+            : false
+
+  const headerSavePending =
+    settingsTab === 'profile'
+      ? profileSaving
+      : settingsTab === 'company'
+        ? companySaving
+        : settingsTab === 'appearance'
+          ? brandingSaving
+          : false
 
   const handleSaveCompany = async () => {
     try {
@@ -509,127 +566,185 @@ export default function SettingsPage() {
 
   return (
     <div className="app-page">
-      <div className="mx-auto max-w-4xl space-y-6">
-        <div>
-          <h1 className="app-section-title">Settings</h1>
-          <p className="app-section-subtitle">Profile, company, and branding preferences.</p>
+      <div className="mx-auto max-w-5xl space-y-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="app-section-title">Settings</h1>
+            <p className="app-section-subtitle">Manage your account settings and preferences</p>
+          </div>
+          <Button
+            type="button"
+            className="h-11 shrink-0 gap-2 rounded-lg bg-[#0f172a] px-5 text-white hover:bg-[#1e293b] dark:bg-[#0f172a] dark:hover:bg-[#1e293b]"
+            disabled={headerSaveDisabled}
+            onClick={() => void handleHeaderSave()}
+          >
+            <Save className="h-4 w-4" aria-hidden />
+            {headerSavePending ? 'Saving…' : 'Save Changes'}
+          </Button>
         </div>
-          <Tabs defaultValue="profile" className="space-y-6">
-            <TabsList>
-              <TabsTrigger value="profile" className="gap-2">
-                <User className="h-4 w-4" />
-                Profile
-              </TabsTrigger>
-              <TabsTrigger value="company" className="gap-2">
-                <Building2 className="h-4 w-4" />
-                Company
-              </TabsTrigger>
-              <TabsTrigger value="branding" className="gap-2">
-                <Palette className="h-4 w-4" />
-                Branding
-              </TabsTrigger>
-            </TabsList>
 
-            <TabsContent value="profile">
-              <Card className="app-surface">
-                <CardHeader>
-                  <CardTitle>Profile Settings</CardTitle>
-                  <CardDescription>Manage your personal information</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="mb-6 flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-sm font-semibold text-foreground">
+        <Tabs value={settingsTab} onValueChange={setSettingsTab} className="space-y-6">
+          <TabsList className="flex h-auto w-full flex-wrap items-stretch justify-start gap-2 rounded-xl border border-border bg-[#f4f6f8] p-1.5 dark:bg-muted/40">
+            <TabsTrigger
+              value="profile"
+              className="gap-2 rounded-lg border border-transparent px-4 py-2.5 text-sm font-semibold shadow-none data-[state=active]:border-border data-[state=active]:bg-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-background"
+            >
+              <User className="h-4 w-4 shrink-0" />
+              Profile
+            </TabsTrigger>
+            <TabsTrigger
+              value="company"
+              className="gap-2 rounded-lg border border-transparent px-4 py-2.5 text-sm font-semibold shadow-none data-[state=active]:border-border data-[state=active]:bg-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-background"
+            >
+              <Building2 className="h-4 w-4 shrink-0" />
+              Company
+            </TabsTrigger>
+            <TabsTrigger
+              value="notifications"
+              className="gap-2 rounded-lg border border-transparent px-4 py-2.5 text-sm font-semibold shadow-none data-[state=active]:border-border data-[state=active]:bg-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-background"
+            >
+              <Bell className="h-4 w-4 shrink-0" />
+              Notifications
+            </TabsTrigger>
+            <TabsTrigger
+              value="security"
+              className="gap-2 rounded-lg border border-transparent px-4 py-2.5 text-sm font-semibold shadow-none data-[state=active]:border-border data-[state=active]:bg-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-background"
+            >
+              <Shield className="h-4 w-4 shrink-0" />
+              Security
+            </TabsTrigger>
+            <TabsTrigger
+              value="appearance"
+              className="gap-2 rounded-lg border border-transparent px-4 py-2.5 text-sm font-semibold shadow-none data-[state=active]:border-border data-[state=active]:bg-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-background"
+            >
+              <Palette className="h-4 w-4 shrink-0" />
+              Appearance
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="profile" className="mt-6">
+            <Card className="app-surface border-border shadow-sm">
+              <CardHeader className="space-y-1 pb-4">
+                <CardTitle className="text-xl font-semibold text-foreground">Profile Information</CardTitle>
+                <CardDescription>Update your personal details</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="mb-8 flex flex-col gap-6 sm:flex-row sm:items-center">
+                  <div className="relative shrink-0">
+                    <div className="flex h-24 w-24 items-center justify-center rounded-full bg-muted text-2xl font-semibold text-muted-foreground ring-4 ring-background">
                       {(profileForm.full_name || profileForm.email || 'U')
                         .trim()
                         .slice(0, 1)
                         .toUpperCase()}
                     </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-foreground">
-                        {profileForm.full_name || '—'}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">{profileForm.email || '—'}</p>
-                      {profileForm.role ? (
-                        <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          {profileForm.role}
-                        </p>
-                      ) : null}
-                    </div>
+                    <button
+                      type="button"
+                      aria-label="Change profile photo"
+                      className="absolute -bottom-0.5 -right-0.5 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-[#2563eb] text-white shadow-md transition hover:bg-[#1d4ed8]"
+                      onClick={() =>
+                        toast.message('Coming soon', {
+                          description: 'Profile photo upload is not available yet.',
+                        })
+                      }
+                    >
+                      <Camera className="h-3.5 w-3.5" aria-hidden />
+                    </button>
                   </div>
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault()
-                      handleSaveProfile()
-                    }}
-                  >
-                    <FieldGroup>
-                      <Field>
-                        <FieldLabel htmlFor="profile-name">Full Name</FieldLabel>
-                        <Input
-                          id="profile-name"
-                          value={profileForm.full_name}
-                          onChange={(e) => setProfileForm({ ...profileForm, full_name: e.target.value })}
-                          disabled={profileLoading}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="profile-email">Email Address</FieldLabel>
-                        <Input
-                          id="profile-email"
-                          type="email"
-                          value={profileForm.email}
-                          onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
-                          disabled={profileLoading}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="profile-company">Company</FieldLabel>
-                        <Input
-                          id="profile-company"
-                          value={profileForm.company_name}
-                          onChange={(e) => setProfileForm({ ...profileForm, company_name: e.target.value })}
-                          disabled={profileLoading}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="profile-role">Role</FieldLabel>
-                        <Input id="profile-role" value={profileForm.role} disabled />
-                      </Field>
-                    </FieldGroup>
-                    <div className="mt-6">
-                      <Button type="submit">Save Changes</Button>
-                    </div>
-                  </form>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="company">
-              <Card className="app-surface">
-                <CardHeader>
-                  <CardTitle>Company Settings</CardTitle>
-                  <CardDescription>Manage your company information</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="mb-6 flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted text-foreground">
-                      <Building2 className="h-6 w-6" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-foreground">{companyForm.name || '—'}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {companyForm.industry || 'Organization details'}
-                      </p>
-                    </div>
+                  <div className="min-w-0 space-y-1.5">
+                    <p className="text-lg font-bold tracking-tight text-foreground">
+                      {profileForm.full_name || '—'}
+                    </p>
+                    <p className="text-sm text-muted-foreground">{profileForm.email || '—'}</p>
+                    {profileForm.role ? (
+                      <Badge
+                        variant="secondary"
+                        className="mt-1 border-sky-200/80 bg-sky-50 font-semibold capitalize text-sky-900 hover:bg-sky-50 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-100"
+                      >
+                        {profileForm.role}
+                      </Badge>
+                    ) : null}
                   </div>
+                </div>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    void handleSaveProfile()
+                  }}
+                >
+                  <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                    <Field>
+                      <FieldLabel htmlFor="profile-name">Full Name</FieldLabel>
+                      <Input
+                        id="profile-name"
+                        value={profileForm.full_name}
+                        onChange={(e) => setProfileForm({ ...profileForm, full_name: e.target.value })}
+                        disabled={profileLoading}
+                        className="bg-background"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="profile-email">Email Address</FieldLabel>
+                      <Input
+                        id="profile-email"
+                        type="email"
+                        value={profileForm.email}
+                        onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
+                        disabled={profileLoading}
+                        className="bg-background"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="profile-company">Company</FieldLabel>
+                      <Input
+                        id="profile-company"
+                        value={profileForm.company_name}
+                        onChange={(e) => setProfileForm({ ...profileForm, company_name: e.target.value })}
+                        disabled={profileLoading}
+                        className="bg-background"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="profile-role">Role</FieldLabel>
+                      <Input
+                        id="profile-role"
+                        value={profileForm.role}
+                        disabled
+                        className="bg-muted/80 text-muted-foreground"
+                      />
+                    </Field>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault()
-                      void handleSaveCompany()
-                    }}
-                  >
-                    <FieldGroup>
+          <TabsContent value="company" className="mt-6">
+            <Card className="app-surface border-border shadow-sm">
+              <CardHeader className="space-y-1 pb-4">
+                <CardTitle className="text-xl font-semibold text-foreground">Company information</CardTitle>
+                <CardDescription>Update your organization details</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="mb-8 flex items-center gap-4">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-muted text-foreground">
+                    <Building2 className="h-7 w-7" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-base font-semibold text-foreground">{companyForm.name || '—'}</p>
+                    <p className="truncate text-sm text-muted-foreground">
+                      {companyForm.industry || 'Organization details'}
+                    </p>
+                  </div>
+                </div>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    void handleSaveCompany()
+                  }}
+                >
+                  <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                    <div className="md:col-span-2">
                       <Field>
                         <FieldLabel htmlFor="company-name">Company Name</FieldLabel>
                         <Input
@@ -637,66 +752,94 @@ export default function SettingsPage() {
                           value={companyForm.name}
                           onChange={(e) => setCompanyForm((p) => ({ ...p, name: e.target.value }))}
                           disabled={companyLoading || companySaving}
+                          className="bg-background"
                         />
                       </Field>
-                      <Field>
-                        <FieldLabel htmlFor="company-industry">Industry</FieldLabel>
-                        <Input
-                          id="company-industry"
-                          value={companyForm.industry}
-                          onChange={(e) => setCompanyForm((p) => ({ ...p, industry: e.target.value }))}
-                          disabled={companyLoading || companySaving}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="company-website">Website</FieldLabel>
-                        <Input
-                          id="company-website"
-                          value={companyForm.website}
-                          onChange={(e) => setCompanyForm((p) => ({ ...p, website: e.target.value }))}
-                          disabled={companyLoading || companySaving}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="company-phone">Phone</FieldLabel>
-                        <Input
-                          id="company-phone"
-                          value={companyForm.phone}
-                          onChange={(e) => setCompanyForm((p) => ({ ...p, phone: e.target.value }))}
-                          disabled={companyLoading || companySaving}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="company-address">Address</FieldLabel>
-                        <Input
-                          id="company-address"
-                          value={companyForm.address}
-                          onChange={(e) => setCompanyForm((p) => ({ ...p, address: e.target.value }))}
-                          disabled={companyLoading || companySaving}
-                        />
-                      </Field>
-                    </FieldGroup>
-
-                    <div className="mt-6">
-                      <Button type="submit" disabled={companyLoading || companySaving}>
-                        {companySaving ? 'Saving...' : 'Save Changes'}
-                      </Button>
                     </div>
-                  </form>
-                </CardContent>
-              </Card>
-            </TabsContent>
+                    <Field>
+                      <FieldLabel htmlFor="company-industry">Industry</FieldLabel>
+                      <Input
+                        id="company-industry"
+                        value={companyForm.industry}
+                        onChange={(e) => setCompanyForm((p) => ({ ...p, industry: e.target.value }))}
+                        disabled={companyLoading || companySaving}
+                        className="bg-background"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="company-website">Website</FieldLabel>
+                      <Input
+                        id="company-website"
+                        value={companyForm.website}
+                        onChange={(e) => setCompanyForm((p) => ({ ...p, website: e.target.value }))}
+                        disabled={companyLoading || companySaving}
+                        className="bg-background"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="company-phone">Phone</FieldLabel>
+                      <Input
+                        id="company-phone"
+                        value={companyForm.phone}
+                        onChange={(e) => setCompanyForm((p) => ({ ...p, phone: e.target.value }))}
+                        disabled={companyLoading || companySaving}
+                        className="bg-background"
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="company-address">Address</FieldLabel>
+                      <Input
+                        id="company-address"
+                        value={companyForm.address}
+                        onChange={(e) => setCompanyForm((p) => ({ ...p, address: e.target.value }))}
+                        disabled={companyLoading || companySaving}
+                        className="bg-background"
+                      />
+                    </Field>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-            <TabsContent value="branding">
-              <Card className="app-surface">
-                <CardHeader>
-                  <CardTitle>Branding</CardTitle>
-                  <CardDescription>
-                    Company name, primary color, and logo are used on exported document PDFs. Upload an image, then
-                    zoom, position, and crop it for PDF branding. PNG, JPEG, or WebP; max 2MB.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-8">
+          <TabsContent value="notifications" className="mt-6">
+            <Card className="app-surface border-border shadow-sm">
+              <CardHeader className="space-y-1 pb-2">
+                <CardTitle className="text-xl font-semibold text-foreground">Notifications</CardTitle>
+                <CardDescription>Choose how you want to be notified about project activity</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  Notification preferences will be available in a future update.
+                </p>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="security" className="mt-6">
+            <Card className="app-surface border-border shadow-sm">
+              <CardHeader className="space-y-1 pb-2">
+                <CardTitle className="text-xl font-semibold text-foreground">Security</CardTitle>
+                <CardDescription>Manage password and account security</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  Security settings will be available in a future update.
+                </p>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="appearance" className="mt-6">
+            <Card className="app-surface border-border shadow-sm">
+              <CardHeader className="space-y-1 pb-4">
+                <CardTitle className="text-xl font-semibold text-foreground">Appearance &amp; PDF branding</CardTitle>
+                <CardDescription>
+                  Company name, primary color, and logo appear on exported PDFs. Upload an image, then zoom, position,
+                  and crop. PNG, JPEG, or WebP; max 2MB.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-8">
                   {brandingLoading ? (
                     <p className="text-sm text-muted-foreground">Loading branding…</p>
                   ) : (
@@ -780,11 +923,8 @@ export default function SettingsPage() {
                       </FieldGroup>
 
                       <div className="flex flex-wrap gap-2">
-                        <Button type="button" onClick={() => void handleSaveBranding()} disabled={brandingSaving}>
-                          {brandingSaving ? 'Saving…' : 'Save branding'}
-                        </Button>
                         <Button type="button" variant="outline" onClick={() => void loadBranding()}>
-                          Reload
+                          Reload from server
                         </Button>
                       </div>
                     </>

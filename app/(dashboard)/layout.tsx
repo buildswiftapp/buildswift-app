@@ -48,16 +48,14 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="app-shell flex h-screen flex-col">
-      <AppHeader
-        sidebarCollapsed={sidebarCollapsed}
+    <div className="app-shell flex h-screen overflow-hidden">
+      <AppSidebarWithProjects
+        collapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed((prev) => !prev)}
       />
-      <div className="flex flex-1 overflow-hidden">
-        <AppSidebarWithProjects collapsed={sidebarCollapsed} />
-        <main className="flex-1 overflow-auto bg-background">
-          {children}
-        </main>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+        <AppHeader />
+        <main className="min-h-0 flex-1 overflow-auto">{children}</main>
       </div>
       <Toaster position="top-right" />
     </div>

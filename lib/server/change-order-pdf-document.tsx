@@ -6,6 +6,10 @@ export type ChangeOrderApprovalPdfRow = {
   name: string
   role: string
   action: string
+  /** Resolved image URL (often a data URI) when the reviewer drew/uploaded a signature */
+  signatureUrl?: string | null
+  /** Typed / printed signer name fallback when no image */
+  signatureName?: string | null
   date: string
   notes: string
 }
@@ -82,6 +86,8 @@ export type ChangeOrderPdfViewModel = {
   attachments: ChangeOrderAttachmentRow[]
 
   finalAuthorizationStatus: string
+  /** Latest decided reviewer full name when available (else single assignee, else em dash). */
+  reviewedByDisplay: string
   approvalRows: ChangeOrderApprovalPdfRow[]
 }
 
@@ -137,6 +143,47 @@ function priorityStyle(raw: string): { color: string } {
   if (u === 'HIGH' || /\bhigh\b/i.test(t) || /\burgent\b/i.test(t)) return { color: '#dc2626' }
   if (u === 'LOW' || /\blow\b/i.test(t)) return { color: '#16a34a' }
   return { color: TEXT_DARK }
+}
+
+/** Compact reviewer signature slot inside the APPROVAL / RESPONSE LOG grid */
+function CoApprovalLogSignatureCell({
+  signatureUrl,
+  signatureName,
+}: {
+  signatureUrl?: string | null
+  signatureName?: string | null
+}) {
+  const url = (signatureUrl || '').trim()
+  const name = (signatureName || '').trim()
+  return (
+    <View
+      style={{
+        width: '22%',
+        paddingHorizontal: 6,
+        paddingVertical: 5,
+        borderRightWidth: 1,
+        borderRightColor: PURPLE_BORDER,
+        justifyContent: 'center',
+      }}
+    >
+      {url ? (
+        <Image src={url} style={{ width: 64, height: 18, objectFit: 'contain' }} />
+      ) : name ? (
+        <Text
+          style={{
+            fontSize: BASE_FONT - 0.55,
+            fontFamily: 'Helvetica-Oblique',
+            color: TEXT_DARK,
+            lineHeight: BODY_LINE_HEIGHT,
+          }}
+        >
+          {clampText(name, 26)}
+        </Text>
+      ) : (
+        <View style={{ borderBottomWidth: 0.75, borderBottomColor: BORDER, marginTop: 9, opacity: 0.88 }} />
+      )}
+    </View>
+  )
 }
 
 function clampText(value: string, maxChars: number) {
@@ -391,6 +438,11 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
     data.attachments.length > MAX_ATTACHMENTS_ROWS
       ? data.attachments.slice(0, MAX_ATTACHMENTS_ROWS)
       : data.attachments
+
+  const hasAttachments = data.attachments.some((a) => {
+    const name = (a?.fileName ?? '').trim()
+    return Boolean(name) && name !== 'N/A' && name !== '—' && name !== 'Not Provided'
+  })
 
   const descPlainClamped = clampText(stripHtmlToPlainParagraphs(data.detailedDescription), MAX_DESCRIPTION_CHARS)
 
@@ -651,9 +703,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
           </Card>
 
           <Card title="CHANGE DESCRIPTION">
-            <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 4 }}>
-              DETAILED DESCRIPTION
-            </Text>
             <Text style={{ fontSize: BASE_FONT, lineHeight: DESC_LINE_HEIGHT }}>{descPlainClamped}</Text>
           </Card>
 
@@ -692,61 +741,63 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
             </View>
           </Card>
 
-          <Card title="ATTACHMENTS">
-            <View style={{ borderWidth: 1, borderColor: PURPLE_BORDER, borderRadius: 7, overflow: 'hidden' }}>
-              <View style={{ flexDirection: 'row', backgroundColor: TABLE_HEAD, borderBottomWidth: 1, borderBottomColor: PURPLE_BORDER }}>
-                {(['FILE NAME', 'FILE TYPE'] as const).map((h, idx) => (
-                  <Text
-                    key={h}
-                    style={{
-                      width: idx === 0 ? '68%' : '32%',
-                      fontSize: LABEL_FONT,
-                      fontWeight: 700,
-                      paddingHorizontal: 8,
-                      paddingVertical: 6,
-                      textTransform: 'uppercase',
-                      color: PURPLE_DARK,
-                      borderRightWidth: idx === 1 ? 0 : 1,
-                      borderRightColor: BORDER,
-                    }}
+          {hasAttachments ? (
+            <Card title="ATTACHMENTS">
+              <View style={{ borderWidth: 1, borderColor: PURPLE_BORDER, borderRadius: 7, overflow: 'hidden' }}>
+                <View style={{ flexDirection: 'row', backgroundColor: TABLE_HEAD, borderBottomWidth: 1, borderBottomColor: PURPLE_BORDER }}>
+                  {(['FILE NAME', 'FILE TYPE'] as const).map((h, idx) => (
+                    <Text
+                      key={h}
+                      style={{
+                        width: idx === 0 ? '68%' : '32%',
+                        fontSize: LABEL_FONT,
+                        fontWeight: 700,
+                        paddingHorizontal: 8,
+                        paddingVertical: 6,
+                        textTransform: 'uppercase',
+                        color: PURPLE_DARK,
+                        borderRightWidth: idx === 1 ? 0 : 1,
+                        borderRightColor: BORDER,
+                      }}
+                    >
+                      {h}
+                    </Text>
+                  ))}
+                </View>
+                {attachmentRowsTruncated.map((row, ri) => (
+                  <View
+                    key={`att-${ri}`}
+                    style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: PURPLE_BORDER, backgroundColor: '#ffffff' }}
                   >
-                    {h}
-                  </Text>
+                    <Text
+                      style={{
+                        width: '68%',
+                        fontSize: BASE_FONT - 0.5,
+                        paddingHorizontal: 7,
+                        paddingVertical: 6,
+                        borderRightWidth: 1,
+                        borderRightColor: BORDER,
+                        lineHeight: BODY_LINE_HEIGHT,
+                      }}
+                    >
+                      {clampText(row.fileName, 44)}
+                    </Text>
+                    <Text
+                      style={{
+                        width: '32%',
+                        fontSize: BASE_FONT - 0.5,
+                        paddingHorizontal: 7,
+                        paddingVertical: 6,
+                        lineHeight: BODY_LINE_HEIGHT,
+                      }}
+                    >
+                      {row.fileType}
+                    </Text>
+                  </View>
                 ))}
               </View>
-              {attachmentRowsTruncated.map((row, ri) => (
-                <View
-                  key={`att-${ri}`}
-                  style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: PURPLE_BORDER, backgroundColor: '#ffffff' }}
-                >
-                  <Text
-                    style={{
-                      width: '68%',
-                      fontSize: BASE_FONT - 0.5,
-                      paddingHorizontal: 7,
-                      paddingVertical: 6,
-                      borderRightWidth: 1,
-                      borderRightColor: BORDER,
-                      lineHeight: BODY_LINE_HEIGHT,
-                    }}
-                  >
-                    {clampText(row.fileName, 44)}
-                  </Text>
-                  <Text
-                    style={{
-                      width: '32%',
-                      fontSize: BASE_FONT - 0.5,
-                      paddingHorizontal: 7,
-                      paddingVertical: 6,
-                      lineHeight: BODY_LINE_HEIGHT,
-                    }}
-                  >
-                    {row.fileType}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </Card>
+            </Card>
+          ) : null}
 
           <Card title="APPROVAL / AUTHORIZATION">
             <View style={{ borderWidth: 1, borderColor: PURPLE_BORDER, borderRadius: 7, overflow: 'hidden', backgroundColor: '#ffffff' }}>
@@ -761,7 +812,7 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
                   <Text style={{ fontSize: LABEL_FONT, color: PURPLE_LABEL, textTransform: 'uppercase', fontWeight: 800, marginBottom: 4 }}>
                     REVIEWED BY
                   </Text>
-                  <Text style={{ fontSize: BASE_FONT + 0.2, fontWeight: 700, color: TEXT_DARK }}>—</Text>
+                  <Text style={{ fontSize: BASE_FONT + 0.2, fontWeight: 700, color: TEXT_DARK }}>{clampText(data.reviewedByDisplay, 72)}</Text>
                 </View>
               </View>
 
@@ -775,18 +826,24 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
 
               <View style={{ borderTopWidth: 1, borderTopColor: BORDER }}>
                 <View style={{ flexDirection: 'row', backgroundColor: TABLE_HEAD }}>
-                  {['Name', 'Role', 'Action', 'Date', 'Notes'].map((h, idx) => (
+                  {([
+                    { h: 'Name', w: '20%' },
+                    { h: 'Role', w: '16%' },
+                    { h: 'Action', w: '24%' },
+                    { h: 'Signature', w: '22%' },
+                    { h: 'Date', w: '18%' },
+                  ] as const).map(({ h, w }, idx, arr) => (
                     <Text
                       key={h}
                       style={{
-                        width: idx === 0 ? '22%' : idx === 1 ? '16%' : idx === 2 ? '18%' : idx === 3 ? '14%' : '30%',
+                        width: w,
                         fontSize: LABEL_FONT - 0.12,
                         fontWeight: 700,
                         paddingHorizontal: 6,
                         paddingVertical: 5,
                         textTransform: 'uppercase',
                         color: PURPLE_DARK,
-                        borderRightWidth: idx === 4 ? 0 : 1,
+                        borderRightWidth: idx === arr.length - 1 ? 0 : 1,
                         borderRightColor: BORDER,
                       }}
                     >
@@ -802,11 +859,12 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
                       borderTopWidth: 1,
                       borderTopColor: PURPLE_BORDER,
                       backgroundColor: '#ffffff',
+                      alignItems: 'stretch',
                     }}
                   >
                     <Text
                       style={{
-                        width: '22%',
+                        width: '20%',
                         fontSize: BASE_FONT - 0.5,
                         paddingHorizontal: 6,
                         paddingVertical: 5,
@@ -815,7 +873,7 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
                         lineHeight: BODY_LINE_HEIGHT,
                       }}
                     >
-                      {clampText(r.name, 28)}
+                      {clampText(r.name, 26)}
                     </Text>
                     <Text
                       style={{
@@ -828,11 +886,11 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
                         lineHeight: BODY_LINE_HEIGHT,
                       }}
                     >
-                      {clampText(r.role, 22)}
+                      {clampText(r.role, 20)}
                     </Text>
                     <Text
                       style={{
-                        width: '18%',
+                        width: '24%',
                         fontSize: BASE_FONT - 0.5,
                         paddingHorizontal: 6,
                         paddingVertical: 5,
@@ -843,21 +901,17 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
                     >
                       {r.action}
                     </Text>
+                    <CoApprovalLogSignatureCell signatureUrl={r.signatureUrl} signatureName={r.signatureName} />
                     <Text
                       style={{
-                        width: '14%',
+                        width: '18%',
                         fontSize: BASE_FONT - 0.5,
                         paddingHorizontal: 6,
                         paddingVertical: 5,
-                        borderRightWidth: 1,
-                        borderRightColor: PURPLE_BORDER,
                         lineHeight: BODY_LINE_HEIGHT,
                       }}
                     >
-                      {clampText(r.date, 18)}
-                    </Text>
-                    <Text style={{ width: '30%', fontSize: BASE_FONT - 0.5, paddingHorizontal: 6, paddingVertical: 5, lineHeight: BODY_LINE_HEIGHT }}>
-                      {clampText(r.notes, 52)}
+                      {clampText(r.date, 16)}
                     </Text>
                   </View>
                 ))}

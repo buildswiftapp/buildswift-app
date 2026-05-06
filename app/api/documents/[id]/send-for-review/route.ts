@@ -603,6 +603,7 @@ export async function POST(req: Request, { params }: Params) {
         review_cycle_id: cycle.id,
         reviewer_email: reviewer.email.toLowerCase(),
         full_name: reviewer.full_name,
+        reviewer_role: (reviewer as any).role ?? null,
         secure_token_hash: hashToken(token),
         token_expires_at: new Date(reviewLinkExpiresAtMs(expiresInDays)).toISOString(),
         email_status: 'sent',
@@ -615,11 +616,12 @@ export async function POST(req: Request, { params }: Params) {
       review_cycle_id: row.review_cycle_id,
       reviewer_email: row.reviewer_email,
       ...(row.full_name ? { full_name: row.full_name } : {}),
+      ...(row.reviewer_role ? { reviewer_role: row.reviewer_role } : {}),
       secure_token_hash: row.secure_token_hash,
       token_expires_at: row.token_expires_at,
       email_status: row.email_status,
     }))
-    let { error: requestError } = await privilegedDb.from('review_requests').insert(requestInsertRows)
+    let { error: requestError } = await privilegedDb.from('review_requests').insert(requestInsertRows as any)
     if (requestError?.message?.toLowerCase().includes('row-level security')) {
       const admin = createSupabaseAdminClient()
       if (admin) {

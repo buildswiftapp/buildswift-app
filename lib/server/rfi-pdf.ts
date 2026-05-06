@@ -118,9 +118,9 @@ function isBlankRfiResponseField(v: string | null | undefined): boolean {
 
 function pickSourceApprovalRowForResponse(rows: RfiApprovalRow[]): RfiApprovalRow | null {
   if (!rows.length) return null
+  // Response box should reflect an actual reviewer response, not "pending review".
   const decided = rows.filter((r) => r.reviewDecision === 'approved' || r.reviewDecision === 'rejected')
-  const pool = decided.length ? decided : rows
-  return pool[pool.length - 1] ?? null
+  return decided[decided.length - 1] ?? null
 }
 
 const aiRfiShape = z.object({
@@ -268,8 +268,15 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
     const actionLabel =
       r.action ||
       (r.signature === 'approved' ? 'Approved' : r.signature === 'rejected' ? 'Rejected' : 'Pending review')
+    const typedSig = (r.signatureName || '').trim()
     const signatureTextFallback =
-      signatureImageUri ? '' : (r.signatureName || '').trim() || actionLabel
+      signatureImageUri
+        ? ''
+        : typedSig
+          ? typedSig
+          : r.signature === 'pending'
+            ? ''
+            : actionLabel
     return {
       name: displayName,
       role: (r.role || 'Reviewer').trim() || 'Reviewer',
@@ -281,19 +288,26 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
     }
   })
 
-  const approvalRows = approvalRowsMapped.filter(
-    (row) => (row.role || '').trim().toLowerCase() === 'reviewer'
-  )
+  function isReviewActivityRole(role: string | null | undefined): boolean {
+    const t = (role ?? '').trim().toLowerCase()
+    if (!t) return true
+    // Exclude obvious submitter rows; everything else counts as reviewer activity.
+    if (t.includes('contractor') || t.includes('submitter')) return false
+    return true
+  }
 
-  const rawReviewerRows = (input.approvalRows ?? []).filter(
-    (r) => (r.role || '').trim().toLowerCase() === 'reviewer'
-  )
-  const lastReviewerRaw = rawReviewerRows[rawReviewerRows.length - 1]
+  // Include reviewer activity rows even when role is "Engineer", "Owner", etc.
+  const approvalRows = approvalRowsMapped.filter((row) => isReviewActivityRole(row.role))
+
+  const rawReviewerRows = (input.approvalRows ?? []).filter((r) => isReviewActivityRole(r.role))
+  const lastDecidedReviewerRaw = [...rawReviewerRows]
+    .reverse()
+    .find((r) => r.signature === 'approved' || r.signature === 'rejected')
   const reviewedByDisplay = (() => {
-    if (!lastReviewerRaw) return '—'
-    const fromSig = (lastReviewerRaw.signatureName || '').trim()
+    if (!lastDecidedReviewerRaw) return '—'
+    const fromSig = (lastDecidedReviewerRaw.signatureName || '').trim()
     if (fromSig) return fromSig
-    const t = (lastReviewerRaw.title || '').trim()
+    const t = (lastDecidedReviewerRaw.title || '').trim()
     if (t && !looksLikeEmail(t)) return t
     return '—'
   })()
@@ -360,7 +374,7 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
       ? reviewedByDisplay
       : NOT_PROVIDED
 
-  const reviewerEmailFromRow = (lastReviewerRaw?.reviewerEmail ?? '').trim()
+  const reviewerEmailFromRow = (lastDecidedReviewerRaw?.reviewerEmail ?? '').trim()
   const recipientWithReviewerEmail = (() => {
     const email = reviewerEmailFromRow
     const b = recipientResolved.trim()

@@ -3,15 +3,19 @@
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import {
-  LayoutDashboard,
-  FolderKanban,
+  Building2,
+  CreditCard,
+  FilePen,
   FileQuestion,
   FileStack,
-  FilePen,
-  Settings,
-  CreditCard,
+  FolderKanban,
   HelpCircle,
+  LayoutDashboard,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings,
 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 const SIDEBAR_BG = '#001437'
@@ -38,9 +42,10 @@ const bottomNavigation = [
 
 type AppSidebarWithProjectsProps = {
   collapsed: boolean
+  onToggleSidebar: () => void
 }
 
-export function AppSidebarWithProjects({ collapsed }: AppSidebarWithProjectsProps) {
+export function AppSidebarWithProjects({ collapsed, onToggleSidebar }: AppSidebarWithProjectsProps) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
@@ -63,11 +68,61 @@ export function AppSidebarWithProjects({ collapsed }: AppSidebarWithProjectsProp
     <aside
       style={{ backgroundColor: SIDEBAR_BG }}
       className={cn(
-        'flex h-screen flex-col border-r border-white/10 text-white transition-[width] duration-300 ease-out',
+        'flex h-full min-h-0 shrink-0 flex-col border-r border-white/10 text-white transition-[width] duration-300 ease-out',
         collapsed ? 'w-[4.25rem]' : 'w-[15.5rem]'
       )}
     >
-      <nav className="flex min-h-0 flex-col gap-1.5 overflow-y-auto px-2.5 pb-4 pt-5">
+      {collapsed ? (
+        <div className="flex shrink-0 flex-col items-center gap-2 border-b border-white/10 px-2 py-4">
+          <Link
+            href="/dashboard"
+            className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 text-white transition-colors hover:bg-white/15"
+            aria-label="BuildSwift home"
+          >
+            <Building2 className="h-5 w-5 shrink-0" strokeWidth={1.9} aria-hidden />
+          </Link>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onToggleSidebar}
+            aria-label="Expand sidebar"
+            title="Expand sidebar"
+            className="h-8 w-8 text-white/70 hover:bg-white/10 hover:text-white"
+          >
+            <PanelLeftOpen className="h-4 w-4" strokeWidth={1.8} aria-hidden />
+          </Button>
+        </div>
+      ) : (
+        <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-3 py-3.5">
+          <Link
+            href="/dashboard"
+            className="flex min-w-0 flex-1 items-center gap-2.5 truncate rounded-xl py-0.5"
+            aria-label="BuildSwift home"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white">
+              <Building2 className="h-5 w-5" strokeWidth={1.9} aria-hidden />
+            </span>
+            <span className="truncate text-[22px] font-semibold leading-tight tracking-tight">
+              <span className="text-white">Build</span>
+              <span className="text-[#93c5fd]">Swift</span>
+            </span>
+          </Link>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onToggleSidebar}
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+            className="h-9 w-9 shrink-0 text-white/70 hover:bg-white/10 hover:text-white"
+          >
+            <PanelLeftClose className="h-[18px] w-[18px]" strokeWidth={1.8} aria-hidden />
+          </Button>
+        </div>
+      )}
+
+      <nav className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2.5 pb-4 pt-4">
         {navigation.map((item) => {
           const active = isActive(item)
           const href = item.query ? `${item.href}?${item.query}` : item.href

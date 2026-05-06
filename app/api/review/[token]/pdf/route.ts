@@ -116,7 +116,7 @@ export async function GET(_req: Request, { params }: Params) {
 
   const { data: cycleRequests } = await privilegedDb
     .from('review_requests')
-    .select('id,full_name,reviewer_email,decision,decided_at,decision_notes,signature_url,created_at')
+    .select('id,full_name,reviewer_email,reviewer_role,decision,decided_at,decision_notes,signature_url,created_at')
     .eq('review_cycle_id', cycleRow.id)
     .order('created_at', { ascending: true })
 
@@ -255,7 +255,10 @@ export async function GET(_req: Request, { params }: Params) {
         (typeof row.full_name === 'string' && row.full_name.trim()) ||
         (typeof row.reviewer_email === 'string' && row.reviewer_email.trim()) ||
         'Reviewer',
-      role: 'Reviewer',
+      role:
+        typeof (row as any).reviewer_role === 'string' && (row as any).reviewer_role.trim()
+          ? (row as any).reviewer_role.trim()
+          : 'Reviewer',
       action:
         row.decision === 'approve'
           ? 'Approved'
@@ -269,7 +272,7 @@ export async function GET(_req: Request, { params }: Params) {
             ? ('rejected' as const)
             : ('pending' as const),
       signatureName:
-        row.decision === 'approve' &&
+        (row.decision === 'approve' || row.decision === 'reject') &&
         typeof row.full_name === 'string' &&
         row.full_name.trim()
           ? row.full_name.trim()

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { ArrowLeft, Mail, Send } from 'lucide-react'
+import { ArrowLeft, Mail, Send, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -26,6 +26,7 @@ import {
 import { cn } from '@/lib/utils'
 
 type DocType = 'rfi' | 'submittal' | 'change_order'
+type ReviewerRow = { email: string; full_name: string; role: string }
 
 function formCardClassName(extra?: string) {
   return cn(
@@ -52,6 +53,29 @@ function isValidEmail(raw: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)
 }
 
+function toTitleCaseWord(w: string): string {
+  const t = w.trim()
+  if (!t) return ''
+  return t.slice(0, 1).toUpperCase() + t.slice(1).toLowerCase()
+}
+
+function guessFullNameFromEmail(email: string): string {
+  const local = normalizeEmail(email).split('@')[0] || ''
+  const base = local.replace(/[+].*$/, '').replace(/[^a-z0-9._-]/gi, '')
+  const parts = base
+    .split(/[._-]+/g)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .slice(0, 4)
+  const name = parts.map(toTitleCaseWord).join(' ')
+  return name || 'Reviewer'
+}
+
+function makeReviewerRow(email: string): ReviewerRow {
+  const e = normalizeEmail(email)
+  return { email: e, full_name: guessFullNameFromEmail(e), role: 'Reviewer' }
+}
+
 export default function SendForReviewPage() {
   const router = useRouter()
   const params = useParams<{ id: string }>()
@@ -63,7 +87,7 @@ export default function SendForReviewPage() {
   const [projectName, setProjectName] = useState<string>('—')
 
   const [emailInput, setEmailInput] = useState('')
-  const [reviewers, setReviewers] = useState<string[]>([])
+  const [reviewers, setReviewers] = useState<ReviewerRow[]>([])
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
@@ -132,12 +156,12 @@ export default function SendForReviewPage() {
       return
     }
     setReviewers((prev) => {
-      const seen = new Set(prev)
+      const seen = new Set(prev.map((r) => r.email))
       const next = [...prev]
       for (const e of tokens) {
         if (!seen.has(e)) {
           seen.add(e)
-          next.push(e)
+          next.push(makeReviewerRow(e))
         }
       }
       return next
@@ -146,7 +170,13 @@ export default function SendForReviewPage() {
   }
 
   const removeEmail = (email: string) => {
-    setReviewers((prev) => prev.filter((e) => e !== email))
+    const normalized = normalizeEmail(email)
+    setReviewers((prev) => prev.filter((r) => r.email !== normalized))
+  }
+
+  const updateReviewer = (email: string, patch: Partial<ReviewerRow>) => {
+    const normalized = normalizeEmail(email)
+    setReviewers((prev) => prev.map((r) => (r.email === normalized ? { ...r, ...patch } : r)))
   }
 
   useEffect(() => {
@@ -172,13 +202,22 @@ export default function SendForReviewPage() {
 
   const handleSend = async () => {
     const pendingTokens = splitEmailTokens(emailInput)
-    const merged = [...reviewers, ...pendingTokens]
-      .map((e) => normalizeEmail(e))
-      .filter(Boolean)
-    const uniq = Array.from(new Set(merged))
+    const merged: ReviewerRow[] = [
+      ...reviewers,
+      ...pendingTokens
+        .map((e) => normalizeEmail(e))
+        .filter(Boolean)
+        .map((e) => makeReviewerRow(e)),
+    ]
+    const byEmail = new Map<string, ReviewerRow>()
+    for (const r of merged) {
+      if (!r.email) continue
+      if (!byEmail.has(r.email)) byEmail.set(r.email, r)
+    }
+    const uniq = Array.from(byEmail.values())
 
     if (uniq.length === 0) return toast.error('Add at least one reviewer email')
-    const invalid = uniq.filter((e) => !isValidEmail(e))
+    const invalid = uniq.map((r) => r.email).filter((e) => !isValidEmail(e))
     if (invalid.length) return toast.error(`Invalid email${invalid.length > 1 ? 's' : ''}: ${invalid.join(', ')}`)
 
     setIsSending(true)
@@ -186,7 +225,11 @@ export default function SendForReviewPage() {
       await apiFetch(`/api/documents/${id}/send-for-review`, {
         method: 'POST',
         json: {
-          reviewers: uniq,
+          reviewers: uniq.map((r) => ({
+            email: r.email,
+            full_name: (r.full_name || '').trim() || undefined,
+            role: (r.role || '').trim() || undefined,
+          })),
           expires_in_days: expiresInDays,
           resend: false,
         },
@@ -300,7 +343,7 @@ export default function SendForReviewPage() {
                       </CommandEmpty>
                       <CommandGroup heading="Saved reviewers">
                         {(suggestions ?? [])
-                          .filter((e) => !reviewers.includes(e))
+                          .filter((e) => !reviewers.some((r) => r.email === normalizeEmail(e)))
                           .slice(0, 25)
                           .map((e) => (
                             <CommandItem
@@ -325,19 +368,73 @@ export default function SendForReviewPage() {
               </p>
 
               {reviewers.length ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {reviewers.map((e) => (
-                    <button
-                      key={e}
-                      type="button"
-                      onClick={() => removeEmail(e)}
-                      disabled={isSending || isLoading}
-                      className="inline-flex items-center gap-2 rounded-full border border-[#e2e8f0] bg-[#f8fafc] px-3 py-1 text-xs font-semibold text-[#0f172a] hover:bg-[#eef2ff] disabled:opacity-50"
-                      title="Remove"
+                <div className="mt-3 space-y-2">
+                  {reviewers.map((r) => (
+                    <div
+                      key={r.email}
+                      className={cn(
+                        'flex flex-col gap-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]',
+                        'sm:flex-row sm:items-center sm:gap-3'
+                      )}
                     >
-                      {e}
-                      <span className="text-[#64748b]">×</span>
-                    </button>
+                      <div className="grid flex-1 grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">
+                            Reviewer Email
+                          </p>
+                          <Input
+                            value={r.email}
+                            disabled
+                            readOnly
+                            className="mt-1 h-8 bg-[#f8fafc] font-mono text-xs font-semibold"
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">
+                            Reviewer Name
+                          </p>
+                          <Input
+                            value={r.full_name}
+                            onChange={(e) => updateReviewer(r.email, { full_name: e.target.value })}
+                            disabled={isSending || isLoading}
+                            className="mt-1 h-8 bg-[#f8fafc] text-xs font-semibold"
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">
+                            Reviewer Role
+                          </p>
+                          <Select
+                            value={r.role}
+                            onValueChange={(v) => updateReviewer(r.email, { role: v })}
+                            disabled={isSending || isLoading}
+                          >
+                            <SelectTrigger className="mt-1 h-8 bg-[#f8fafc] text-xs font-semibold">
+                              <SelectValue placeholder="Role" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Reviewer">Reviewer</SelectItem>
+                              <SelectItem value="Architect">Architect</SelectItem>
+                              <SelectItem value="Engineer">Engineer</SelectItem>
+                              <SelectItem value="Owner">Owner</SelectItem>
+                              <SelectItem value="Consultant">Consultant</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeEmail(r.email)}
+                        disabled={isSending || isLoading}
+                        className="h-9 w-9 shrink-0 text-[#64748b] hover:bg-[#fee2e2] hover:text-[#b91c1c]"
+                        title="Remove reviewer"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   ))}
                 </div>
               ) : null}
