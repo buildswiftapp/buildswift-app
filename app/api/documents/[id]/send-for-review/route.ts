@@ -14,6 +14,7 @@ import {
   type ReviewLinkExpiryDays,
 } from '@/lib/server/review-token-policy'
 import { sendForReviewSchema } from '@/lib/server/validators'
+import { statusOnSendForReview, type DocType } from '@/lib/status'
 
 type Params = { params: Promise<{ id: string }> }
 type DocumentType = 'rfi' | 'submittal' | 'change_order'
@@ -647,9 +648,17 @@ export async function POST(req: Request, { params }: Params) {
       return serverError(errorMsg)
     }
 
+    const previousStatus = (document as { status?: string | null }).status ?? null
+    const canonicalStatus = statusOnSendForReview(document.doc_type as DocType)
     const { error: docUpdateError } = await privilegedDb
       .from(DOCUMENT_TABLE_BY_TYPE[document.doc_type as DocumentType])
-      .update({ internal_status: 'in_review', external_status: 'sent' })
+      .update({
+        // Canonical (single source of truth read by UI/PDF).
+        status: canonicalStatus,
+        // Legacy dual-write for Phase 1.
+        internal_status: 'in_review',
+        external_status: 'sent',
+      })
       .eq('id', id)
     if (docUpdateError) return serverError(docUpdateError.message)
 
@@ -665,8 +674,27 @@ export async function POST(req: Request, { params }: Params) {
         reviewer_count: reviewerEmails.length,
         cycle_no: cycleNo,
         expires_in_days: expiresInDays,
+        from_status: previousStatus,
+        to_status: canonicalStatus,
       },
     })
+
+    if (previousStatus !== canonicalStatus) {
+      await writeAuditLog({
+        accountId: auth.accountId,
+        actorType: 'user',
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email ?? null,
+        eventType: 'document.status_changed',
+        documentId: id,
+        projectId: document.project_id,
+        eventData: {
+          from_status: previousStatus,
+          to_status: canonicalStatus,
+          reason: 'sent_for_review',
+        },
+      })
+    }
 
     return ok({
       cycle_id: cycle.id,

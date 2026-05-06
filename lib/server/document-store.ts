@@ -16,7 +16,11 @@ type BaseDoc = {
   title: string
   description: string
   current_version_no: number
+  /** Canonical lifecycle status (per-doc-type vocabulary in `lib/status.ts`). */
+  status: string
+  /** Legacy: kept for back-compat during Phase 1 dual-write. */
   internal_status: string
+  /** Legacy: kept for back-compat during Phase 1 dual-write. */
   external_status: string
   is_final: boolean
   created_by: string
@@ -130,16 +134,49 @@ export async function updateDocumentStatusesById(params: {
   id: string
   internalStatus: string
   externalStatus: string
+  /** Canonical status (per `lib/status.ts`). When provided, dual-writes alongside legacy fields. */
+  status?: string
 }) {
-  const { supabase, id, internalStatus, externalStatus } = params
+  const { supabase, id, internalStatus, externalStatus, status } = params
   const found = await findDocumentById({ supabase, id })
   if (found.error || !found.data) return { error: found.error, data: null }
   const table = TABLE_BY_TYPE[found.data.doc_type]
+  const updates: Record<string, unknown> = {
+    internal_status: internalStatus,
+    external_status: externalStatus,
+  }
+  if (typeof status === 'string' && status.length) updates.status = status
   const { data, error } = await supabase
     .from(table)
-    .update({ internal_status: internalStatus, external_status: externalStatus })
+    .update(updates)
     .eq('id', id)
     .select('id')
     .maybeSingle()
   return { data, error }
+}
+
+/**
+ * Update only the canonical `status` column for a document. Used by the
+ * `POST /api/documents/[id]/close` endpoint and any future writers that should
+ * not touch the legacy status fields.
+ */
+export async function updateDocumentStatusOnly(params: {
+  supabase: any
+  id: string
+  accountId?: string | null
+  status: string
+}) {
+  const { supabase, id, accountId, status } = params
+  const found = await findDocumentById({ supabase, id, accountId })
+  if (found.error || !found.data) return { data: null, error: found.error, docType: null }
+  const { doc_type } = found.data
+  let q = supabase.from(TABLE_BY_TYPE[doc_type]).update({ status }).eq('id', id)
+  if (accountId) q = q.eq('account_id', accountId)
+  const { data, error } = await q.select('*').single()
+  if (error) return { data: null, error, docType: doc_type }
+  return {
+    data: { ...(data as BaseDoc), doc_type } as UnifiedDocument,
+    error: null,
+    docType: doc_type,
+  }
 }

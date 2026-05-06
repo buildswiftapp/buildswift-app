@@ -15,7 +15,13 @@ import {
   Clock,
 } from 'lucide-react' 
 import { apiFetch } from '@/lib/api'
-import { formatDate } from '@/lib/utils'
+import { cn, formatDate } from '@/lib/utils'
+import {
+  backfillFromLegacy,
+  statusBadge,
+  statusBadgeClasses,
+  type DocType,
+} from '@/lib/status'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -78,7 +84,8 @@ export default function ProjectDetailPage({
       projectId: string
       type: 'rfi' | 'submittal' | 'change_order'
       title: string
-      status: 'draft' | 'pending_review' | 'approved' | 'rejected' | 'revision_requested'
+      /** Canonical lifecycle status (per `lib/status.ts`). */
+      status: string
       updatedAt: string
       dueDate?: string
     }>
@@ -118,7 +125,9 @@ export default function ProjectDetailPage({
               project_id: string
               doc_type: 'rfi' | 'submittal' | 'change_order'
               title: string
+              status: string
               internal_status: string
+              external_status?: string
               updated_at: string
             }>
           }>(`/api/documents?project_id=${id}`),
@@ -146,14 +155,17 @@ export default function ProjectDetailPage({
             projectId: d.project_id,
             type: d.doc_type,
             title: d.title,
+            // Read canonical status; fall back to legacy-derived value while
+            // Phase 1 dual-write is still rolling out.
             status:
-              d.internal_status === 'in_review'
-                ? 'pending_review'
-                : d.internal_status === 'pending_reviewer'
-                  ? 'pending_review'
-                  : d.internal_status === 'revising'
-                    ? 'revision_requested'
-                    : (d.internal_status as 'draft' | 'pending_review' | 'approved' | 'rejected' | 'revision_requested'),
+              typeof d.status === 'string' && d.status.length
+                ? d.status
+                : backfillFromLegacy(
+                    d.doc_type as DocType,
+                    d.internal_status,
+                    d.external_status ?? null,
+                    null
+                  ),
             updatedAt: d.updated_at,
           }))
         )
@@ -171,7 +183,9 @@ export default function ProjectDetailPage({
     submittal: projectDocuments.filter((d) => d.type === 'submittal'),
     change_order: projectDocuments.filter((d) => d.type === 'change_order'),
   }
-  const pendingReviewCount = projectDocuments.filter((d) => d.status === 'pending_review').length
+  const pendingReviewCount = projectDocuments.filter(
+    (d) => d.status === 'pending' || d.status === 'pending_review' || d.status === 'under_review'
+  ).length
   const projectMetricCards = [
     {
       key: 'rfis',
@@ -241,16 +255,13 @@ export default function ProjectDetailPage({
     return <Badge className={style.className}>{style.label}</Badge>
   }
 
-  const getDocStatusBadge = (status: string) => {
-    const styles: Record<string, { className: string; label: string }> = {
-      draft: { className: 'bg-muted text-muted-foreground', label: 'Draft' },
-      pending_review: { className: 'bg-slate-100 text-slate-800', label: 'Pending' },
-      approved: { className: 'bg-emerald-100 text-emerald-800', label: 'Approved' },
-      rejected: { className: 'bg-red-100 text-red-800', label: 'Rejected' },
-      revision_requested: { className: 'bg-violet-100 text-violet-800', label: 'Revision' },
-    }
-    const style = styles[status] || styles.draft
-    return <Badge className={style.className}>{style.label}</Badge>
+  const getDocStatusBadge = (docType: DocType, status: string) => {
+    const badge = statusBadge(docType, status)
+    return (
+      <Badge variant="outline" className={cn('font-medium', statusBadgeClasses(badge.tone))}>
+        {badge.label}
+      </Badge>
+    )
   }
 
   const getDocumentTypeIcon = (type: string) => {
@@ -316,7 +327,7 @@ export default function ProjectDetailPage({
               </div>
             </div>
             <div className="flex items-center gap-3">
-              {getDocStatusBadge(doc.status)}
+              {getDocStatusBadge(doc.type as DocType, doc.status)}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild onClick={(e) => e.preventDefault()}>
                   <Button variant="ghost" size="icon">

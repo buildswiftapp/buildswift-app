@@ -21,10 +21,31 @@ export function resolveReviewTokenExpiresAtMs(params: {
   return Number.NaN
 }
 
+import { isFinal, type DocType } from '@/lib/status'
+
 const FINAL_INTERNAL = new Set(['approved', 'rejected'])
 const FINAL_EXTERNAL = new Set(['approved', 'rejected'])
 
-export function isDocumentReviewFinal(doc: { internal_status?: string | null; external_status?: string | null }) {
+/**
+ * The reviewer page treats a document as "no longer accepting responses" when:
+ *
+ *   1. The canonical `status` column says so (any decision-state or `closed`),
+ *      or
+ *   2. (Legacy fallback during Phase 1) the old `internal_status` /
+ *      `external_status` columns indicate approved/rejected.
+ *
+ * Once Phase 2 retires the legacy columns we can drop the second clause.
+ */
+export function isDocumentReviewFinal(doc: {
+  doc_type?: string | null
+  status?: string | null
+  internal_status?: string | null
+  external_status?: string | null
+}) {
+  const docType = (doc.doc_type ?? '') as DocType
+  if (docType === 'rfi' || docType === 'submittal' || docType === 'change_order') {
+    if (isFinal(docType, doc.status ?? null)) return true
+  }
   return (
     FINAL_INTERNAL.has(doc.internal_status ?? '') || FINAL_EXTERNAL.has(doc.external_status ?? '')
   )

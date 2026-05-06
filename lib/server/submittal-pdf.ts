@@ -17,6 +17,10 @@ export type SubmittalPdfInput = {
   title: string
   projectName: string
   descriptionHtml: string
+  /** Stable id for default submittal # when `submittalNo` is absent */
+  documentId?: string | null
+  /** Account logo data URI; falls back to env/default asset */
+  brandingLogoDataUri?: string | null
   // Metadata
   submittalNo?: string | null
   projectAddress?: string | null
@@ -122,6 +126,18 @@ function stripHtmlToText(html: string): string {
 const NA = 'N/A'
 const NOT_PROVIDED = 'Not Provided'
 
+function isBlankSubmittalReviewDisplay(v: string | null | undefined): boolean {
+  const t = (v ?? '').trim()
+  return !t || t === NOT_PROVIDED || t === NA || t === 'N/A' || t === '—'
+}
+
+function pickSubmittalReviewerActivityRow(rows: SubmittalApprovalRow[]): SubmittalApprovalRow | null {
+  if (!rows.length) return null
+  const decided = rows.filter((r) => r.action === 'Approved' || r.action === 'Rejected')
+  const pool = decided.length ? decided : rows
+  return pool[pool.length - 1] ?? null
+}
+
 const aiSubmittalShape = z.object({
   submittalTitle: z.string(),
   detailedDescription: z.string(),
@@ -134,7 +150,6 @@ const aiSubmittalShape = z.object({
   detailReferences: z.string(),
   relatedRfiNumbers: z.string(),
   reviewerComments: z.string(),
-  impactDescription: z.string(),
   submittalType: z.string(),
 })
 
@@ -150,19 +165,20 @@ async function composeSubmittalWithAi(input: {
   detailReferences: string
   relatedRfiNumbers: string
   reviewerComments: string
-  impactDescription: string
   submittalType: string
 }): Promise<z.infer<typeof aiSubmittalShape> | null> {
   const openai = getOpenAIClient()
   if (!openai) return null
 
   const model = process.env.OPENAI_MODEL || 'gpt-4o'
-  const system = `You are a construction project engineer preparing a formal Submittal PDF. Normalize and improve the provided data.
-- Return JSON only.
-- Keep content concise for a single-page PDF.
-- Use "N/A" for missing unknown technical values.
-- Use clear, professional construction language.
-- Keep spec sections and drawings in compact comma-separated form (e.g., "08 44 13"; "A-501, A-502").`
+  const system = `You are a construction project engineer preparing a formal Submittal PDF. Normalize and professionalize the provided data.
+Return JSON only. Rules:
+- Improve the detailed description for clarity and formality while staying accurate to facts given.
+- Ensure manufacturer/vendor, material/product, model, and quantity are complete and coherent; use "N/A" only where truly unknown.
+- Align specification sections and drawing references with conventional CSI / sheet notation (comma-separated lists, e.g. "08 44 13"; "A-501, A-502").
+- Enhance reviewer-comments text where provided so they read complete and actionable; otherwise "N/A" is acceptable.
+- submittalType must be one of: Shop Drawing, Product Data, Samples, Mockups, Other (prefer the closest match).
+- Keep each string reasonably concise but do not omit important technical detail present in the input.`
 
   try {
     const completion = await openai.chat.completions.create({
@@ -203,7 +219,10 @@ export async function generateSubmittalPdfBuffer(
   const contactPhone = input.contactPhone?.trim() || '(555) 123-4567'
   const contactEmail = input.contactEmail?.trim() || 'info@buildswift.com'
 
-  const logoDataUri = resolveLogoDataUri()
+  const logoDataUri =
+    typeof input.brandingLogoDataUri === 'string' && input.brandingLogoDataUri.trim().length > 0
+      ? input.brandingLogoDataUri.trim()
+      : resolveLogoDataUri()
 
   const brand = companyName
   const brandSub = 'CONSTRUCTION'
@@ -243,7 +262,6 @@ export async function generateSubmittalPdfBuffer(
     detailReferences: input.detailReferences?.trim() || NA,
     relatedRfiNumbers: input.relatedRfiNumbers?.trim() || NA,
     reviewerComments: input.reviewerComments?.trim() || NA,
-    impactDescription: input.impactDescription?.trim() || NA,
     submittalType: input.submittalType?.trim() || 'Other',
   })
 
@@ -265,17 +283,12 @@ export async function generateSubmittalPdfBuffer(
     return raw?.trim() ? raw.trim() : 'Medium'
   }
 
-  const toImpactFlag = (raw?: string | null) => {
-    const v = (raw || '').toLowerCase()
-    if (v.includes('yes')) return 'Yes'
-    if (v.includes('potential') || v.includes('possible') || v.includes('maybe')) return 'Potential'
-    if (v === NA.toLowerCase() || v === NOT_PROVIDED.toLowerCase()) return 'None'
-    return v ? 'Potential' : 'None'
-  }
-
+  const docIdCompact = (input.documentId ?? '').replace(/-/g, '')
   const subNum =
     input.submittalNo?.trim() ||
-    `SUB-${Buffer.from((input.title || 'submittal').toLowerCase()).toString('hex').slice(0, 8).toUpperCase()}`
+    (docIdCompact.length >= 6
+      ? `SUB-${docIdCompact.slice(0, 12).toUpperCase()}`
+      : `SUB-${Buffer.from((input.title || 'submittal').toLowerCase()).toString('hex').slice(0, 8).toUpperCase()}`)
 
   const attachments: SubmittalAttachmentRow[] = Array.isArray(input.attachments)
     ? (typeof input.attachments[0] === 'string'
@@ -302,13 +315,73 @@ export async function generateSubmittalPdfBuffer(
     signatureUrl: r.signatureUrl || null,
   }))
 
+  const reviewerOnlyRows = approvalRows.filter((r) => (r.role || '').toLowerCase().includes('reviewer'))
+  const reviewerActivityRow = pickSubmittalReviewerActivityRow(reviewerOnlyRows)
+
   const fromDisplay = input.from?.trim() || input.contactAddress?.trim() || NOT_PROVIDED
   const toDisplay = input.to?.trim() || NOT_PROVIDED
 
-  /** Approval / review log: reviewer activity only (omit submitter / submission row). */
-  const ensuredApprovalRows = approvalRows.filter(
-    (row) => (row.role || '').trim().toLowerCase() === 'reviewer'
-  )
+  /** Full workflow log on PDF (submitters + reviewers) per product spec */
+  const ensuredApprovalRows = approvalRows
+
+  /** Signature line for Review / Response block — prefer reviewer-role rows */
+  const pickReviewerSignature = () => {
+    const rows = ensuredApprovalRows
+    const reviewerMatch = [...rows]
+      .reverse()
+      .find(
+        (r) =>
+          (r.role || '').toLowerCase().includes('reviewer') &&
+          ((r.signatureUrl || '').trim().length > 0 || !!(r.signatureName || '').trim().length),
+      )
+    if (reviewerMatch) {
+      return {
+        url: (reviewerMatch.signatureUrl || '').trim(),
+        name: reviewerMatch.signatureName ?? null,
+      }
+    }
+    const anySig = [...rows]
+      .reverse()
+      .find((r) => (r.signatureUrl || '').trim().length > 0 || !!(r.signatureName || '').trim().length)
+    if (anySig) return { url: (anySig.signatureUrl || '').trim(), name: anySig.signatureName ?? null }
+    return { url: '', name: null as string | null }
+  }
+
+  const { url: reviewerSignatureUrl, name: reviewerSignatureName } = pickReviewerSignature()
+
+  const commentsPrimary = (aiComposed?.reviewerComments ?? '').trim() || (input.reviewerComments ?? '').trim()
+  const reviewerCommentsResolved =
+    !isBlankSubmittalReviewDisplay(commentsPrimary) && commentsPrimary !== NA
+      ? commentsPrimary
+      : reviewerActivityRow &&
+          !isBlankSubmittalReviewDisplay(reviewerActivityRow.notes) &&
+          reviewerActivityRow.notes !== NA
+        ? reviewerActivityRow.notes.trim()
+        : NA
+
+  const trimmedReviewedBy = input.reviewedBy?.trim() ?? ''
+  const reviewedByResolved = !isBlankSubmittalReviewDisplay(trimmedReviewedBy)
+    ? trimmedReviewedBy
+    : reviewerActivityRow &&
+        !isBlankSubmittalReviewDisplay(reviewerActivityRow.name) &&
+        reviewerActivityRow.name !== NOT_PROVIDED
+      ? reviewerActivityRow.name
+      : NOT_PROVIDED
+
+  const reviewDateResolved = (() => {
+    if (input.reviewDate?.trim()) {
+      const fd = fmtLongDate(input.reviewDate)
+      if (!isBlankSubmittalReviewDisplay(fd) && fd !== '—') return fd
+    }
+    if (
+      reviewerActivityRow?.date &&
+      !isBlankSubmittalReviewDisplay(reviewerActivityRow.date) &&
+      reviewerActivityRow.date !== NOT_PROVIDED
+    ) {
+      return reviewerActivityRow.date
+    }
+    return '—'
+  })()
 
   const footerNote = `${subNum} — ${companyName}`
 
@@ -323,7 +396,7 @@ export async function generateSubmittalPdfBuffer(
     projectName: input.projectName || NOT_PROVIDED,
     projectAddress: projectAddressRaw?.trim() || NOT_PROVIDED,
     submittalNumber: subNum,
-    status: normalizeStatus(input.reviewStatus),
+    status: normalizeStatus(input.reviewStatus || 'PENDING REVIEW'),
     dateIssued: fmtLongDate(dateIssuedRaw),
     requiredReviewDate: fmtLongDate(requiredReviewRaw),
     to: toDisplay,
@@ -341,24 +414,15 @@ export async function generateSubmittalPdfBuffer(
     detailReferences: aiComposed?.detailReferences || input.detailReferences?.trim() || NA,
     relatedRfiNumbers: aiComposed?.relatedRfiNumbers || input.relatedRfiNumbers?.trim() || NA,
     attachments,
-    reviewStatus: normalizeStatus(input.reviewStatus),
-    reviewerComments: aiComposed?.reviewerComments || input.reviewerComments?.trim() || NA,
-    reviewedBy: input.reviewedBy?.trim() || NOT_PROVIDED,
-    reviewDate: fmtLongDate(input.reviewDate),
-    costImpact: toImpactFlag(input.costImpact),
-    scheduleImpact: toImpactFlag(input.scheduleImpact),
-    impactDescription:
-      (() => {
-        const v = (aiComposed?.impactDescription || input.impactDescription?.trim() || '').trim()
-        if (!v || v === NA) return 'No impact anticipated at this time.'
-        return v
-      })(),
-    finalStatus: normalizeStatus(input.reviewStatus),
-    approvalRows: ensuredApprovalRows,
+    reviewerComments: reviewerCommentsResolved,
+    reviewedBy: reviewedByResolved,
+    reviewDate: reviewDateResolved,
+    reviewerSignatureUrl,
+    reviewerSignatureName,
     footerNote,
   }
 
   return renderToBuffer(
-    React.createElement(SubmittalPdfDocument, { data: viewModel }) as React.ReactElement
+    React.createElement(SubmittalPdfDocument, { data: viewModel }) as unknown as React.ReactElement<any>
   )
 }

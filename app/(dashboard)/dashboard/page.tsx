@@ -16,6 +16,12 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
+import {
+  backfillFromLegacy,
+  statusBadge,
+  statusBadgeClasses,
+  type DocType,
+} from '@/lib/status'
 
 type DashboardProject = {
   id: string
@@ -32,7 +38,11 @@ type DashboardDocument = {
   project_id: string
   doc_type: 'rfi' | 'submittal' | 'change_order' | string
   title: string
+  /** Canonical lifecycle status (per `lib/status.ts`). */
+  status: string
+  /** Legacy: kept as fallback while Phase 1 dual-write is in flight. */
   internal_status: string
+  external_status?: string
   updated_at: string
 }
 
@@ -85,12 +95,12 @@ export default function DashboardPage() {
     }
   }, [])
 
-  const normalizeStatus = (internalStatus: string) => {
-    const s = (internalStatus ?? '').trim().toLowerCase()
-    if (s === 'in_review' || s === 'pending_reviewer') return 'pending_review'
-    if (s === 'revising') return 'revision_requested'
-    if (s === 'approved' || s === 'rejected' || s === 'draft') return s
-    return 'draft'
+  // Read canonical status when present, otherwise derive from legacy fields.
+  const resolveStatus = (d: DashboardDocument): string => {
+    if (typeof d.status === 'string' && d.status.length) return d.status
+    const t = d.doc_type
+    if (t !== 'rfi' && t !== 'submittal' && t !== 'change_order') return 'draft'
+    return backfillFromLegacy(t as DocType, d.internal_status, d.external_status ?? null, null)
   }
 
   const uiDocuments = documents.map((d) => ({
@@ -98,7 +108,7 @@ export default function DashboardPage() {
     projectId: d.project_id,
     type: d.doc_type,
     title: d.title,
-    status: normalizeStatus(d.internal_status),
+    status: resolveStatus(d),
     updatedAt: d.updated_at,
   }))
 
@@ -117,7 +127,11 @@ export default function DashboardPage() {
   }))
 
   const activeProjects = uiProjects.filter((p) => p.status === 'active')
-  const pendingDocuments = uiDocuments.filter((d) => d.status === 'pending_review')
+  // RFIs use `pending`, submittals use `pending_review`, change orders use `under_review`.
+  const pendingDocuments = uiDocuments.filter((d) => {
+    const s = d.status
+    return s === 'pending' || s === 'pending_review' || s === 'under_review'
+  })
   const draftDocuments = uiDocuments.filter((d) => d.status === 'draft')
 
   const documentsByType = {
@@ -130,16 +144,16 @@ export default function DashboardPage() {
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, 5)
 
-  const getStatusBadge = (status: string) => {
-    const styles: Record<string, { className: string; label: string }> = {
-      draft: { className: 'bg-muted text-muted-foreground', label: 'Draft' },
-      pending_review: { className: 'bg-slate-100 text-slate-800', label: 'Pending Review' },
-      approved: { className: 'bg-emerald-100 text-emerald-800', label: 'Approved' },
-      rejected: { className: 'bg-red-100 text-red-800', label: 'Rejected' },
-      revision_requested: { className: 'bg-violet-100 text-violet-800', label: 'Revision Requested' },
-    }
-    const style = styles[status] || styles.draft
-    return <Badge className={style.className}>{style.label}</Badge>
+  const getStatusBadge = (docType: string, status: string) => {
+    const t = (docType === 'rfi' || docType === 'submittal' || docType === 'change_order'
+      ? docType
+      : 'rfi') as DocType
+    const badge = statusBadge(t, status)
+    return (
+      <Badge variant="outline" className={cn('font-medium', statusBadgeClasses(badge.tone))}>
+        {badge.label}
+      </Badge>
+    )
   }
 
   const getDocumentTypeIcon = (type: string) => {
@@ -266,7 +280,7 @@ export default function DashboardPage() {
                           {project?.name} &bull; {formatDate(doc.updatedAt)}
                         </p>
                       </div>
-                      {getStatusBadge(doc.status)}
+                      {getStatusBadge(doc.type, doc.status)}
                     </Link>
                   )
                   })

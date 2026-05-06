@@ -1,5 +1,12 @@
 /** Shared HTML builders + parsers for RFI / Submittal / Change Order documents. */
 
+import type {
+  ChangeOrderBaselineState,
+  ChangeOrderCostState,
+  ChangeOrderScheduleState,
+} from '@/lib/co-impact'
+import { deserializeChangeOrderImpactFromMetadata } from '@/lib/co-impact'
+
 export const CO_REASON_OPTIONS = [
   { value: 'owner_request', label: 'Owner Request' },
   { value: 'design_change', label: 'Design Change' },
@@ -115,10 +122,13 @@ export function buildRfiHeaderHtml(values: {
  * and `metadata.rfiDate` / `metadata.question` / `metadata.notes` hold the rest.
  */
 export function buildRfiDescriptionBody(values: {
+  reasonForRequest?: string
   question: string
   description: string
   notes: string
 }): string {
+  const reason = (values.reasonForRequest ?? '').trim()
+  const reasonBlock = reason ? `<h3>Reason for Request</h3><p>${reason}</p>` : ''
   const q = values.question.trim()
   const d = values.description.trim()
   const notes = values.notes.trim()
@@ -129,7 +139,7 @@ export function buildRfiDescriptionBody(values: {
     main = `<h3>Questions / descriptions</h3><p>${q || d}</p>`
   }
   const notesBlock = notes ? `<h3>Notes</h3><p>${notes}</p>` : ''
-  return main + notesBlock
+  return reasonBlock + main + notesBlock
 }
 
 /** Full printable HTML (header + body) — previews, exports, and legacy rows. */
@@ -138,6 +148,7 @@ export function buildRfiHtml(values: {
   title: string
   date: string
   projectName: string
+  reasonForRequest?: string
   question: string
   description: string
   notes: string
@@ -340,12 +351,77 @@ export function scheduleLabelToValue(label: string): string {
 }
 
 /** Text for the schedule impact free-text field from a stored `scheduleImpact` value. */
+/** @deprecated use `lib/co-impact.ts` structured schedule state. */
 export function scheduleImpactValueToInputText(value: string): string {
   if (value === 'none') return ''
   const opt = CO_SCHEDULE_OPTIONS.find((o) => o.value === value)
   if (opt) return opt.label
   if (value.startsWith(CUSTOM_SCHEDULE_PREFIX)) return value.slice(CUSTOM_SCHEDULE_PREFIX.length)
   return value
+}
+
+/** First whole-number day count from duration text — aligned with change-order PDF `parseWholeDays`. */
+/** @deprecated use `lib/co-impact.ts` baseline duration parsing. */
+export function parseCoWholeDaysInput(raw: string | number | null | undefined): number | null {
+  if (raw === null || raw === undefined) return null
+  if (typeof raw === 'number')
+    return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : null
+  const t = String(raw).trim()
+  if (!t) return null
+  const n = Number.parseInt(t.replace(/[^0-9]/g, ''), 10)
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+function inferCoScheduleImpactChoice(raw: string): 'none' | 'adds' | 'reduces' {
+  const l = (raw || '').toLowerCase()
+  if (!l.trim() || l.includes('no impact') || l === 'none') return 'none'
+  if (l.includes('reduce') || l.includes('reduc') || l.includes('deduct') || l.includes('- day')) return 'reduces'
+  return 'adds'
+}
+
+function extractCoImpactDaysDigits(raw: string): string {
+  const m = (raw || '').match(/(\d+)\s*(?:calendar\s*)?day/i)
+  if (m) return m[1]
+  const m2 = (raw || '').match(/^\+?\s*(\d+)\s*$/i)
+  if (m2) return m2[1]
+  return ''
+}
+
+function coScheduleSignedDeltaDays(choice: 'none' | 'adds' | 'reduces', daysRaw: string): number | null {
+  if (choice === 'none') return 0
+  const trimmed = daysRaw.trim()
+  const num = trimmed ? Number.parseInt(trimmed.replace(/[^0-9]/g, ''), 10) : Number.NaN
+  if (!Number.isFinite(num)) return null
+  const mag = Math.abs(num)
+  return choice === 'adds' ? mag : -mag
+}
+
+/** Revised duration phrase for metadata — baseline days + signed schedule delta; empty string when incomplete (matches PDF inference). */
+/** @deprecated use `lib/co-impact.ts` derived schedule totals. */
+export function computeCoRevisedDurationPhrase(
+  originalDurationRaw: string,
+  scheduleNoImpact: boolean,
+  scheduleImpactText: string,
+): string {
+  const baseline = parseCoWholeDaysInput(originalDurationRaw)
+  if (baseline === null) return ''
+
+  let delta: number | null
+  if (scheduleNoImpact) {
+    delta = 0
+  } else {
+    const st = scheduleImpactText.trim()
+    if (!st) return ''
+    const choice = inferCoScheduleImpactChoice(st)
+    const daysDigits = extractCoImpactDaysDigits(st)
+    delta = coScheduleSignedDeltaDays(choice, daysDigits || st)
+    if (delta === null) return ''
+  }
+
+  const total = baseline + delta
+  if (total < 0) return ''
+  const dayWord = total === 1 ? 'day' : 'days'
+  return `${total} calendar ${dayWord}`
 }
 
 export function extractCoDescriptionHtml(html: string): string {
@@ -387,6 +463,7 @@ export function initialRfiState(args: {
   title: string
   date: string
   question: string
+  reasonForRequest: string
   description: string
   notes: string
 } {
@@ -400,6 +477,10 @@ export function initialRfiState(args: {
     parseLongDateToIso(strongField(html, 'Date')) ||
     new Date().toISOString().slice(0, 10)
   const question = (typeof m.question === 'string' && m.question) || extractH3Block(html, 'Question') || ''
+  const reasonForRequest =
+    (typeof m.reasonForRequest === 'string' && m.reasonForRequest) ||
+    extractH3Block(html, 'Reason for Request') ||
+    ''
   let description = extractRfiNarrativeFromHtml(html)
   if (!description) {
     description =
@@ -408,7 +489,7 @@ export function initialRfiState(args: {
         .trim() || ''
   }
   const notes = (typeof m.notes === 'string' && m.notes) || extractH3Block(html, 'Notes') || ''
-  return { number, title, date: dateIso, question, description, notes }
+  return { number, title, date: dateIso, question, reasonForRequest, description, notes }
 }
 
 export function initialSubmittalState(args: {
@@ -419,10 +500,15 @@ export function initialSubmittalState(args: {
   number: string
   title: string
   date: string
+  submittalType: string
   specSection: string
   manufacturer: string
   productName: string
   quantity: string
+  modelNumber: string
+  detailReferences: string
+  drawingSheetNumbers: string
+  relatedRfiNumbers: string
   description: string
   notes: string
 } {
@@ -435,10 +521,30 @@ export function initialSubmittalState(args: {
     (typeof m.documentDate === 'string' && m.documentDate) ||
     parseLongDateToIso(strongField(html, 'Date')) ||
     new Date().toISOString().slice(0, 10)
+  const submittalTypeFromMeta =
+    (typeof m.submittalType === 'string' && m.submittalType.trim()) ||
+    (typeof m.type === 'string' && m.type.trim()) ||
+    ''
   const specSection = (typeof m.specSection === 'string' && m.specSection) || strongField(html, 'Specification Section') || ''
   const manufacturer = (typeof m.manufacturer === 'string' && m.manufacturer) || ''
   const productName = (typeof m.productName === 'string' && m.productName) || ''
   const quantity = (typeof m.quantity === 'string' && m.quantity) || strongField(html, 'Quantity') || ''
+  const modelNumber =
+    (typeof m.modelNumber === 'string' && m.modelNumber) || (typeof m.model === 'string' && m.model) || ''
+  const drawingSheetNumbers =
+    (typeof m.drawingSheetNumbers === 'string' && m.drawingSheetNumbers) ||
+    (typeof m.drawingNumber === 'string' && m.drawingNumber) ||
+    (typeof m.sheetNumber === 'string' && m.sheetNumber) ||
+    ''
+  const detailReferences =
+    (typeof m.detailReferences === 'string' && m.detailReferences) ||
+    (typeof m.detailReference === 'string' && m.detailReference) ||
+    ''
+  const relatedRfiNumbers =
+    (typeof m.relatedRfiNumbers === 'string' && m.relatedRfiNumbers) ||
+    (typeof m.relatedRfi === 'string' && m.relatedRfi) ||
+    (typeof m.rfiNo === 'string' && m.rfiNo) ||
+    ''
   let description = extractH3Block(html, 'Description') || ''
   if (!description) {
     description =
@@ -447,7 +553,22 @@ export function initialSubmittalState(args: {
         .trim() || ''
   }
   const notes = (typeof m.notes === 'string' && m.notes) || extractH3Block(html, 'Notes') || ''
-  return { number, title, date: dateIso, specSection, manufacturer, productName, quantity, description, notes }
+  return {
+    number,
+    title,
+    date: dateIso,
+    submittalType: submittalTypeFromMeta,
+    specSection,
+    manufacturer,
+    productName,
+    quantity,
+    modelNumber,
+    detailReferences,
+    drawingSheetNumbers,
+    relatedRfiNumbers,
+    description,
+    notes,
+  }
 }
 
 export function initialChangeOrderState(args: {
@@ -460,16 +581,58 @@ export function initialChangeOrderState(args: {
   title: string
   description: string
   reason: string
+  originalContractAmount: string
+  /** Calendar-day total before this CO — free text or numeric; PDF parses first whole number */
+  originalDuration: string
+  revisedContractAmount: string
+  /** Revised project duration — free text or numeric; PDF uses revisedProjectDurationDays */
+  revisedDuration: string
   costImpact: string
   scheduleImpact: string
   notes: string
+  schedule: ChangeOrderScheduleState
+  baseline: ChangeOrderBaselineState
+  cost: ChangeOrderCostState
 } {
   const { doc, latestMeta, html } = args
   const m = latestMeta
+  const impact = deserializeChangeOrderImpactFromMetadata(m)
   const reasonLabel =
     (typeof m.reason === 'string' && m.reason) || extractH3Block(html, 'Reason for Change') || 'Other'
   const scheduleLabelFromMeta =
     typeof m.scheduleImpact === 'string' ? m.scheduleImpact : extractH3Block(html, 'Schedule Impact')
+  const primeRaw =
+    m.primeContractValue ?? m.contractAmount ?? m.originalContractAmount
+  let originalContractAmount = ''
+  if (typeof primeRaw === 'number' && Number.isFinite(primeRaw)) {
+    originalContractAmount = formatUsd(primeRaw)
+  } else if (typeof primeRaw === 'string' && primeRaw.trim()) {
+    originalContractAmount = formatUsd(parseMoneyInput(primeRaw))
+  }
+  const durationRaw =
+    m.originalProjectDurationDays ?? m.originalDurationDays ?? m.originalDuration
+  let originalDuration = ''
+  if (typeof durationRaw === 'number' && Number.isFinite(durationRaw)) {
+    originalDuration = String(Math.max(0, Math.floor(durationRaw)))
+  } else if (typeof durationRaw === 'string' && durationRaw.trim()) {
+    originalDuration = durationRaw.trim()
+  }
+  const revisedDurationRaw =
+    m.revisedProjectDurationDays ?? m.revisedDurationDays ?? m.revisedDuration
+  let revisedDuration = ''
+  if (typeof revisedDurationRaw === 'number' && Number.isFinite(revisedDurationRaw)) {
+    revisedDuration = String(Math.max(0, Math.floor(revisedDurationRaw)))
+  } else if (typeof revisedDurationRaw === 'string' && revisedDurationRaw.trim()) {
+    revisedDuration = revisedDurationRaw.trim()
+  }
+  const updatedRaw =
+    m.updatedContractValue ?? m.revisedContractAmount ?? m.newContractValue
+  let revisedContractAmount = ''
+  if (typeof updatedRaw === 'number' && Number.isFinite(updatedRaw)) {
+    revisedContractAmount = formatUsd(updatedRaw)
+  } else if (typeof updatedRaw === 'string' && updatedRaw.trim()) {
+    revisedContractAmount = formatUsd(parseMoneyInput(updatedRaw))
+  }
   const cost =
     typeof m.proposedAmount === 'number'
       ? m.proposedAmount
@@ -492,8 +655,15 @@ export function initialChangeOrderState(args: {
     title: doc.title || strongField(html, 'Title'),
     description,
     reason: reasonLabelToValue(reasonLabel),
+    originalContractAmount,
+    originalDuration,
+    revisedContractAmount,
+    revisedDuration,
     costImpact: String(cost ?? 0),
     scheduleImpact: scheduleLabelToValue(scheduleLabelFromMeta),
     notes: (typeof m.notes === 'string' && m.notes) || extractH3Block(html, 'Notes') || '',
+    schedule: impact.schedule,
+    baseline: impact.baseline,
+    cost: impact.cost,
   }
 }

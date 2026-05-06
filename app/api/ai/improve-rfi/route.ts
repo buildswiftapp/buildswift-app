@@ -2,11 +2,25 @@ import { badRequest, ok, serverError, unauthorized } from '@/lib/server/api-resp
 import { getAuthContext } from '@/lib/server/auth'
 import { assertCanUseProFeature } from '@/lib/server/billing'
 import { getOpenAIClient } from '@/lib/server/openai'
+import { rfiStructuredImprovementSchema } from '@/lib/server/rfi-ai-schema'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 import { improveRfiSchema } from '@/lib/server/validators'
 
-const SYSTEM_PROMPT = `You are an expert at writing construction RFIs. Improve the given description to be clear, professional, and actionable. If the user mentions specific drawings, specs, or details, retain and emphasize them. Do not invent new questions - only clarify and sharpen the existing one. Return only the improved description text.`
+const NA = 'N/A'
+const NOT_PROVIDED = 'Not Provided'
+
+const SYSTEM_PROMPT = `You are an expert at writing construction RFIs. Respond with JSON only (no markdown).
+The JSON must have:
+- improvedDescription (string): clear, professional, actionable question/description. Do not invent site facts — only clarify/sharpen from the user's text and notes.
+
+- structured (object):
+  - summaryTitle: concise RFI subject line (same intent as improvedDescription; may match document title style)
+  - questionDetails.detailedQuestion, reasonForRequest, conflictIdentification, missingInformation, clarificationRequired
+  - reference.drawingSheetNumber, specificationSection, specificReference, location
+  - impacts.costImpact, scheduleImpact, description — use terse values for costImpact/scheduleImpact: "None", "Potential", or "Yes" unless user specified otherwise.
+
+If any field lacks evidence in input, use "${NA}" for short categorical fields or "${NOT_PROVIDED}" for narrative blanks as appropriate — never fabricate drawings, grids, spec sections, or locations.`
 
 export async function POST(req: Request) {
   const auth = await getAuthContext(req)
@@ -38,16 +52,43 @@ export async function POST(req: Request) {
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userMessage },
       ],
+      response_format: { type: 'json_object' },
     })
 
-    const improved =
+    const raw =
       typeof completion.choices[0]?.message?.content === 'string'
         ? completion.choices[0].message.content.trim()
         : ''
+    if (!raw) return serverError('AI improvement temporarily unavailable.')
 
-    if (!improved) return serverError('AI improvement temporarily unavailable.')
+    let parsedJson: Record<string, unknown>
+    try {
+      parsedJson = JSON.parse(raw) as Record<string, unknown>
+    } catch {
+      return serverError('AI improvement temporarily unavailable.')
+    }
 
-    return ok({ improvedDescription: improved })
+    const improvedDescription =
+      typeof parsedJson.improvedDescription === 'string' ? parsedJson.improvedDescription.trim() : ''
+
+    let structuredPayload: Record<string, unknown> | undefined
+    if (
+      parsedJson.structured &&
+      typeof parsedJson.structured === 'object' &&
+      !Array.isArray(parsedJson.structured)
+    ) {
+      const s = rfiStructuredImprovementSchema.safeParse(parsedJson.structured)
+      if (s.success) {
+        structuredPayload = s.data as unknown as Record<string, unknown>
+      }
+    }
+
+    if (!improvedDescription) return serverError('AI improvement temporarily unavailable.')
+
+    return ok({
+      improvedDescription,
+      ...(structuredPayload ? { structured: structuredPayload } : {}),
+    })
   } catch {
     return serverError('AI improvement temporarily unavailable.')
   }
