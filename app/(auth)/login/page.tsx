@@ -3,8 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import Image from 'next/image'
-import { Loader2 } from 'lucide-react'
+import { ArrowRight, Building2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -69,101 +68,123 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="app-shell flex min-h-screen flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="mb-8 flex justify-center">
-          <Image
-            src="/logo.png"
-            alt="BuildSwift"
-            width={280}
-            height={68}
-            className="h-14 w-auto max-w-full object-contain"
-            priority
-          />
+    <div
+      className="app-shell grid min-h-screen w-full lg:grid-cols-2"
+      style={{ backgroundColor: '#f4f6fb' }}
+    >
+      <aside
+        className="hidden flex-col justify-between p-12 text-white lg:flex"
+        style={{ backgroundColor: '#0b1424' }}
+      >
+        <div className="flex items-center gap-3">
+          <span
+            className="flex h-10 w-10 items-center justify-center rounded-xl text-white"
+            style={{ backgroundColor: '#3f63f3' }}
+            aria-hidden
+          >
+            <Building2 className="h-5 w-5" strokeWidth={2.1} />
+          </span>
+          <span className="text-xl font-bold tracking-tight">BuildSwift</span>
         </div>
 
-        <Card className="app-surface">
-          <CardHeader className="text-center">
-            <CardTitle>Welcome back</CardTitle>
-            <CardDescription>
-              Sign in to your account to continue
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit}>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor="email">Email</FieldLabel>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="you@company.com"
-                    value={formData.email}
-                    onChange={(e) =>
-                      setFormData({ ...formData, email: e.target.value })
-                    }
-                    autoComplete="email"
-                  />
-                </Field>
-                <Field>
-                  <div className="flex items-center justify-between">
+        <div className="max-w-xl">
+          <h1 className="text-4xl font-bold leading-tight tracking-tight sm:text-[2.6rem]">
+            Construction Document Management,
+            <br />
+            <span style={{ color: '#3f63f3' }}>Reimagined</span>
+          </h1>
+          <p className="mt-6 max-w-md text-base leading-relaxed text-white/70">
+            Streamline RFIs, Submittals, and Change Orders with AI-powered automation and seamless
+            collaboration.
+          </p>
+        </div>
+
+        <p className="text-xs text-white/50">Trusted by leading construction firms worldwide</p>
+      </aside>
+
+      <section className="flex flex-col items-center justify-center px-6 py-10 sm:px-12">
+        <div className="w-full max-w-[420px]">
+          <Card className="w-full rounded-xl border-0 shadow-md">
+            <CardHeader className="space-y-1 text-center">
+              <CardTitle className="text-2xl font-bold tracking-tight">Welcome back</CardTitle>
+              <CardDescription>Sign in to your account to continue</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSubmit}>
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor="email">Email</FieldLabel>
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder="you@company.com"
+                      value={formData.email}
+                      onChange={(e) =>
+                        setFormData({ ...formData, email: e.target.value })
+                      }
+                      autoComplete="email"
+                    />
+                  </Field>
+                  <Field>
                     <FieldLabel htmlFor="password">Password</FieldLabel>
-                    <Link
-                      href="/forgot-password"
-                      className="text-sm text-primary hover:underline"
-                    >
-                      Forgot password?
-                    </Link>
-                  </div>
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="Enter your password"
-                    value={formData.password}
-                    onChange={(e) =>
-                      setFormData({ ...formData, password: e.target.value })
-                    }
-                    autoComplete="current-password"
-                  />
-                </Field>
-              </FieldGroup>
+                    <Input
+                      id="password"
+                      type="password"
+                      placeholder="Enter your password"
+                      value={formData.password}
+                      onChange={(e) =>
+                        setFormData({ ...formData, password: e.target.value })
+                      }
+                      autoComplete="current-password"
+                    />
+                  </Field>
+                </FieldGroup>
 
-              {error && (
-                <p className="mt-4 text-sm text-destructive">{error}</p>
-              )}
-
-              <Button type="submit" className="mt-6 w-full" disabled={isLoading}>
-                {isLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Signing in...
-                  </>
-                ) : (
-                  'Sign in'
+                {error && (
+                  <p className="mt-4 text-sm text-destructive">{error}</p>
                 )}
-              </Button>
-            </form>
 
-            <div className="mt-6 text-center text-sm text-muted-foreground">
-              {"Don't have an account? "}
-              <Link href="/register" className="text-primary hover:underline">
-                Sign up
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
+                <Button
+                  type="submit"
+                  className="mt-6 h-11 w-full rounded-md text-white hover:brightness-110"
+                  style={{ backgroundColor: '#0f1d36' }}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Signing in...
+                    </>
+                  ) : (
+                    <>
+                      Sign in
+                      <ArrowRight className="ml-2 h-4 w-4" aria-hidden />
+                    </>
+                  )}
+                </Button>
+              </form>
 
-        <p className="mt-6 text-center text-sm text-muted-foreground">
-          By signing in, you agree to our{' '}
-          <Link href="/terms" className="text-primary hover:underline">
-            Terms of Service
-          </Link>{' '}
-          and{' '}
-          <Link href="/privacy" className="text-primary hover:underline">
-            Privacy Policy
-          </Link>
-        </p>
-      </div>
+              <div className="mt-6 text-center text-sm text-muted-foreground">
+                {"Don't have an account? "}
+                <Link href="/register" className="text-primary hover:underline">
+                  Sign up
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+
+          <p className="mt-6 text-center text-sm text-muted-foreground">
+            By signing in, you agree to our{' '}
+            <Link href="/terms" className="text-primary hover:underline">
+              Terms of Service
+            </Link>{' '}
+            and{' '}
+            <Link href="/privacy" className="text-primary hover:underline">
+              Privacy Policy
+            </Link>
+          </p>
+        </div>
+      </section>
     </div>
   )
 }
