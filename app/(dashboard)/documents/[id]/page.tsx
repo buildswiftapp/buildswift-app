@@ -1004,25 +1004,9 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                 <div className="border-b border-border pb-6">
                   <h2 className="text-lg font-semibold tracking-tight text-foreground">Change details</h2>
                   <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                    Set the reason, then capture schedule extension, project baseline length, and cost categories. Totals
-                    below update automatically.
+                    Capture baseline duration and schedule extension, plus cost categories. Totals below update
+                    automatically.
                   </p>
-                </div>
-
-                <div className="mt-6 max-w-xl">
-                  <label className={capLabel}>Reason for change</label>
-                  <Select value={co.reason} onValueChange={(v) => setCo((p) => ({ ...p, reason: v }))}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CO_REASON_OPTIONS.map((o) => (
-                        <SelectItem key={o.value} value={o.value}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                 </div>
 
                 <div className="mt-8">
@@ -1031,6 +1015,107 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                     Three independent blocks — validate and save separately.
                   </p>
                   <div className="mt-5 grid grid-cols-1 gap-5">
+                    <CoImpactCardShell
+                      accentBorder="border-t-[3px] border-t-muted-foreground"
+                      iconBg="bg-muted"
+                      iconClass="text-foreground"
+                      icon={<Timer aria-hidden />}
+                      title="Original project duration"
+                      description="Baseline length before this change order. Used with schedule impact for revised duration."
+                      footer={
+                        <p className="text-[11px] font-medium leading-relaxed text-muted-foreground">
+                          {baselineComputed.valid ? (
+                            <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-800 dark:text-emerald-300">
+                              Baseline · {derived.baselineDaysTotal} calendar day
+                              {derived.baselineDaysTotal === 1 ? '' : 's'}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2.5 py-1 text-amber-900 dark:text-amber-200">
+                              Enter a numeric duration
+                              {co.baseline.unit === 'days' ? ' and day type' : ''}
+                            </span>
+                          )}
+                        </p>
+                      }
+                    >
+                      <div className="space-y-3">
+                        <div>
+                          <label className={capLabel}>Duration</label>
+                          <Input
+                            id="co-baseline-duration"
+                            inputMode="numeric"
+                            value={co.baseline.value}
+                            onChange={(e) => {
+                              setImpactErrors((p) => ({ ...p, baselineDuration: undefined }))
+                              setCo((p) => ({ ...p, baseline: { ...p.baseline, value: e.target.value } }))
+                            }}
+                            placeholder="Whole number, e.g. 240"
+                          />
+                          {impactErrors.baselineDuration ? (
+                            <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDuration}</p>
+                          ) : null}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className={capLabel}>Unit</label>
+                            <Select
+                              value={co.baseline.unit}
+                              onValueChange={(v) =>
+                                setCo((p) => ({
+                                  ...p,
+                                  baseline: {
+                                    ...p.baseline,
+                                    unit: v === 'weeks' ? 'weeks' : 'days',
+                                    dayType: v === 'weeks' ? '' : p.baseline.dayType,
+                                  },
+                                }))
+                              }
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="days">Days</SelectItem>
+                                <SelectItem value="weeks">Weeks</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {co.baseline.unit === 'days' ? (
+                            <div>
+                              <label className={capLabel}>Day type</label>
+                              <Select
+                                value={co.baseline.dayType}
+                                onValueChange={(v) => {
+                                  setImpactErrors((p) => ({ ...p, baselineDayType: undefined }))
+                                  setCo((p) => ({
+                                    ...p,
+                                    baseline: {
+                                      ...p.baseline,
+                                      dayType:
+                                        v === 'business' ? 'business' : v === 'calendar' ? 'calendar' : '',
+                                    },
+                                  }))
+                                }}
+                              >
+                                <SelectTrigger className="w-full" id="co-baseline-day-type">
+                                  <SelectValue placeholder="Select" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="calendar">Calendar</SelectItem>
+                                  <SelectItem value="business">Business</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              {impactErrors.baselineDayType ? (
+                                <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDayType}</p>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </CoImpactCardShell>
+
                     <CoImpactCardShell
                       accentBorder="border-t-[3px] border-t-sky-500"
                       iconBg="bg-sky-500/10"
@@ -1170,107 +1255,6 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                     </CoImpactCardShell>
 
                     <CoImpactCardShell
-                      accentBorder="border-t-[3px] border-t-muted-foreground"
-                      iconBg="bg-muted"
-                      iconClass="text-foreground"
-                      icon={<Timer aria-hidden />}
-                      title="Original project duration"
-                      description="Baseline length before this change order. Used with schedule impact for revised duration."
-                      footer={
-                        <p className="text-[11px] font-medium leading-relaxed text-muted-foreground">
-                          {baselineComputed.valid ? (
-                            <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-800 dark:text-emerald-300">
-                              Baseline · {derived.baselineDaysTotal} calendar day
-                              {derived.baselineDaysTotal === 1 ? '' : 's'}
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2.5 py-1 text-amber-900 dark:text-amber-200">
-                              Enter a numeric duration
-                              {co.baseline.unit === 'days' ? ' and day type' : ''}
-                            </span>
-                          )}
-                        </p>
-                      }
-                    >
-                      <div className="space-y-3">
-                        <div>
-                          <label className={capLabel}>Duration</label>
-                          <Input
-                            id="co-baseline-duration"
-                            inputMode="numeric"
-                            value={co.baseline.value}
-                            onChange={(e) => {
-                              setImpactErrors((p) => ({ ...p, baselineDuration: undefined }))
-                              setCo((p) => ({ ...p, baseline: { ...p.baseline, value: e.target.value } }))
-                            }}
-                            placeholder="Whole number, e.g. 240"
-                          />
-                          {impactErrors.baselineDuration ? (
-                            <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDuration}</p>
-                          ) : null}
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className={capLabel}>Unit</label>
-                            <Select
-                              value={co.baseline.unit}
-                              onValueChange={(v) =>
-                                setCo((p) => ({
-                                  ...p,
-                                  baseline: {
-                                    ...p.baseline,
-                                    unit: v === 'weeks' ? 'weeks' : 'days',
-                                    dayType: v === 'weeks' ? '' : p.baseline.dayType,
-                                  },
-                                }))
-                              }
-                            >
-                              <SelectTrigger className="w-full">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="days">Days</SelectItem>
-                                <SelectItem value="weeks">Weeks</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          {co.baseline.unit === 'days' ? (
-                            <div>
-                              <label className={capLabel}>Day type</label>
-                              <Select
-                                value={co.baseline.dayType}
-                                onValueChange={(v) => {
-                                  setImpactErrors((p) => ({ ...p, baselineDayType: undefined }))
-                                  setCo((p) => ({
-                                    ...p,
-                                    baseline: {
-                                      ...p.baseline,
-                                      dayType:
-                                        v === 'business' ? 'business' : v === 'calendar' ? 'calendar' : '',
-                                    },
-                                  }))
-                                }}
-                              >
-                                <SelectTrigger className="w-full" id="co-baseline-day-type">
-                                  <SelectValue placeholder="Select" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="calendar">Calendar</SelectItem>
-                                  <SelectItem value="business">Business</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              {impactErrors.baselineDayType ? (
-                                <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDayType}</p>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    </CoImpactCardShell>
-
-                    <CoImpactCardShell
                       accentBorder="border-t-[3px] border-t-[#f97316]"
                       iconBg="bg-orange-500/10"
                       iconClass="text-orange-700 dark:text-orange-400"
@@ -1361,7 +1345,6 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                                 { key: 'materials', label: 'Materials' },
                                 { key: 'equipment', label: 'Equipment' },
                                 { key: 'subcontractor', label: 'Subcontractors' },
-                                { key: 'other', label: 'Other' },
                               ] as const
                             ).map((row, idx) => (
                               <div key={row.key}>
@@ -1390,18 +1373,44 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                                 </div>
                               </div>
                             ))}
-                          </div>
-
-                          <div>
-                            <label className={capLabel}>Markup % (optional)</label>
-                            <Input
-                              inputMode="decimal"
-                              value={co.cost.markupPercent}
-                              onChange={(e) =>
-                                setCo((p) => ({ ...p, cost: { ...p.cost, markupPercent: e.target.value } }))
-                              }
-                              placeholder="e.g. 10"
-                            />
+                            <div>
+                              <label className={capLabel}>Other</label>
+                              <div className="relative">
+                                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                                  $
+                                </span>
+                                <Input
+                                  inputMode="decimal"
+                                  value={co.cost.other}
+                                  onChange={(e) => {
+                                    setImpactErrors((p) => ({ ...p, costAtLeastOne: undefined }))
+                                    setCo((p) => ({
+                                      ...p,
+                                      cost: { ...p.cost, other: e.target.value },
+                                    }))
+                                  }}
+                                  className="pl-7 pr-14"
+                                  placeholder="0.00"
+                                />
+                                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                                  USD
+                                </span>
+                              </div>
+                            </div>
+                            <div>
+                              <label className={capLabel}>Markup % (optional)</label>
+                              <Input
+                                inputMode="decimal"
+                                value={co.cost.markupPercent}
+                                onChange={(e) =>
+                                  setCo((p) => ({
+                                    ...p,
+                                    cost: { ...p.cost, markupPercent: e.target.value },
+                                  }))
+                                }
+                                placeholder="e.g. 10"
+                              />
+                            </div>
                           </div>
 
                           {impactErrors.costAtLeastOne ? (
@@ -1437,49 +1446,53 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                   <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
                     Read-only totals derived from contract amount and impacts above — useful for PDFs and reviewers.
                   </p>
-                  <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
-                      <label className={capLabel}>Original contract amount</label>
-                      <div className="relative mt-2">
-                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                          $
-                        </span>
-                        <Input
-                          value={co.originalContractAmount}
-                          onChange={(e) =>
-                            setCo((p) => ({ ...p, originalContractAmount: e.target.value }))
-                          }
-                          className="pl-7 pr-14"
-                          placeholder="0.00"
-                          inputMode="decimal"
-                        />
-                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                          USD
-                        </span>
+                  <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    <div className="space-y-4">
+                      <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
+                        <label className={capLabel}>Original contract amount</label>
+                        <div className="relative mt-2">
+                          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                            $
+                          </span>
+                          <Input
+                            value={co.originalContractAmount}
+                            onChange={(e) =>
+                              setCo((p) => ({ ...p, originalContractAmount: e.target.value }))
+                            }
+                            className="pl-7 pr-14"
+                            placeholder="0.00"
+                            inputMode="decimal"
+                          />
+                          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                            USD
+                          </span>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
+                        <label className={capLabel}>Revised contract amount</label>
+                        <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-border bg-muted/50 px-3 font-mono text-sm font-semibold tabular-nums text-foreground">
+                          {derived.revisedContractAmount === null
+                            ? '—'
+                            : `$${formatUsd(derived.revisedContractAmount)}`}
+                        </div>
                       </div>
                     </div>
-                    <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
-                      <label className={capLabel}>Revised contract amount</label>
-                      <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-border bg-muted/50 px-3 font-mono text-sm font-semibold tabular-nums text-foreground">
-                        {derived.revisedContractAmount === null
-                          ? '—'
-                          : `$${formatUsd(derived.revisedContractAmount)}`}
+                    <div className="space-y-4">
+                      <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
+                        <label className={capLabel}>Original duration (normalized)</label>
+                        <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-border bg-muted/50 px-3 text-sm font-medium tabular-nums text-foreground">
+                          {derived.baselineDaysTotal
+                            ? `${derived.baselineDaysTotal} calendar days`
+                            : '—'}
+                        </div>
                       </div>
-                    </div>
-                    <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
-                      <label className={capLabel}>Original duration (normalized)</label>
-                      <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-border bg-muted/50 px-3 text-sm font-medium tabular-nums text-foreground">
-                        {derived.baselineDaysTotal
-                          ? `${derived.baselineDaysTotal} calendar days`
-                          : '—'}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
-                      <label className={capLabel}>Revised duration (normalized)</label>
-                      <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-border bg-muted/50 px-3 text-sm font-medium tabular-nums text-foreground">
-                        {derived.revisedDaysTotal === null
-                          ? '—'
-                          : `${derived.revisedDaysTotal} calendar days`}
+                      <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
+                        <label className={capLabel}>Revised duration (normalized)</label>
+                        <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-border bg-muted/50 px-3 text-sm font-medium tabular-nums text-foreground">
+                          {derived.revisedDaysTotal === null
+                            ? '—'
+                            : `${derived.revisedDaysTotal} calendar days`}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1583,22 +1596,6 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
           </div>
 
           <aside className="w-full min-w-0 space-y-6 lg:sticky lg:top-6 lg:self-start">
-            {docType === 'change_order' ? (
-              <div className={formCardClassName()}>
-                <h3 className="mb-5 text-lg font-semibold text-foreground">Categorization</h3>
-                <div className="space-y-4">
-                  <div>
-                    <label className={capLabel}>Reason</label>
-                    <p className="text-sm font-medium text-foreground">{reasonLabel}</p>
-                  </div>
-                  <div className="border-t border-border pt-4">
-                    <label className={capLabel}>Schedule impact</label>
-                    <p className="text-sm font-medium text-foreground">{scheduleLabel}</p>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
             <div className={formCardClassName()}>
               <h3 className="mb-5 text-lg font-semibold text-foreground">Summary</h3>
               <div className="space-y-4">
@@ -1678,6 +1675,21 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                     <div className="border-t border-border pt-4">
                       <p className="text-xs text-muted-foreground">Schedule Impact</p>
                       <p className="text-sm font-semibold text-foreground">{scheduleLabel}</p>
+                    </div>
+                    <div className="border-t border-border pt-4">
+                      <label className={capLabel}>Reason for change</label>
+                      <Select value={co.reason} onValueChange={(v) => setCo((p) => ({ ...p, reason: v }))}>
+                        <SelectTrigger className="mt-2 w-full">
+                          <SelectValue placeholder="Select reason" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CO_REASON_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>
+                              {o.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </>
                 ) : null}
