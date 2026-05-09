@@ -22,9 +22,11 @@ export type ReviewDecisionSummary = {
   decided_at: string
   reviewer_email: string
   reviewer_name: string | null
-  status: 'Approved' | 'Rejected'
+  status: 'Approved' | 'Answered' | 'Rejected'
   notes: string | null
 }
+
+type DocType = 'rfi' | 'submittal' | 'change_order'
 
 type ActivityRow = {
   id?: string | null
@@ -189,8 +191,9 @@ function ExpandableReviewerNotes({ text }: { text: string | null }) {
   )
 }
 
-export function DocumentActivityPanel(props: { documentId: string }) {
-  const { documentId } = props
+export function DocumentActivityPanel(props: { documentId: string; docType?: DocType }) {
+  const { documentId, docType } = props
+  const positiveOutcomeLabel = docType === 'rfi' ? 'Answered' : 'Approved'
   const [activity, setActivity] = useState<ActivityRow[]>([])
   const [reviewDecisions, setReviewDecisions] = useState<ReviewDecisionSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -308,7 +311,8 @@ export function DocumentActivityPanel(props: { documentId: string }) {
           <div className="mb-2">
             <h3 className="text-base font-semibold text-[#0f172a]">Reviewer responses</h3>
             <p className="mt-0.5 text-sm text-[#64748b]">
-              Each row is one reviewer decision (Approved or Rejected) with any notes they provided.
+              Each row is one reviewer decision ({positiveOutcomeLabel} or Rejected) with any notes
+              they provided.
             </p>
           </div>
           <div className="overflow-hidden rounded-lg border border-[#e2e8f0]">
@@ -352,9 +356,9 @@ export function DocumentActivityPanel(props: { documentId: string }) {
                         <Badge
                           variant="outline"
                           className={cn(
-                            d.status === 'Approved'
-                              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-                              : 'border-rose-200 bg-rose-50 text-rose-900'
+                            d.status === 'Rejected'
+                              ? 'border-rose-200 bg-rose-50 text-rose-900'
+                              : 'border-emerald-200 bg-emerald-50 text-emerald-900'
                           )}
                         >
                           {d.status}

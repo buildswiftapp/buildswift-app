@@ -336,10 +336,13 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
           {/* Status banner — uses the canonical reviewer outcome label when available. */}
           {alreadyDecided && (() => {
             const isApprove = payload.reviewStatus.decision === 'approve'
+            const isRfi = payload.documentContent.type === 'rfi'
             const outcomeLabel = submittedOutcome
               ? OUTCOME_LABELS[submittedOutcome]
               : isApprove
-                ? 'Approved'
+                ? isRfi
+                  ? 'Answered'
+                  : 'Approved'
                 : 'Rejected'
             return (
               <div
@@ -414,7 +417,11 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
           <div className="rounded-2xl border border-slate-200 bg-white shadow-md">
             <div className="border-b border-slate-100 px-7 py-6">
               <h2 className="text-xl font-bold text-slate-900">Submit Review</h2>
-              <p className="mt-1 text-sm text-slate-500">Add notes and sign if needed, then approve or reject.</p>
+              <p className="mt-1 text-sm text-slate-500">
+                {payload.documentContent.type === 'rfi'
+                  ? 'Add notes and sign if needed, then click Submit Answer.'
+                  : 'Add notes and sign if needed, then approve or reject.'}
+              </p>
             </div>
 
             <div className="px-7 py-7 space-y-7">

@@ -7,53 +7,65 @@ export type AppBillingPlan = {
   price: number
   documentsLimit: number
   aiGenerationsLimit: number
+  /** null = unlimited active projects */
+  maxActiveProjects: number | null
+  attachmentsAllowed: boolean
   features: string[]
+  tagline: string
+  promoFootnote?: string
 }
 
 export const BILLING_PLANS: AppBillingPlan[] = [
   {
     id: 'plan-free',
-    name: 'Free',
+    name: 'Starter',
     tier: 'free',
     price: 0,
     documentsLimit: 5,
-    aiGenerationsLimit: 0,
+    aiGenerationsLimit: 5,
+    maxActiveProjects: 1,
+    attachmentsAllowed: false,
+    tagline: 'Try BuildSwift and experience the speed.',
     features: [
-      'Up to 5 documents per month',
-      'Single reviewer only',
-      'No PDF export',
-      'No Missing Scope AI',
-      'No branding',
+      '1 active project',
+      '5 documents per month',
+      '5 AI assists per month',
     ],
   },
   {
     id: 'plan-professional',
-    name: 'Professional',
+    name: 'Builder',
     tier: 'professional',
-    price: 29,
+    price: 39,
     documentsLimit: -1,
     aiGenerationsLimit: -1,
+    maxActiveProjects: 5,
+    attachmentsAllowed: true,
+    tagline: 'For everyday project workflows.',
+    promoFootnote: 'Most users start here',
     features: [
+      'Up to 5 active projects',
       'Unlimited documents',
-      'Multi-reviewer approvals',
-      'PDF export',
-      'Missing Scope AI',
-      'Custom branding',
+      'Unlimited AI assists',
+      'Attachments included',
     ],
   },
   {
     id: 'plan-enterprise',
-    name: 'Enterprise',
+    name: 'Pro',
     tier: 'enterprise',
-    price: 49,
+    price: 79,
     documentsLimit: -1,
     aiGenerationsLimit: -1,
+    maxActiveProjects: null,
+    attachmentsAllowed: true,
+    tagline: 'Built for managing multiple projects at scale.',
     features: [
-      'Everything in Professional',
-      'SSO integration',
-      'Advanced analytics',
-      'API access',
-      'Dedicated support',
+      'Unlimited projects',
+      'Unlimited documents',
+      'Unlimited AI assists',
+      'Early access to new features',
+      'Attachments included',
     ],
   },
 ]
@@ -68,4 +80,3 @@ export function planForTier(raw: string | null | undefined): AppBillingPlan {
   const tier = normalizeTier(raw)
   return BILLING_PLANS.find((plan) => plan.tier === tier) ?? BILLING_PLANS[0]
 }
-

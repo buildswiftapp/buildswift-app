@@ -79,6 +79,8 @@ import {
 import { MissingScopeEditorSection } from '../../../components/missing-scope-editor-section'
 import { docTypeToMissingScopeType } from '@/lib/missing-scope-client'
 import { DocumentActivityPanel } from '@/app/components/document-activity-panel'
+import { RfiReasonsField } from '@/app/components/rfi-reasons-field'
+import { joinReasons } from '@/lib/rfi-reasons'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { Attachment as DocAttachment } from '@/lib/types'
 
@@ -216,7 +218,8 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     title: '',
     date: '',
     question: '',
-    reasonForRequest: '',
+    reasonsForRequest: [] as string[],
+    reasonForRequestOther: '',
     description: '',
     notes: '',
   })
@@ -437,8 +440,11 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     }
     const latest = getLatestVersion(doc.document_versions)
     const prevMeta = (latest?.metadata as Record<string, unknown>) ?? {}
+    const reasonsJoined = joinReasons(rfi.reasonsForRequest, rfi.reasonForRequestOther)
     const descriptionBody = buildRfiDescriptionBody({
-      reasonForRequest: rfi.reasonForRequest.trim(),
+      reasonForRequest: reasonsJoined,
+      reasonsForRequest: rfi.reasonsForRequest,
+      reasonForRequestOther: rfi.reasonForRequestOther.trim(),
       question: rfi.question.trim(),
       description: rfi.description,
       notes: rfi.notes,
@@ -451,7 +457,9 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
         ...prevMeta,
         rfiDate: rfi.date || undefined,
         question: rfi.question.trim() || undefined,
-        reasonForRequest: rfi.reasonForRequest.trim() || undefined,
+        reasonForRequest: reasonsJoined || undefined,
+        reasonsForRequest: rfi.reasonsForRequest.length ? rfi.reasonsForRequest : undefined,
+        reasonForRequestOther: rfi.reasonForRequestOther.trim() || undefined,
         notes: rfi.notes || undefined,
         attachments: toDocAttachments(attachments),
       },
@@ -836,13 +844,16 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                         onChange={(e) => setRfi((p) => ({ ...p, title: e.target.value }))}
                       />
                     </div>
-                    <div className="w-full shrink-0 space-y-2 sm:w-[min(22rem,40%)] sm:max-w-md">
-                      <label className={capLabel}>Reason for request</label>
-                      <Input
-                        value={rfi.reasonForRequest}
-                        onChange={(e) => setRfi((p) => ({ ...p, reasonForRequest: e.target.value }))}
-                        placeholder="e.g., Drawing conflict, omitted scope..."
-                        className="h-8 w-full text-xs"
+                    <div className="w-full shrink-0 sm:w-[min(28rem,50%)] sm:max-w-lg">
+                      <RfiReasonsField
+                        selected={rfi.reasonsForRequest}
+                        other={rfi.reasonForRequestOther}
+                        onSelectedChange={(next) =>
+                          setRfi((p) => ({ ...p, reasonsForRequest: next }))
+                        }
+                        onOtherChange={(next) =>
+                          setRfi((p) => ({ ...p, reasonForRequestOther: next }))
+                        }
                       />
                     </div>
                   </div>
@@ -903,6 +914,13 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                   else if (docType === 'submittal') setSub((p) => ({ ...p, description: v }))
                   else setCo((p) => ({ ...p, description: v }))
                 }}
+                onRfiReasonsApply={({ selected, other }) =>
+                  setRfi((p) => ({
+                    ...p,
+                    reasonsForRequest: Array.from(new Set([...p.reasonsForRequest, ...selected])),
+                    reasonForRequestOther: other || p.reasonForRequestOther,
+                  }))
+                }
                 aiNotes={docType === 'rfi' ? rfi.notes : docType === 'submittal' ? sub.notes : co.notes}
                 rows={8}
               />
@@ -1559,7 +1577,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
               </TabsContent>
 
               <TabsContent value="activity" className="mt-4 outline-none">
-                <DocumentActivityPanel documentId={id} />
+                <DocumentActivityPanel documentId={id} docType={docType} />
               </TabsContent>
             </Tabs>
           </div>

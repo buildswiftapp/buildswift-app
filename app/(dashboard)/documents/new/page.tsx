@@ -10,6 +10,7 @@ import {
   Eye,
   Save,
   FileImage,
+  Paperclip,
 } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -29,6 +30,8 @@ import { uploadPendingAttachments } from '@/lib/supabase/upload-attachments'
 import { MissingScopeEditorSection } from '../../../components/missing-scope-editor-section'
 import { docTypeToMissingScopeType } from '@/lib/missing-scope-client'
 import { buildRfiDescriptionBody, buildSubmittalDescriptionBody } from '@/lib/document-html'
+import { RfiReasonsField } from '@/app/components/rfi-reasons-field'
+import { joinReasons } from '@/lib/rfi-reasons'
 
 const PAGE_BG = '#f1f5f9'
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
@@ -86,7 +89,8 @@ function NewDocumentContent() {
     title: '',
     date: new Date().toISOString().slice(0, 10),
     dueDate: '',
-    reasonForRequest: '',
+    reasonsForRequest: [] as string[],
+    reasonForRequestOther: '',
     description: '',
     submittalType: '',
     specSection: '',
@@ -206,10 +210,17 @@ function NewDocumentContent() {
         type: a.type,
       }))
 
+      const reasonsJoined =
+        formData.type === 'rfi'
+          ? joinReasons(formData.reasonsForRequest, formData.reasonForRequestOther)
+          : ''
+
       const descriptionBody =
         formData.type === 'rfi'
           ? buildRfiDescriptionBody({
-              reasonForRequest: formData.reasonForRequest.trim(),
+              reasonForRequest: reasonsJoined,
+              reasonsForRequest: formData.reasonsForRequest,
+              reasonForRequestOther: formData.reasonForRequestOther.trim(),
               question: '',
               description: formData.description,
               notes: formData.notes,
@@ -233,8 +244,14 @@ function NewDocumentContent() {
           metadata: {
             rfiDate: formData.type === 'rfi' ? formData.date : undefined,
             reasonForRequest:
-              formData.type === 'rfi' && formData.reasonForRequest.trim()
-                ? formData.reasonForRequest.trim()
+              formData.type === 'rfi' && reasonsJoined ? reasonsJoined : undefined,
+            reasonsForRequest:
+              formData.type === 'rfi' && formData.reasonsForRequest.length
+                ? formData.reasonsForRequest
+                : undefined,
+            reasonForRequestOther:
+              formData.type === 'rfi' && formData.reasonForRequestOther.trim()
+                ? formData.reasonForRequestOther.trim()
                 : undefined,
             submittalDate: formData.type === 'submittal' ? formData.date : undefined,
             actionNeededBy: formData.dueDate ? formData.dueDate : undefined,
@@ -283,6 +300,12 @@ function NewDocumentContent() {
 
   const hintClass = 'mt-1.5 text-xs text-[#64748b]'
 
+  const PRIORITY_DOTS: Record<'low' | 'normal' | 'urgent', string> = {
+    low: 'bg-[#10B981]',
+    normal: 'bg-[#6366F1]',
+    urgent: 'bg-[#EF4444]',
+  }
+
   const priorityBtn = (key: 'low' | 'normal' | 'urgent', label: string) => {
     const on = formData.priority === key
     return (
@@ -291,12 +314,13 @@ function NewDocumentContent() {
         type="button"
         onClick={() => setFormData((p) => ({ ...p, priority: key }))}
         className={cn(
-          'h-12 flex-1 rounded-lg border text-sm font-semibold transition-colors',
+          'flex h-12 flex-1 items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition-colors',
           on
-            ? 'border-[#0f172a] bg-[#0f172a] text-white shadow-none'
+            ? 'border-[#6366F1] bg-white text-[#6366F1]'
             : 'border-[#e2e8f0] bg-white text-[#475569] hover:border-[#cbd5e1] hover:bg-[#f8fafc]'
         )}
       >
+        <span className={cn('h-2 w-2 shrink-0 rounded-full', PRIORITY_DOTS[key])} />
         {label}
       </button>
     )
@@ -331,7 +355,7 @@ function NewDocumentContent() {
               <Button
                 type="button"
                 variant="outline"
-                className="gap-2 border-2 border-dashed border-[#60a5fa] bg-white text-[#1e3a8a] shadow-sm hover:bg-[#eff6ff] sm:shrink-0"
+                className="gap-2 sm:shrink-0"
                 onClick={() => void handleSubmit(true)}
                 disabled={isSubmitting}
               >
@@ -341,7 +365,7 @@ function NewDocumentContent() {
               <Button
                 type="button"
                 variant="default"
-                className="min-w-[10rem] !bg-[#0b1d3a] text-white shadow-[0_4px_14px_rgba(15,23,42,0.25)] hover:!bg-[#132b4f] hover:brightness-100 sm:shrink-0"
+                className="min-w-[10rem] sm:shrink-0"
                 onClick={() => void handleSubmit(false)}
                 disabled={isSubmitting}
               >
@@ -429,13 +453,16 @@ function NewDocumentContent() {
                         placeholder="e.g., Structural Clearance Issue at Grid Line C-12"
                       />
                     </div>
-                    <div className="w-full shrink-0 space-y-2 sm:w-[min(22rem,40%)] sm:max-w-md">
-                      <label className={capLabel}>Reason for request</label>
-                      <Input
-                        value={formData.reasonForRequest}
-                        onChange={(e) => setFormData((p) => ({ ...p, reasonForRequest: e.target.value }))}
-                        placeholder="e.g., Spec vs. drawing mismatch..."
-                        className="h-8 w-full text-xs"
+                    <div className="w-full shrink-0 sm:w-[min(28rem,50%)] sm:max-w-lg">
+                      <RfiReasonsField
+                        selected={formData.reasonsForRequest}
+                        other={formData.reasonForRequestOther}
+                        onSelectedChange={(next) =>
+                          setFormData((p) => ({ ...p, reasonsForRequest: next }))
+                        }
+                        onOtherChange={(next) =>
+                          setFormData((p) => ({ ...p, reasonForRequestOther: next }))
+                        }
                       />
                     </div>
                   </div>
@@ -477,6 +504,13 @@ function NewDocumentContent() {
                 documentApiType={docTypeToMissingScopeType(formData.type as DocumentType)}
                 value={formData.description}
                 onChange={(v) => setFormData((p) => ({ ...p, description: v }))}
+                onRfiReasonsApply={({ selected, other }) =>
+                  setFormData((p) => ({
+                    ...p,
+                    reasonsForRequest: Array.from(new Set([...p.reasonsForRequest, ...selected])),
+                    reasonForRequestOther: other || p.reasonForRequestOther,
+                  }))
+                }
                 aiNotes={formData.notes}
                 rows={8}
                 placeholder={
@@ -651,20 +685,28 @@ function NewDocumentContent() {
               </div>
             </div>
 
-            <div className="relative overflow-hidden rounded-xl border border-[#e2e8f0] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-              <div
-                className="aspect-[4/3] bg-cover bg-center bg-no-repeat"
-                style={{
-                  backgroundImage:
-                    "url('https://lh3.googleusercontent.com/aida-public/AB6AXuD7_4vd9OR1EKDJrX4T4pU1yOiptI0UoYbbOj4vqoVlL2cp6BJs173PepMwegslSa7ee1TNhCyjvXkiUUuL_PuNaxYgDwpRZ0TxEEn4NB7oKeW8ql6vx0K1FXp1eLA9iAI3P4R2b_HoBBmqCRTbBkmL2XsW7HHZWjryVmWG9mrQfD1c4WuCt-r2kwYqSfqc77yaaGEQSiKQhbm5-5c1i_P2TL-OpAedYi3Bw-VvmEauxJOLSm2bPWzsD5_bDiT-1yojYmMWyNu58d4')",
-                }}
-              />
-              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
-              <div className="absolute bottom-4 left-4 right-4 text-white">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/80">Reference context</p>
-                <p className="mt-1 text-xl font-bold tracking-tight">Grid Sector Alpha-9</p>
-                <p className="mt-1 text-xs text-white/70">Link on-site photos and drawings to this request for reviewers.</p>
+            <div className="rounded-xl border border-[#e2e8f0] bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+              <h3 className="mb-4 text-lg font-semibold text-[#0f172a]">Reference Context</h3>
+              <div className="overflow-hidden rounded-lg">
+                <div
+                  className="aspect-[4/3] bg-cover bg-center bg-no-repeat"
+                  style={{
+                    backgroundImage:
+                      "url('https://lh3.googleusercontent.com/aida-public/AB6AXuD7_4vd9OR1EKDJrX4T4pU1yOiptI0UoYbbOj4vqoVlL2cp6BJs173PepMwegslSa7ee1TNhCyjvXkiUUuL_PuNaxYgDwpRZ0TxEEn4NB7oKeW8ql6vx0K1FXp1eLA9iAI3P4R2b_HoBBmqCRTbBkmL2XsW7HHZWjryVmWG9mrQfD1c4WuCt-r2kwYqSfqc77yaaGEQSiKQhbm5-5c1i_P2TL-OpAedYi3Bw-VvmEauxJOLSm2bPWzsD5_bDiT-1yojYmMWyNu58d4')",
+                  }}
+                />
               </div>
+              <div className="mt-4">
+                <p className="font-semibold text-[#0f172a]">Grid Sector Alpha-9</p>
+                <p className="mt-1 text-sm text-[#64748b]">Link on-site photos and drawings to this request for reviewers.</p>
+              </div>
+              <button
+                type="button"
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-[#e2e8f0] bg-white py-2.5 text-sm font-medium text-[#0f172a] hover:bg-[#f8fafc]"
+              >
+                <Paperclip className="h-4 w-4" />
+                Manage Reference
+              </button>
             </div>
           </aside>
         </div>

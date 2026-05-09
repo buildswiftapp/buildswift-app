@@ -1,6 +1,7 @@
 import { badRequest, ok, serverError, unauthorized } from '@/lib/server/api-response'
+import { writeAuditLog } from '@/lib/server/audit'
 import { getAuthContext } from '@/lib/server/auth'
-import { assertCanUseProFeature } from '@/lib/server/billing'
+import { assertCanUseAiAssist } from '@/lib/server/billing'
 import { getOpenAIClient } from '@/lib/server/openai'
 import { rfiStructuredImprovementSchema } from '@/lib/server/rfi-ai-schema'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
@@ -28,8 +29,8 @@ export async function POST(req: Request) {
   if (!auth.accountId) return badRequest('Account context is unavailable.')
   const supabase = createSupabaseAdminClient() ?? (await createSupabaseServerClient())
   if (!supabase) return serverError('Supabase is not configured')
-  const proGate = await assertCanUseProFeature(supabase as any, auth.accountId, 'Missing Scope AI')
-  if (!proGate.ok) return badRequest(proGate.reason)
+  const aiGate = await assertCanUseAiAssist(supabase as any, auth.accountId)
+  if (!aiGate.ok) return badRequest(aiGate.reason)
 
   const parsed = improveRfiSchema.safeParse(await req.json().catch(() => ({})))
   if (!parsed.success) return badRequest('Invalid payload', parsed.error.flatten())
@@ -84,6 +85,18 @@ export async function POST(req: Request) {
     }
 
     if (!improvedDescription) return serverError('AI improvement temporarily unavailable.')
+
+    await writeAuditLog(
+      {
+        accountId: auth.accountId,
+        actorType: 'user',
+        actorUserId: auth.user.id,
+        actorEmail: auth.user.email ?? null,
+        eventType: 'ai.generation',
+        eventData: { feature: 'improve_rfi', model },
+      },
+      supabase as any
+    )
 
     return ok({
       improvedDescription,

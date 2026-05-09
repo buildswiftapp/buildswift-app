@@ -496,7 +496,9 @@ export default function SendForReviewPage() {
                       <p className="text-sm font-semibold text-[#0f172a]">{r.reviewer_email}</p>
                       <span className="text-xs font-semibold text-[#64748b]">
                         {r.decision === 'approve'
-                          ? 'Approved'
+                          ? doc?.doc_type === 'rfi'
+                            ? 'Answered'
+                            : 'Approved'
                           : r.decision === 'reject'
                             ? 'Rejected'
                             : 'Pending'}

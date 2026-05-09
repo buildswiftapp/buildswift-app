@@ -77,13 +77,14 @@ export type ReviewDecisionSummary = {
   decided_at: string
   reviewer_email: string
   reviewer_name: string | null
-  status: 'Approved' | 'Rejected'
+  status: 'Approved' | 'Answered' | 'Rejected'
   notes: string | null
 }
 
 async function fetchReviewDecisionsForDocument(
   supabase: SupabaseClient,
-  documentId: string
+  documentId: string,
+  docType: 'rfi' | 'submittal' | 'change_order'
 ): Promise<ReviewDecisionSummary[]> {
   const { data: cycles, error: cyclesError } = await supabase
     .from('review_cycles')
@@ -127,7 +128,14 @@ async function fetchReviewDecisionsForDocument(
       decided_at: decidedAt,
       reviewer_email: reviewerEmail,
       reviewer_name: fullName.length > 0 ? fullName : null,
-      status: decision === 'approve' ? 'Approved' : 'Rejected',
+      // RFI reviewer outcomes are surfaced to users as "Answered" rather than
+      // "Approved" — submittals and change orders keep the "Approved" label.
+      status:
+        decision === 'approve'
+          ? docType === 'rfi'
+            ? 'Answered'
+            : 'Approved'
+          : 'Rejected',
       notes: rawNotes.length > 0 ? rawNotes : null,
     })
   }
@@ -166,7 +174,8 @@ export async function GET(req: Request, { params }: Params) {
 
   const raw = (data ?? []) as Record<string, unknown>[]
   const activity = await enrichAuditRowsWithActorDisplayNames(supabase, raw)
-  const reviewDecisions = await fetchReviewDecisionsForDocument(supabase, id)
+  const docType = (doc as { doc_type?: 'rfi' | 'submittal' | 'change_order' }).doc_type ?? 'rfi'
+  const reviewDecisions = await fetchReviewDecisionsForDocument(supabase, id, docType)
   return ok({ activity, reviewDecisions })
 }
 

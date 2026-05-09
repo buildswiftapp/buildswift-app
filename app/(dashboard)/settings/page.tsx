@@ -565,24 +565,24 @@ export default function SettingsPage() {
   const colorPickerValue = parseBrandingPrimaryColor(branding.primary_color) || '#2C7DA0'
 
   return (
-    <div className="app-page">
-      <div className="mx-auto max-w-5xl space-y-8">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="app-section-title">Settings</h1>
-            <p className="app-section-subtitle">Manage your account settings and preferences</p>
-          </div>
-          <Button
-            type="button"
-            className="h-11 shrink-0 gap-2 rounded-lg bg-[#0f172a] px-5 text-white hover:bg-[#1e293b] dark:bg-[#0f172a] dark:hover:bg-[#1e293b]"
-            disabled={headerSaveDisabled}
-            onClick={() => void handleHeaderSave()}
-          >
-            <Save className="h-4 w-4" aria-hidden />
-            {headerSavePending ? 'Saving…' : 'Save Changes'}
-          </Button>
+    <div className="min-h-full bg-white">
+      <div className="flex items-center justify-between gap-4 border-b border-[#e2e8f0] bg-white px-6 py-4">
+        <div className="min-w-0">
+          <h1 className="text-[22px] font-bold leading-tight text-[#111827]">Settings</h1>
+          <p className="mt-1 text-sm leading-tight text-[#64748b]">Manage your account settings and preferences</p>
         </div>
-
+        <Button
+          type="button"
+          className="h-9 shrink-0 gap-2 rounded-lg bg-[#6366F1] px-4 text-sm text-white hover:bg-[#4F46E5]"
+          disabled={headerSaveDisabled}
+          onClick={() => void handleHeaderSave()}
+        >
+          <Save className="h-4 w-4" aria-hidden />
+          {headerSavePending ? 'Saving…' : 'Save Changes'}
+        </Button>
+      </div>
+      <div className="app-page">
+      <div className="mx-auto max-w-5xl space-y-8">
         <Tabs value={settingsTab} onValueChange={setSettingsTab} className="space-y-6">
           <TabsList className="flex h-auto w-full flex-wrap items-stretch justify-start gap-2 rounded-xl border border-border bg-[#f4f6f8] p-1.5 dark:bg-muted/40">
             <TabsTrigger
@@ -640,7 +640,7 @@ export default function SettingsPage() {
                     <button
                       type="button"
                       aria-label="Change profile photo"
-                      className="absolute -bottom-0.5 -right-0.5 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-[#2563eb] text-white shadow-md transition hover:bg-[#1d4ed8]"
+                      className="absolute -bottom-0.5 -right-0.5 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-[#6366F1] text-white shadow-md transition hover:bg-[#4F46E5]"
                       onClick={() =>
                         toast.message('Coming soon', {
                           description: 'Profile photo upload is not available yet.',
@@ -1001,6 +1001,7 @@ export default function SettingsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
     </div>
   )
 }

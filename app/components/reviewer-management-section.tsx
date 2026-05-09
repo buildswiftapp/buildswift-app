@@ -200,7 +200,7 @@ export function ReviewerManagementSection({
             <button
               type="button"
               onClick={addReviewer}
-              className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-[6px] bg-[#0f172a] text-white transition-colors hover:bg-[#1e293b]"
+              className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-[6px] bg-[#6366F1] text-white transition-colors hover:bg-[#4F46E5]"
               aria-label="Add reviewer"
             >
               <UserPlus className="h-5 w-5" strokeWidth={2} />
@@ -271,7 +271,7 @@ export function ReviewerManagementSection({
                     className={cn(
                       'rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
                       expiresInDays === d
-                        ? 'border-[#2563eb] bg-[#eff6ff] text-[#1d4ed8]'
+                        ? 'border-[#6366F1] bg-[#EEF2FF] text-[#6366F1]'
                         : 'border-[#e2e8f0] bg-white text-[#475569] hover:bg-[#f8fafc]'
                     )}
                   >
@@ -289,7 +289,7 @@ export function ReviewerManagementSection({
               type="button"
               onClick={() => void handleSend()}
               disabled={ccReviewers.length === 0 || sending}
-              className="h-12 w-full bg-[#2563eb] hover:bg-[#1d4ed8]"
+              className="h-12 w-full bg-[#6366F1] hover:bg-[#4F46E5]"
             >
               <Send className={cn('mr-2 h-4 w-4', sending && 'animate-spin')} />
               {sending ? 'Sending…' : 'Send'}

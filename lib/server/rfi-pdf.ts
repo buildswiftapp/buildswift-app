@@ -271,7 +271,7 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
       sigRaw && (sigRaw.startsWith('data:') || /^https?:\/\//i.test(sigRaw)) ? sigRaw : null
     const actionLabel =
       r.action ||
-      (r.signature === 'approved' ? 'Approved' : r.signature === 'rejected' ? 'Rejected' : 'Pending review')
+      (r.signature === 'approved' ? 'Answered' : r.signature === 'rejected' ? 'Rejected' : 'Pending review')
     const typedSig = (r.signatureName || '').trim()
     const signatureTextFallback =
       signatureImageUri

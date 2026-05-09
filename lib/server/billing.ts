@@ -1,3 +1,6 @@
+import { normalizeTier, planForTier } from '@/lib/billing-plans'
+import { attachmentsPayloadNonEmpty } from '@/lib/server/attachments'
+
 type SupabaseLike = {
   from: (table: string) => {
     select: (columns: string) => any
@@ -14,7 +17,8 @@ type BillingState = {
   cancelAt: string | null
 }
 
-export const FREE_DOCUMENTS_PER_MONTH = 5
+const starterPlan = planForTier('free')
+export const FREE_DOCUMENTS_PER_MONTH = starterPlan.documentsLimit
 
 const ACTIVE_PRO_STATUSES = new Set(['active', 'trialing'])
 
@@ -49,6 +53,19 @@ function isActiveProBilling(state: BillingState) {
   return periodEndMs > Date.now()
 }
 
+/** Paid Builder/Pro caps; when not paid-active, Starter rules apply (1 active project). */
+export function activeProjectCapForBillingState(billing: BillingState): number | null {
+  if (!isActiveProBilling(billing)) return starterPlan.maxActiveProjects ?? 1
+  const tier = normalizeTier(billing.subscriptionTier)
+  const plan = planForTier(tier)
+  return plan.maxActiveProjects
+}
+
+export function attachmentsAllowedForBillingState(billing: BillingState): boolean {
+  if (!isActiveProBilling(billing)) return starterPlan.attachmentsAllowed
+  return planForTier(billing.subscriptionTier).attachmentsAllowed
+}
+
 function shouldDowngradeExpiredAccount(state: BillingState) {
   if (!isProTier(state.subscriptionTier)) return false
   if (!state.currentPeriodEnd) return false
@@ -71,8 +88,6 @@ async function countCurrentMonthDocumentsFallback(
   const tables = ['rfi_documents', 'submittal_documents', 'change_order_documents']
   let total = 0
   for (const table of tables) {
-    // Some Supabase client typings in this repo expose `select(columns)` only.
-    // Cast to `any` so we can use the runtime-supported `(columns, options)` overload.
     const { count, error } = await (supabase.from(table) as any)
       .select('id', { count: 'exact', head: true })
       .eq('account_id', accountId)
@@ -144,6 +159,62 @@ export async function getMonthlyDocumentUsage(
   return typeof data?.documents_created === 'number' ? data.documents_created : 0
 }
 
+export async function countActiveProjects(supabase: SupabaseLike, accountId: string): Promise<number> {
+  try {
+    const { count, error } = await (supabase.from('projects') as any)
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId)
+      .eq('status', 'active')
+    if (error) throw new Error(error.message)
+    return typeof count === 'number' ? count : 0
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Monthly `ai.generation` audit events (UTC calendar month).
+ * Returns 0 if audit_logs errors so callers stay resilient.
+ */
+export async function getMonthlyAiGenerationCount(
+  supabase: SupabaseLike,
+  accountId: string,
+  date = new Date()
+): Promise<number> {
+  try {
+    const { startIso, endIso } = monthWindow(date)
+    const { count, error } = await (supabase.from('audit_logs') as any)
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId)
+      .eq('event_type', 'ai.generation')
+      .gte('created_at', startIso)
+      .lt('created_at', endIso)
+    if (error) return 0
+    return typeof count === 'number' ? count : 0
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * All-time `ai.generation` audit count (legacy / diagnostics).
+ */
+export async function getAccountAiGenerationCount(
+  supabase: SupabaseLike,
+  accountId: string
+): Promise<number> {
+  try {
+    const { count, error } = await (supabase.from('audit_logs') as any)
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId)
+      .eq('event_type', 'ai.generation')
+    if (error) return 0
+    return typeof count === 'number' ? count : 0
+  } catch {
+    return 0
+  }
+}
+
 export async function incrementMonthlyDocumentUsage(
   supabase: SupabaseLike,
   accountId: string,
@@ -175,17 +246,91 @@ export async function assertCanCreateDocument(
   if (isActiveProBilling(billing)) return { ok: true }
 
   const used = await getMonthlyDocumentUsage(supabase, accountId)
-  if (used >= FREE_DOCUMENTS_PER_MONTH) {
+  const docLimit = starterPlan.documentsLimit
+  if (used >= docLimit) {
     if (billing.billingStatus === 'past_due') {
       return {
         ok: false,
         reason:
-          'Your subscription is past due and free document limits now apply. Update billing in Billing Settings.',
+          'Your subscription is past due and Starter document limits apply. Update billing on the Billing page.',
       }
     }
     return {
       ok: false,
-      reason: 'Free plan limit reached (5 documents/month). Upgrade to Pro in Billing Settings.',
+      reason: `Starter plan limit reached (${docLimit} documents per month). Upgrade to Builder or Pro on the Billing page.`,
+    }
+  }
+  return { ok: true }
+}
+
+export async function assertCanCreateProject(
+  supabase: SupabaseLike,
+  accountId: string
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const billing = await getAccountBillingState(supabase, accountId)
+  const cap = activeProjectCapForBillingState(billing)
+  if (cap === null) return { ok: true }
+
+  const count = await countActiveProjects(supabase, accountId)
+  if (count >= cap) {
+    if (!isActiveProBilling(billing)) {
+      return {
+        ok: false,
+        reason: `Starter plan allows ${cap} active project${cap === 1 ? '' : 's'}. Upgrade to Builder or Pro on the Billing page to add more.`,
+      }
+    }
+    const tier = normalizeTier(billing.subscriptionTier)
+    if (tier === 'professional') {
+      return {
+        ok: false,
+        reason: `Builder plan allows up to ${cap} active projects. Upgrade to Pro on the Billing page for unlimited projects, or archive a project.`,
+      }
+    }
+    return {
+      ok: false,
+      reason: `You have reached your plan limit of ${cap} active project${cap === 1 ? '' : 's'}.`,
+    }
+  }
+  return { ok: true }
+}
+
+export async function assertCanSyncDocumentAttachments(
+  supabase: SupabaseLike,
+  accountId: string,
+  attachmentsRaw: unknown
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!attachmentsPayloadNonEmpty(attachmentsRaw)) return { ok: true }
+  const billing = await getAccountBillingState(supabase, accountId)
+  if (!attachmentsAllowedForBillingState(billing)) {
+    return {
+      ok: false,
+      reason:
+        'Attachments are included on Builder and Pro. Upgrade on the Billing page to attach files.',
+    }
+  }
+  return { ok: true }
+}
+
+export async function assertCanUseAiAssist(
+  supabase: SupabaseLike,
+  accountId: string
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const billing = await getAccountBillingState(supabase, accountId)
+  if (isActiveProBilling(billing)) return { ok: true }
+
+  const used = await getMonthlyAiGenerationCount(supabase, accountId)
+  const aiCap = starterPlan.aiGenerationsLimit
+  if (used >= aiCap) {
+    if (billing.billingStatus === 'past_due') {
+      return {
+        ok: false,
+        reason:
+          'Your subscription is past due and Starter AI limits apply. Update billing on the Billing page.',
+      }
+    }
+    return {
+      ok: false,
+      reason: `Starter plan allows ${aiCap} AI assists per month. Upgrade to Builder or Pro on the Billing page.`,
     }
   }
   return { ok: true }
@@ -201,12 +346,12 @@ export async function assertCanUseProFeature(
   if (billing.billingStatus === 'past_due') {
     return {
       ok: false,
-      reason: `Your subscription is past due. Update payment method in Billing Settings to use ${featureName}.`,
+      reason: `Your subscription is past due. Update payment method on the Billing page to use ${featureName}.`,
     }
   }
   return {
     ok: false,
-    reason: `${featureName} is a Pro feature. Upgrade in Billing Settings to continue.`,
+    reason: `${featureName} requires Builder or Pro. Upgrade on the Billing page.`,
   }
 }
 
@@ -225,4 +370,3 @@ export async function downgradeAccountToFree(supabase: SupabaseLike, accountId: 
     .eq('id', accountId)
   if (error) throw new Error(error.message)
 }
-

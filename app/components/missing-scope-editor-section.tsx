@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import type { MissingScopeApiType } from '@/lib/missing-scope-client'
 import type { RfiStructuredImprovement } from '@/lib/server/rfi-ai-schema'
+import { parseLegacyReasons } from '@/lib/rfi-reasons'
 
 const MIN_DESCRIPTION_LENGTH = 10
 const HELPER_TEXT = 'Enter a brief description first so AI can improve it.'
@@ -35,8 +36,9 @@ type ImprovementResult =
 function getUiConfig(documentApiType: MissingScopeApiType) {
   if (documentApiType === 'RFI') {
     return {
-      prompt: 'Want help making this request clearer and more complete?',
-      buttonLabel: '✨ Improve & Clarify',
+      prompt: 'Need help writing a clearer request?',
+      helperText: 'AI can review your description and suggest improvements.',
+      buttonLabel: '✨ Improve with AI',
       runningLabel: 'Improving…',
       icon: Sparkles,
     }
@@ -44,13 +46,15 @@ function getUiConfig(documentApiType: MissingScopeApiType) {
   if (documentApiType === 'Submittal') {
     return {
       prompt: 'Want to make this submittal description more complete and professional?',
+      helperText: 'AI can review your description and suggest improvements.',
       buttonLabel: '✨ Improve & Complete',
       runningLabel: 'Improving…',
       icon: Sparkles,
     }
   }
   return {
-    prompt: 'Want AI to improve and standardize this change description, reason, and references?',
+    prompt: 'Need help improving this change description?',
+    helperText: 'AI can review and standardize your description, reason, and references.',
     buttonLabel: '✨ Improve with AI',
     runningLabel: 'Improving…',
     icon: Sparkles,
@@ -63,6 +67,13 @@ export function MissingScopeEditorSection(props: {
   onChange: (next: string) => void
   /** When user applies RFI improvement; merge into document metadata via parent. */
   onRfiStructuredImprove?: (structured: RfiStructuredImprovement) => void
+  /**
+   * RFI multi-select reasons: when the AI's improved `reasonForRequest` is
+   * applied, the section parses the string against the canonical reason list
+   * (case-insensitive) and forwards the result so the parent can pre-check
+   * matching boxes and route any leftover text into the "Other" field.
+   */
+  onRfiReasonsApply?: (next: { selected: string[]; other: string }) => void
   rows?: number
   textareaClassName?: string
   placeholder?: string
@@ -76,6 +87,7 @@ export function MissingScopeEditorSection(props: {
     value,
     onChange,
     onRfiStructuredImprove,
+    onRfiReasonsApply,
     rows = 5,
     textareaClassName,
     placeholder,
@@ -150,11 +162,17 @@ export function MissingScopeEditorSection(props: {
   const applyTextImprovement = useCallback(() => {
     if (improvementResult?.kind !== 'text') return
     onChange(improvementResult.improvedDescription)
-    if (documentApiType === 'RFI' && improvementResult.structured && onRfiStructuredImprove) {
-      onRfiStructuredImprove(improvementResult.structured)
+    if (documentApiType === 'RFI' && improvementResult.structured) {
+      if (onRfiStructuredImprove) {
+        onRfiStructuredImprove(improvementResult.structured)
+      }
+      if (onRfiReasonsApply) {
+        const aiReason = improvementResult.structured.questionDetails?.reasonForRequest ?? ''
+        onRfiReasonsApply(parseLegacyReasons(aiReason))
+      }
     }
     setImprovementResult(null)
-  }, [documentApiType, improvementResult, onChange, onRfiStructuredImprove])
+  }, [documentApiType, improvementResult, onChange, onRfiReasonsApply, onRfiStructuredImprove])
 
   const applyChangeOrderSuggestion = useCallback(() => {
     if (improvementResult?.kind !== 'change-order') return
@@ -259,32 +277,43 @@ export function MissingScopeEditorSection(props: {
 
   return (
     <div className="space-y-3">
-      <Textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        rows={rows}
-        disabled={disabled || isGeneratingDescription || isImproving}
-        placeholder={placeholder}
-        className={cn(
-          variant === 'document-description'
-            ? 'min-h-[200px] w-full resize-none rounded-lg border-0 bg-[#E9ECEF] px-4 py-3 text-[15px] leading-relaxed text-[#333e4f] shadow-none placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb]/25'
-            : 'min-h-[7.5rem] resize-none sm:min-h-0',
-          textareaClassName
+      <div className="relative">
+        <Textarea
+          value={value}
+          maxLength={4000}
+          onChange={(e) => onChange(e.target.value)}
+          rows={rows}
+          disabled={disabled || isGeneratingDescription || isImproving}
+          placeholder={placeholder}
+          className={cn(
+            variant === 'document-description'
+              ? 'min-h-[200px] w-full resize-none rounded-lg border border-[#e2e8f0] bg-white px-4 py-3 pb-7 text-[15px] leading-relaxed text-[#333e4f] shadow-none placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6366F1]/25'
+              : 'min-h-[7.5rem] resize-none sm:min-h-0',
+            textareaClassName
+          )}
+        />
+        {variant === 'document-description' && (
+          <span className="pointer-events-none absolute bottom-2 right-3 select-none text-xs text-[#94a3b8]">
+            {value.length}/4000
+          </span>
         )}
-      />
+      </div>
 
-      <div className="flex flex-col gap-3 rounded-lg border border-dashed border-[#CED4DA] bg-white px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-sm font-medium leading-snug text-[#0f172a]">{ui.prompt}</p>
-          {!canRun ? <p className="mt-1 text-xs text-slate-500">{HELPER_TEXT}</p> : null}
+      <div className="flex items-center gap-3 rounded-lg border border-[#e2e8f0] bg-white px-4 py-3.5">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#EEF2FF]">
+          <Icon className="h-5 w-5 text-[#6366F1]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold leading-snug text-[#0f172a]">{ui.prompt}</p>
+          <p className="mt-0.5 text-xs text-[#64748b]">{ui.helperText}</p>
         </div>
         <Button
           type="button"
-          variant={variant === 'document-description' ? 'outline' : 'default'}
+          variant="outline"
           size="sm"
           onClick={() => void runImprove()}
           disabled={buttonDisabled}
-          className={actionButtonClass}
+          className="shrink-0"
         >
           {isImproving ? (
             <>

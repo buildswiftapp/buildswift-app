@@ -1,7 +1,11 @@
 import { badRequest, ok, serverError, unauthorized } from '@/lib/server/api-response'
 import { normalizeTier, planForTier } from '@/lib/billing-plans'
 import { getAuthContext } from '@/lib/server/auth'
-import { getAccountBillingState, getMonthlyDocumentUsage } from '@/lib/server/billing'
+import {
+  getAccountBillingState,
+  getMonthlyAiGenerationCount,
+  getMonthlyDocumentUsage,
+} from '@/lib/server/billing'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 
@@ -31,6 +35,8 @@ export async function GET(req: Request) {
     documentsUsed = 0
   }
 
+  const aiGenerationsUsed = await getMonthlyAiGenerationCount(supabase as any, auth.accountId)
+
   return ok({
     tier,
     plan_name: plan.name,
@@ -39,7 +45,7 @@ export async function GET(req: Request) {
     cancel_at: account.cancelAt,
     documents_used: documentsUsed,
     documents_limit: plan.documentsLimit,
-    ai_generations_used: 0,
+    ai_generations_used: aiGenerationsUsed,
     ai_generations_limit: plan.aiGenerationsLimit,
   })
 }

@@ -1,5 +1,6 @@
 import { badRequest, created, ok, serverError, unauthorized } from '@/lib/server/api-response'
 import { getAuthContext } from '@/lib/server/auth'
+import { assertCanCreateProject } from '@/lib/server/billing'
 import { writeAuditLog } from '@/lib/server/audit'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
@@ -51,6 +52,9 @@ export async function POST(req: Request) {
 
   const parsed = createProjectSchema.safeParse(await req.json().catch(() => ({})))
   if (!parsed.success) return badRequest('Invalid payload', parsed.error.flatten())
+
+  const projectGate = await assertCanCreateProject(supabase as any, auth.accountId)
+  if (!projectGate.ok) return badRequest(projectGate.reason)
 
   const payload = parsed.data
   const { data, error } = await supabase

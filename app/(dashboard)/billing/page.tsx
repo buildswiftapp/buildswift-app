@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ElementType } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Check, CreditCard, Download } from 'lucide-react'
+import { BrickWall, Check, FileText, Shield, Sparkles, Sprout, Star } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
-import { BILLING_PLANS, type AppBillingTier } from '@/lib/billing-plans'
+import { BILLING_PLANS, type AppBillingTier, type AppBillingPlan } from '@/lib/billing-plans'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -26,6 +26,11 @@ type BillingSummary = {
 
 const toTierForCheckout = (tier: AppBillingTier): 'pro' | 'enterprise' => (tier === 'enterprise' ? 'enterprise' : 'pro')
 
+const TIER_ICONS: Record<'free' | 'professional', ElementType> = {
+  free: Sprout,
+  professional: BrickWall,
+}
+
 export default function BillingPage() {
   const searchParams = useSearchParams()
   const [summary, setSummary] = useState<BillingSummary | null>(null)
@@ -34,7 +39,6 @@ export default function BillingPage() {
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null)
   const [schedulingDowngrade, setSchedulingDowngrade] = useState(false)
   const [cancelingDowngrade, setCancelingDowngrade] = useState(false)
-  const [openingPortal, setOpeningPortal] = useState(false)
   const [checkoutNotice, setCheckoutNotice] = useState<{
     tone: 'success' | 'error' | 'info'
     message: string
@@ -175,21 +179,6 @@ export default function BillingPage() {
     }
   }, [searchParams])
 
-  const openPortal = async () => {
-    try {
-      setOpeningPortal(true)
-      const { url } = await apiFetch<{ url: string }>('/api/billing/portal', {
-        method: 'POST',
-        json: {},
-      })
-      window.location.href = url
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Unable to open Stripe portal')
-    } finally {
-      setOpeningPortal(false)
-    }
-  }
-
   const handleUpgrade = async (tier: AppBillingTier, planId: string) => {
     try {
       setLoadingPlanId(planId)
@@ -240,23 +229,119 @@ export default function BillingPage() {
     }
   }
 
+  const renderPlanFooter = (plan: AppBillingPlan, isCurrentPlan: boolean) => {
+    if (plan.tier === 'free') {
+      if (isCurrentPlan) {
+        return (
+          <Button
+            variant="outline"
+            disabled
+            className="w-full rounded-lg border-[#22C55E] bg-transparent text-[#22C55E] opacity-100 hover:bg-transparent"
+          >
+            Current Plan
+          </Button>
+        )
+      }
+      return (
+        <Button
+          variant="outline"
+          className={cn(
+            'w-full rounded-lg border-[#22C55E] bg-white text-[#22C55E]',
+            'hover:bg-emerald-50 hover:text-emerald-700'
+          )}
+          onClick={() => void handleScheduleDowngrade('free')}
+          disabled={schedulingDowngrade}
+        >
+          {schedulingDowngrade ? 'Scheduling...' : 'Start Free'}
+        </Button>
+      )
+    }
+
+    if (plan.tier === 'professional') {
+      if (isCurrentPlan) {
+        return (
+          <Button
+            disabled
+            className="w-full rounded-lg bg-[#4F46E5] text-white opacity-100 hover:bg-[#4F46E5]"
+          >
+            Current Plan
+          </Button>
+        )
+      }
+      if (summary?.tier === 'enterprise') {
+        return (
+          <Button
+            variant="outline"
+            className="w-full rounded-lg border-[#4F46E5] bg-white text-[#4F46E5] hover:bg-violet-50"
+            onClick={() => void handleScheduleDowngrade('professional')}
+            disabled={schedulingDowngrade}
+          >
+            {schedulingDowngrade ? 'Scheduling...' : 'Downgrade'}
+          </Button>
+        )
+      }
+      return (
+        <Button
+          className="w-full rounded-lg bg-[#4F46E5] text-white hover:bg-[#4338CA]"
+          onClick={() => void handleUpgrade(plan.tier, plan.id)}
+          disabled={loadingPlanId === plan.id}
+        >
+          {loadingPlanId === plan.id ? 'Redirecting...' : 'Upgrade to Builder'}
+        </Button>
+      )
+    }
+
+    if (plan.tier === 'enterprise') {
+      if (isCurrentPlan) {
+        return (
+          <Button
+            variant="outline"
+            disabled
+            className="w-full rounded-lg border-[#F97316] bg-transparent text-[#F97316] opacity-100 hover:bg-transparent"
+          >
+            Current Plan
+          </Button>
+        )
+      }
+      return (
+        <Button
+          variant="outline"
+          className="w-full rounded-lg border-[#F97316] bg-white text-[#F97316] hover:bg-orange-50"
+          onClick={() => void handleUpgrade(plan.tier, plan.id)}
+          disabled={loadingPlanId === plan.id}
+        >
+          {loadingPlanId === plan.id ? 'Redirecting...' : 'Go Pro'}
+        </Button>
+      )
+    }
+
+    return null
+  }
+
   const showSpinner = loadingSummary || fetchingSummaryCount > 0
-  const scheduledDowngradeTargetLabel = summary?.tier === 'enterprise' ? 'Professional' : 'Free'
+  const scheduledDowngradeTargetLabel = summary?.tier === 'enterprise' ? 'Builder' : 'Starter'
+  const bannerPlanName =
+    currentPlan?.name ?? (summary?.tier === 'enterprise' ? 'Pro' : summary?.tier === 'professional' ? 'Builder' : 'Starter')
 
   return (
-    <div className="app-page relative space-y-6">
-      {showSpinner ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/70 backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-5 shadow-lg">
-            <div className="h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-slate-700" />
-            <p className="text-sm font-medium text-slate-600">Loading billing data…</p>
-          </div>
+    <div className="min-h-full bg-white">
+      <div className="flex items-center justify-between gap-4 border-b border-[#e2e8f0] bg-white px-6 py-4">
+        <div className="min-w-0">
+          <h1 className="text-[22px] font-bold leading-tight text-[#111827]">Billing</h1>
+          <p className="mt-1 text-sm leading-tight text-[#64748b]">
+            Manage subscription, payment details, and invoices.
+          </p>
         </div>
-      ) : null}
-      <div>
-        <h1 className="app-section-title">Billing</h1>
-        <p className="app-section-subtitle">Manage subscription, payment details, and invoices.</p>
       </div>
+      <div className="app-page relative space-y-6 bg-[#f4f6f9]">
+        {showSpinner ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#f4f6f9]/75 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-5 shadow-lg">
+              <div className="h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-slate-700" />
+              <p className="text-sm font-medium text-slate-600">Loading billing data…</p>
+            </div>
+          </div>
+        ) : null}
         {checkoutNotice ? (
           <div
             className={cn(
@@ -272,7 +357,7 @@ export default function BillingPage() {
         {summary?.tier !== 'free' && cancelAtLabel ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             <p>
-              {`Plan: ${currentPlan?.name ?? 'Pro'} (changes on ${cancelAtLabel}). You keep full ${currentPlan?.name ?? 'Pro'} access until this date, then your account switches to ${scheduledDowngradeTargetLabel} automatically.`}
+              {`Plan: ${bannerPlanName} (changes on ${cancelAtLabel}). You keep full ${bannerPlanName} access until this date, then your account switches to ${scheduledDowngradeTargetLabel} automatically.`}
             </p>
             <div className="mt-2">
               <Button
@@ -281,7 +366,7 @@ export default function BillingPage() {
                 onClick={() => void handleCancelScheduledDowngrade()}
                 disabled={cancelingDowngrade}
               >
-                {cancelingDowngrade ? 'Canceling...' : `Keep ${currentPlan?.name ?? 'Pro'} Plan`}
+                {cancelingDowngrade ? 'Canceling...' : `Keep ${bannerPlanName}`}
               </Button>
             </div>
           </div>
@@ -289,155 +374,182 @@ export default function BillingPage() {
         {summary?.tier !== 'free' && !cancelAtLabel && currentPeriodEndLabel ? (
           <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
             <p>
-              {`Plan: ${currentPlan?.name ?? 'Pro'} renews on ${currentPeriodEndLabel}. This is your current billing period expiration date.`}
+              {`Plan: ${bannerPlanName} renews on ${currentPeriodEndLabel}. This is your current billing period expiration date.`}
             </p>
           </div>
         ) : null}
-        <Card className="app-surface">
+        <Card className="app-surface border border-[#e8eaef] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>Current Plan</CardTitle>
                 <CardDescription>
-                  {loadingSummary ? 'Loading plan details...' : `You are currently on the ${currentPlan?.name ?? 'Free'} plan`}
+                  {loadingSummary
+                    ? 'Loading plan details...'
+                    : `You are currently on the ${currentPlan?.name ?? 'Starter'} plan`}
                 </CardDescription>
               </div>
-              <Badge className="bg-primary/10 text-primary text-base px-4 py-1.5">
-                {currentPlan?.name ?? 'Free'}
+              <Badge className="gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-3 py-1.5 text-[#4F46E5] hover:bg-violet-50">
+                <Star className="h-3.5 w-3.5 fill-current" />
+                <span className="text-sm font-semibold">{currentPlan?.name ?? 'Starter'}</span>
               </Badge>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-6 md:grid-cols-2">
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="font-medium">Documents</span>
-                  <span className="text-muted-foreground">
-                    {summary ? `${summary.documents_used} / ${summary.documents_limit < 0 ? 'Unlimited' : summary.documents_limit}` : '—'}
+            <div className="grid gap-6 md:grid-cols-2 md:divide-x md:divide-slate-200">
+              <div className="md:pr-6">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-violet-50 text-[#4F46E5]">
+                    <FileText className="h-5 w-5" />
                   </span>
+                  <div className="flex-1 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="font-medium">Documents</span>
+                      <span className="text-muted-foreground">
+                        {summary
+                          ? `${summary.documents_used} / ${summary.documents_limit < 0 ? 'Unlimited' : summary.documents_limit}`
+                          : '—'}
+                      </span>
+                    </div>
+                    <Progress
+                      value={
+                        summary && summary.documents_limit > 0
+                          ? (summary.documents_used / summary.documents_limit) * 100
+                          : 0
+                      }
+                      className="h-2"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {summary
+                        ? summary.documents_limit < 0
+                          ? 'Unlimited documents available on this plan'
+                          : `${Math.max(0, summary.documents_limit - summary.documents_used)} documents remaining this month`
+                        : '—'}
+                    </p>
+                  </div>
                 </div>
-                <Progress
-                  value={
-                    summary && summary.documents_limit > 0
-                      ? (summary.documents_used / summary.documents_limit) * 100
-                      : 0
-                  }
-                  className="h-2"
-                />
-                <p className="text-xs text-muted-foreground">
-                  {summary
-                    ? summary.documents_limit < 0
-                      ? 'Unlimited documents available on this plan'
-                      : `${Math.max(0, summary.documents_limit - summary.documents_used)} documents remaining this month`
-                    : '—'}
-                </p>
               </div>
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="font-medium">AI Generations</span>
-                  <span className="text-muted-foreground">
-                    {summary
-                      ? `${summary.ai_generations_used} / ${summary.ai_generations_limit < 0 ? 'Unlimited' : summary.ai_generations_limit}`
-                      : '—'}
+              <div className="md:pl-6">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-violet-50 text-[#4F46E5]">
+                    <Sparkles className="h-5 w-5" />
                   </span>
+                  <div className="flex-1 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="font-medium">AI Generations</span>
+                      <span className="text-muted-foreground">
+                        {summary
+                          ? `${summary.ai_generations_used} / ${summary.ai_generations_limit < 0 ? 'Unlimited' : summary.ai_generations_limit}`
+                          : '—'}
+                      </span>
+                    </div>
+                    <Progress
+                      value={
+                        summary && summary.ai_generations_limit > 0
+                          ? (summary.ai_generations_used / summary.ai_generations_limit) * 100
+                          : 0
+                      }
+                      className="h-2"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {summary
+                        ? summary.ai_generations_limit < 0
+                          ? 'Unlimited AI generations available on this plan'
+                          : `${Math.max(0, summary.ai_generations_limit - summary.ai_generations_used)} AI generations remaining`
+                        : '—'}
+                    </p>
+                  </div>
                 </div>
-                <Progress
-                  value={
-                    summary && summary.ai_generations_limit > 0
-                      ? (summary.ai_generations_used / summary.ai_generations_limit) * 100
-                      : 0
-                  }
-                  className="h-2"
-                />
-                <p className="text-xs text-muted-foreground">
-                  {summary
-                    ? summary.ai_generations_limit < 0
-                      ? 'Unlimited AI generations available on this plan'
-                      : `${Math.max(0, summary.ai_generations_limit - summary.ai_generations_used)} AI generations remaining`
-                    : '—'}
-                </p>
               </div>
             </div>
           </CardContent>
         </Card>
 
         <div>
-          <h2 className="mb-4 text-lg font-semibold text-foreground">Available Plans</h2>
-          <div className="grid gap-4 md:grid-cols-3">
+          <h2 className="mb-4 text-lg font-bold tracking-tight text-black">Available Plans</h2>
+          <div className="grid gap-6 md:grid-cols-3">
             {BILLING_PLANS.map((plan) => {
               const isCurrentPlan = plan.tier === summary?.tier
+              const TierIcon = plan.tier === 'enterprise' ? null : TIER_ICONS[plan.tier]
+              const isBuilder = plan.tier === 'professional'
+              const showBuilderBadge = isBuilder
+              const builderBadgeLabel =
+                summary?.tier === 'professional' ? 'CURRENT PLAN' : 'MOST POPULAR'
 
               return (
                 <Card
                   key={plan.id}
                   className={cn(
-                    'app-surface relative',
-                    isCurrentPlan && 'border-primary shadow-md bg-primary/5'
+                    'relative flex flex-col overflow-visible rounded-2xl border bg-white pb-6 pt-10 shadow-[0_1px_2px_rgba(15,23,42,0.06)]',
+                    isBuilder ? 'border-2 border-[#4F46E5]' : 'border border-[#e5e7eb]'
                   )}
                 >
-                  {isCurrentPlan && (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                      <Badge className="bg-primary text-primary-foreground">
-                        Current Plan
-                      </Badge>
-                    </div>
-                  )}
-                  <CardHeader className="pt-8">
-                    <CardTitle>{plan.name}</CardTitle>
-                    <CardDescription>
-                      <span className="text-3xl font-bold text-foreground">
-                        ${plan.price}
+                  {showBuilderBadge ? (
+                    <div className="pointer-events-none absolute -top-3 left-1/2 z-10 -translate-x-1/2">
+                      <span className="whitespace-nowrap rounded-full bg-[#4F46E5] px-4 py-1 text-[11px] font-semibold uppercase tracking-wider text-white">
+                        {builderBadgeLabel}
                       </span>
-                      {plan.price > 0 && (
-                        <span className="text-muted-foreground">/month</span>
+                    </div>
+                  ) : null}
+
+                  <div
+                    className={cn(
+                      'border-b border-[#ebeef2] px-6 pb-6 text-left',
+                      showBuilderBadge ? 'pt-1' : 'pt-2'
+                    )}
+                  >
+                    {plan.tier === 'enterprise' ? (
+                      <div className="relative grid h-14 w-14 shrink-0 place-items-center rounded-full bg-orange-50 text-[#F97316]">
+                        <Shield className="h-8 w-8" aria-hidden />
+                        <Star
+                          className="absolute bottom-1 right-1 h-4 w-4 fill-orange-400 text-orange-500"
+                          aria-hidden
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        className={cn(
+                          'grid h-14 w-14 shrink-0 place-items-center rounded-full',
+                          plan.tier === 'free' && 'bg-emerald-50 text-[#22C55E]',
+                          plan.tier === 'professional' && 'bg-violet-50 text-[#4F46E5]'
+                        )}
+                      >
+                        {TierIcon ? <TierIcon className="h-8 w-8" aria-hidden /> : null}
+                      </div>
+                    )}
+
+                    <h3 className="mt-4 text-lg font-bold text-black">{plan.name}</h3>
+                    <div className="mt-2 flex flex-wrap items-baseline gap-x-1.5 gap-y-0">
+                      <span className="text-3xl font-bold text-black">${plan.price}</span>
+                      {plan.price === 0 ? (
+                        <span className="text-sm font-medium text-blue-600">forever</span>
+                      ) : (
+                        <span className="text-sm font-medium text-blue-600">/month</span>
                       )}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-3">
+                    </div>
+                    <p className="mt-2 max-w-none text-sm leading-snug text-[#6B7280]">{plan.tagline}</p>
+                  </div>
+
+                  <CardContent className="flex flex-1 flex-col px-6 pt-6 pb-2">
+                    <ul className="flex w-full flex-col gap-3">
                       {plan.features.map((feature, index) => (
-                        <li key={index} className="flex items-start gap-2">
-                          <Check className="h-5 w-5 shrink-0 text-primary" />
-                          <span className="text-sm">{feature}</span>
+                        <li key={index} className="flex items-start gap-2.5 text-left">
+                          <Check className="mt-0.5 h-[18px] w-[18px] shrink-0 text-[#22C55E]" strokeWidth={2.5} />
+                          <span className="text-sm leading-snug text-[#374151]">{feature}</span>
                         </li>
                       ))}
                     </ul>
                   </CardContent>
-                  <CardFooter>
-                    {isCurrentPlan ? (
-                      <Button variant="outline" className="w-full" disabled>
-                        Current Plan
-                      </Button>
-                    ) : plan.tier === 'free' ? (
-                      <Button
-                        className="w-full"
-                        variant="outline"
-                        onClick={() => void handleScheduleDowngrade('free')}
-                        disabled={schedulingDowngrade}
-                      >
-                        {schedulingDowngrade ? 'Scheduling...' : 'Downgrade'}
-                      </Button>
-                    ) : plan.tier === 'professional' && summary?.tier === 'enterprise' ? (
-                      <Button
-                        className="w-full"
-                        variant="outline"
-                        onClick={() => void handleScheduleDowngrade('professional')}
-                        disabled={schedulingDowngrade}
-                      >
-                        {schedulingDowngrade ? 'Scheduling...' : 'Downgrade'}
-                      </Button>
-                    ) : (
-                      <Button
-                        className="w-full"
-                        variant="outline"
-                        onClick={() => void handleUpgrade(plan.tier, plan.id)}
-                        disabled={loadingPlanId === plan.id}
-                      >
-                        {loadingPlanId === plan.id
-                          ? 'Redirecting...'
-                          : 'Upgrade'}
-                      </Button>
-                    )}
+
+                  <CardFooter className="mt-auto flex w-full flex-col items-stretch gap-2 border-0 px-6 pb-0 pt-4">
+                    {renderPlanFooter(plan, isCurrentPlan)}
+                    {isBuilder &&
+                    summary?.tier !== 'professional' &&
+                    plan.promoFootnote ? (
+                      <p className="text-center text-xs font-medium leading-tight text-blue-600">
+                        {plan.promoFootnote}
+                      </p>
+                    ) : null}
                   </CardFooter>
                 </Card>
               )
@@ -446,6 +558,7 @@ export default function BillingPage() {
         </div>
 
         {/* Payment Method + Billing History removed per request */}
+      </div>
     </div>
   )
 }
