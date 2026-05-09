@@ -81,19 +81,46 @@ const emptyForm = {
   endDate: '',
 }
 
+const CARD_COLORS = [
+  { iconBg: 'bg-[#EEF2FF]', iconColor: 'text-[#6366F1]' },
+  { iconBg: 'bg-[#FEF3C7]', iconColor: 'text-[#F59E0B]' },
+  { iconBg: 'bg-[#D1FAE5]', iconColor: 'text-[#10B981]' },
+  { iconBg: 'bg-[#FEE2E2]', iconColor: 'text-[#EF4444]' },
+]
+
 function projectCardStatusBadge(project: Project) {
   const pill =
-    'inline-flex items-center rounded-full border border-border px-2.5 py-1 text-[11px] font-semibold leading-none'
+    'inline-flex items-center gap-1.5 rounded-full border border-transparent px-3 py-1 text-xs font-medium leading-none'
   if (project.isArchived) {
-    return <span className={`${pill} bg-muted text-[#64748b]`}>Archived</span>
+    return (
+      <span className={`${pill} bg-muted text-[#64748b]`}>
+        <span className="h-1.5 w-1.5 rounded-full bg-[#94a3b8]" />
+        Archived
+      </span>
+    )
   }
   if (project.status === 'active') {
-    return <span className={`${pill} bg-[#d1fae5] text-[#065f46]`}>Active</span>
+    return (
+      <span className={`${pill} bg-[#d1fae5] text-[#065f46]`}>
+        <span className="h-1.5 w-1.5 rounded-full bg-[#10b981]" />
+        Active
+      </span>
+    )
   }
   if (project.status === 'on_hold') {
-    return <span className={`${pill} bg-muted text-[#64748b]`}>On Hold</span>
+    return (
+      <span className={`${pill} bg-muted text-[#64748b]`}>
+        <span className="h-1.5 w-1.5 rounded-full bg-[#94a3b8]" />
+        On Hold
+      </span>
+    )
   }
-  return <span className={`${pill} bg-muted text-[#475569]`}>Completed</span>
+  return (
+    <span className={`${pill} bg-muted text-[#475569]`}>
+      <span className="h-1.5 w-1.5 rounded-full bg-[#94a3b8]" />
+      Completed
+    </span>
+  )
 }
 
 export default function ProjectsPage() {
@@ -347,45 +374,51 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="app-page space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 space-y-1">
-            <h1 className="app-section-title text-2xl">Projects</h1>
-            <p className="app-section-subtitle">Manage and track your construction projects</p>
-          </div>
-          <Button type="button" onClick={() => setDrawerOpen(true)} className="shrink-0 gap-2 self-start">
-            <Plus className="h-4 w-4" />
-            New Project
-          </Button>
+    <div className="min-h-full bg-white">
+      {/* Page header — full-bleed white band */}
+      <div className="flex items-center justify-between gap-4 border-b border-[#e2e8f0] bg-white px-6 py-4">
+        <div className="min-w-0">
+          <h1 className="text-[22px] font-bold leading-tight text-[#111827]">Projects</h1>
+          <p className="mt-1 text-sm leading-tight text-[#64748b]">
+            Manage and track your construction projects
+          </p>
         </div>
+        <Button
+          type="button"
+          onClick={() => setDrawerOpen(true)}
+          className="gap-2"
+        >
+          <Plus className="h-4 w-4" />
+          New Project
+        </Button>
+      </div>
 
+    <div className="app-page space-y-6">
         {!isLoadingProjects && projects.length > 0 ? (
-          <div className="app-surface bg-muted px-3 py-2.5 sm:px-4 sm:py-3">
-            <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:gap-3">
-              <div className="relative min-w-0 flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search projects..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-10 pl-9"
-                />
-              </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger size="sm" className="w-full sm:w-44 sm:shrink-0">
-                  <span className="flex min-w-0 flex-1 items-center gap-2">
-                    <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <SelectValue placeholder="All Status" />
-                  </span>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="on_hold">On Hold</SelectItem>
-                  <SelectItem value="completed">Completed</SelectItem>
-                </SelectContent>
-              </Select>
+          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:gap-3">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#111827]" />
+              <Input
+                placeholder="Search projects..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-12 rounded-xl border-border bg-white pl-11"
+              />
             </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="h-12 w-full rounded-xl border-border bg-white sm:w-48 sm:shrink-0">
+                <span className="flex min-w-0 flex-1 items-center gap-2">
+                  <Filter className="h-4 w-4 shrink-0 text-[#6366F1]" />
+                  <SelectValue placeholder="All Status" />
+                </span>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="on_hold">On Hold</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         ) : null}
 
@@ -431,8 +464,9 @@ export default function ProjectsPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {filteredProjects.map((project) => {
+            {filteredProjects.map((project, cardIndex) => {
               const hasDesc = Boolean(project.description?.trim())
+              const color = CARD_COLORS[cardIndex % CARD_COLORS.length]
               return (
                 <Card
                   key={project.id}
@@ -441,10 +475,10 @@ export default function ProjectsPage() {
                   <div className="px-5 pb-5 pt-5 sm:px-6 sm:pb-5 sm:pt-6">
                     <div className="flex gap-3">
                       <div
-                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-muted"
+                        className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-xl ${color.iconBg}`}
                         aria-hidden
                       >
-                        <Building2 className="h-5 w-5 text-[#0f172a]" strokeWidth={1.75} />
+                        <Building2 className={`h-7 w-7 ${color.iconColor}`} strokeWidth={1.75} />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
@@ -506,18 +540,20 @@ export default function ProjectsPage() {
                     <p
                       className={`mt-3.5 text-[13px] leading-relaxed ${
                         hasDesc ? 'text-muted-foreground' : 'text-[#94a3b8]'
-                      } line-clamp-1`}
+                      } line-clamp-2`}
                     >
                       {hasDesc ? project.description : '—'}
                     </p>
 
-                    <div className="mt-4 space-y-2.5">
+                    <div className="my-4 border-t border-border" />
+
+                    <div className="space-y-2.5">
                       <div className="flex items-center gap-2 text-[13px] font-normal text-muted-foreground">
-                        <Calendar className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
+                        <Calendar className={`h-4 w-4 shrink-0 ${color.iconColor}`} strokeWidth={2} />
                         <span>Started {formatDate(project.startDate)}</span>
                       </div>
                       <div className="flex items-center gap-2 text-[13px] font-normal text-muted-foreground">
-                        <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
+                        <FileText className={`h-4 w-4 shrink-0 ${color.iconColor}`} strokeWidth={2} />
                         <span>
                           {project.documentsCount}{' '}
                           {project.documentsCount === 1 ? 'document' : 'documents'}
@@ -779,6 +815,7 @@ export default function ProjectsPage() {
           </form>
         </DrawerContent>
       </Drawer>
+    </div>
     </div>
   )
 }

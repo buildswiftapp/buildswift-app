@@ -57,47 +57,47 @@ export default function TeamPage() {
   }
 
   return (
-    <div className="app-page space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="app-section-title text-2xl">Team Members</h2>
-            <p className="app-section-subtitle">Manage your team members</p>
-          </div>
-          <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Invite Member
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Invite Team Member</DialogTitle>
-                <DialogDescription>
-                  Send an invitation to join your team
-                </DialogDescription>
-              </DialogHeader>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel>Email Address</FieldLabel>
-                  <Input
-                    type="email"
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    placeholder="colleague@company.com"
-                  />
-                </Field>
-              </FieldGroup>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setInviteDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleInvite}>Send Invitation</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+    <div className="min-h-full bg-white">
+      <div className="flex items-center justify-between gap-4 border-b border-[#e2e8f0] bg-white px-6 py-4">
+        <div className="min-w-0">
+          <h1 className="text-[22px] font-bold leading-tight text-[#111827]">Team Members</h1>
+          <p className="mt-1 text-sm leading-tight text-[#64748b]">Manage your team members</p>
         </div>
-
+        <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              Invite Member
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Invite Team Member</DialogTitle>
+              <DialogDescription>
+                Send an invitation to join your team
+              </DialogDescription>
+            </DialogHeader>
+            <FieldGroup>
+              <Field>
+                <FieldLabel>Email Address</FieldLabel>
+                <Input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="colleague@company.com"
+                />
+              </Field>
+            </FieldGroup>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setInviteDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleInvite}>Send Invitation</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+      <div className="app-page space-y-6">
         <div className="relative max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -156,7 +156,7 @@ export default function TeamPage() {
             </Card>
           ))}
         </div>
-
+      </div>
     </div>
   )
 }

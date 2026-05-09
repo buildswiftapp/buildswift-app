@@ -28,6 +28,11 @@ function toAttachmentList(raw: unknown): AttachmentInput[] {
   return raw.filter((item) => !!item && typeof item === 'object') as AttachmentInput[]
 }
 
+/** True when metadata would persist at least one attachment after sync. */
+export function attachmentsPayloadNonEmpty(raw: unknown): boolean {
+  return toAttachmentList(raw).length > 0
+}
+
 export async function syncDocumentAttachments(params: {
   supabase: any
   accountId: string

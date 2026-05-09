@@ -480,7 +480,7 @@ function NewChangeOrderContent() {
               <Button
                 type="button"
                 variant="outline"
-                className="gap-2 border-2 border-dashed border-[#60a5fa] bg-white text-[#1e3a8a] shadow-sm hover:bg-[#eff6ff] sm:shrink-0"
+                className="gap-2 sm:shrink-0"
                 onClick={() => handleSubmit(true)}
                 disabled={isSubmitting}
               >
@@ -490,7 +490,7 @@ function NewChangeOrderContent() {
               <Button
                 type="button"
                 variant="default"
-                className="min-w-[10rem] !bg-[#0b1d3a] text-white shadow-[0_4px_14px_rgba(15,23,42,0.25)] hover:!bg-[#132b4f] hover:brightness-100 sm:shrink-0"
+                className="min-w-[10rem] sm:shrink-0"
                 onClick={() =>
                   void handleSendForReview({
                     reviewers: [],
@@ -592,7 +592,6 @@ function NewChangeOrderContent() {
                 rows={8}
                 placeholder="Describe the requested change, affected area, and intended outcome..."
               />
-              <p className={hintClass}>{formData.description.length} characters</p>
             </div>
 
             <div className={formCardClassName()}>
@@ -661,7 +660,7 @@ function NewChangeOrderContent() {
                         className={cn(
                           'h-10 rounded-lg border text-sm font-semibold transition-colors',
                           schedule.enabled
-                            ? 'border-[#0f172a] bg-[#0f172a] text-white shadow-sm'
+                            ? 'border-[#6366F1] bg-[#6366F1] text-white shadow-sm'
                             : 'border-[#e2e8f0] bg-white text-[#334155] hover:bg-[#f8fafc]'
                         )}
                       >
@@ -673,7 +672,7 @@ function NewChangeOrderContent() {
                         className={cn(
                           'h-10 rounded-lg border text-sm font-semibold transition-colors',
                           !schedule.enabled
-                            ? 'border-[#0f172a] bg-[#0f172a] text-white shadow-sm'
+                            ? 'border-[#6366F1] bg-[#6366F1] text-white shadow-sm'
                             : 'border-[#e2e8f0] bg-white text-[#334155] hover:bg-[#f8fafc]'
                         )}
                       >
@@ -890,7 +889,7 @@ function NewChangeOrderContent() {
                             className={cn(
                               'min-h-[2.75rem] rounded-lg border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition-colors sm:text-xs',
                               active
-                                ? 'border-[#0f172a] bg-[#0f172a] text-white shadow-sm'
+                                ? 'border-[#6366F1] bg-[#6366F1] text-white shadow-sm'
                                 : 'border-[#e2e8f0] bg-white text-[#334155] hover:bg-[#f8fafc]'
                             )}
                           >
@@ -1154,7 +1153,13 @@ function NewChangeOrderContent() {
                 <div>
                   <label className={capLabel}>Priority level</label>
                   <div className="grid grid-cols-3 gap-3">
-                    {(['low', 'normal', 'urgent'] as const).map((level) => {
+                    {(
+                      [
+                        { level: 'low', dot: 'bg-[#10B981]' },
+                        { level: 'normal', dot: 'bg-[#6366F1]' },
+                        { level: 'urgent', dot: 'bg-[#EF4444]' },
+                      ] as const
+                    ).map(({ level, dot }) => {
                       const active = formData.priority === level
                       return (
                         <button
@@ -1162,12 +1167,13 @@ function NewChangeOrderContent() {
                           type="button"
                           onClick={() => setFormData((p) => ({ ...p, priority: level }))}
                           className={cn(
-                            'h-10 rounded-xl border text-sm font-semibold transition-colors',
+                            'flex h-10 items-center justify-center gap-1.5 rounded-xl border text-sm font-semibold transition-colors',
                             active
-                              ? 'border-[#0f172a] bg-[#0f172a] text-white'
+                              ? 'border-[#6366F1] bg-white text-[#6366F1]'
                               : 'border-[#e2e8f0] bg-white text-[#334155] hover:bg-[#f8fafc]'
                           )}
                         >
+                          <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
                           {level.charAt(0).toUpperCase() + level.slice(1)}
                         </button>
                       )
@@ -1184,11 +1190,39 @@ function NewChangeOrderContent() {
                 </div>
                 <div>
                   <label className={capLabel}>Reason</label>
-                  <p className="text-sm font-medium text-[#0f172a]">{reasonLabel}</p>
+                  <Select
+                    value={formData.reason}
+                    onValueChange={(value) => setFormData((p) => ({ ...p, reason: value }))}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REASON_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="border-t border-[#e2e8f0] pt-4">
                   <label className={capLabel}>Schedule impact</label>
-                  <p className="text-sm font-medium text-[#0f172a]">{scheduleLabel}</p>
+                  <Select
+                    value={schedule.enabled ? 'has_impact' : 'no_impact'}
+                    onValueChange={(v) => {
+                      if (v === 'no_impact') setSchedule({ enabled: false, duration: '', unit: 'days', dayType: '' })
+                      else setSchedule((p) => ({ ...p, enabled: true }))
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="no_impact">No Impact</SelectItem>
+                      <SelectItem value="has_impact">Has Schedule Impact</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </div>
@@ -1222,12 +1256,12 @@ function NewChangeOrderContent() {
                 </div>
 
                 <div className="border-t border-slate-100 pt-4">
-                  <p className="text-xs text-muted-foreground">Date</p>
+                  <p className="text-xs text-muted-foreground">Document Date</p>
                   <p className="text-sm font-semibold" style={{ color: NAVY }}>
                     {formData.date
                       ? new Date(formData.date + 'T12:00:00').toLocaleDateString('en-US', {
-                          month: 'long',
-                          day: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
                           year: 'numeric',
                         })
                       : '—'}

@@ -322,36 +322,19 @@ function DocumentsContent() {
           : 'New Document'
 
   const hasActiveFilters = searchQuery !== '' || statusFilter !== 'all' || projectFilter !== 'all'
-  const quickStatusFilters: Array<{ key: string; label: string }> = [
-    { key: 'all', label: 'All' },
-    { key: 'draft', label: 'Draft' },
-    { key: 'pending_review', label: 'In Review' },
-    { key: 'approved', label: 'Approved' },
-    { key: 'rejected', label: 'Rejected' },
-    { key: 'closed', label: 'Closed' },
-  ]
 
   return (
+    <div className="min-h-full bg-white">
+      <div className="flex items-center justify-between gap-4 border-b border-[#e2e8f0] bg-white px-6 py-4">
+        <div className="min-w-0">
+          <h1 className="text-[22px] font-bold leading-tight text-[#111827]">Documents</h1>
+          <p className="mt-1 text-sm leading-tight text-[#64748b]">Manage RFIs, submittals, and project documents.</p>
+        </div>
+      </div>
     <div className="app-page space-y-6">
       <div className="space-y-4">
           <div className="app-surface bg-muted/45 p-3">
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                {quickStatusFilters.map((filter) => (
-                  <button
-                    key={filter.key}
-                    type="button"
-                    onClick={() => setStatusFilter(filter.key)}
-                    className={
-                      statusFilter === filter.key
-                        ? 'rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground shadow-sm'
-                        : 'rounded-full bg-background/90 px-3.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-white'
-                    }
-                  >
-                    {filter.label}
-                  </button>
-                ))}
-              </div>
               <div className="relative min-w-[240px] flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -371,7 +354,7 @@ function DocumentsContent() {
                       <SelectItem value="all">All Statuses</SelectItem>
                       <SelectItem value="draft">Draft</SelectItem>
                       <SelectItem value="pending_review">Pending Review</SelectItem>
-                      <SelectItem value="approved">Approved</SelectItem>
+                      <SelectItem value="approved">{typeFilter === 'rfi' ? 'Answered' : 'Approved'}</SelectItem>
                       <SelectItem value="rejected">Rejected</SelectItem>
                       <SelectItem value="revision_requested">Revision Requested</SelectItem>
                     </SelectContent>
@@ -687,6 +670,7 @@ function DocumentsContent() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+    </div>
     </div>
   )
 }

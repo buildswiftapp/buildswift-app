@@ -6,6 +6,7 @@ import type {
   ChangeOrderScheduleState,
 } from '@/lib/co-impact'
 import { deserializeChangeOrderImpactFromMetadata } from '@/lib/co-impact'
+import { parseLegacyReasons } from '@/lib/rfi-reasons'
 
 export const CO_REASON_OPTIONS = [
   { value: 'owner_request', label: 'Owner Request' },
@@ -120,15 +121,30 @@ export function buildRfiHeaderHtml(values: {
 /**
  * Body HTML only — stored in `document.description` while `title`, `doc_number`,
  * and `metadata.rfiDate` / `metadata.question` / `metadata.notes` hold the rest.
+ *
+ * `reasonsForRequest` (multi-select array) takes precedence when provided;
+ * otherwise the legacy `reasonForRequest` joined string is used as a fallback.
  */
 export function buildRfiDescriptionBody(values: {
   reasonForRequest?: string
+  reasonsForRequest?: string[]
+  reasonForRequestOther?: string
   question: string
   description: string
   notes: string
 }): string {
-  const reason = (values.reasonForRequest ?? '').trim()
-  const reasonBlock = reason ? `<h3>Reason for Request</h3><p>${reason}</p>` : ''
+  const selected = Array.isArray(values.reasonsForRequest) ? values.reasonsForRequest : []
+  const other = (values.reasonForRequestOther ?? '').trim()
+  let reasonBlock = ''
+  if (selected.length > 0 || other) {
+    const items = [...selected]
+    if (other) items.push(other)
+    const li = items.map((label) => `<li>${label}</li>`).join('')
+    reasonBlock = `<h3>Reason for Request</h3><ul>${li}</ul>`
+  } else {
+    const legacy = (values.reasonForRequest ?? '').trim()
+    if (legacy) reasonBlock = `<h3>Reason for Request</h3><p>${legacy}</p>`
+  }
   const q = values.question.trim()
   const d = values.description.trim()
   const notes = values.notes.trim()
@@ -149,6 +165,8 @@ export function buildRfiHtml(values: {
   date: string
   projectName: string
   reasonForRequest?: string
+  reasonsForRequest?: string[]
+  reasonForRequestOther?: string
   question: string
   description: string
   notes: string
@@ -463,7 +481,8 @@ export function initialRfiState(args: {
   title: string
   date: string
   question: string
-  reasonForRequest: string
+  reasonsForRequest: string[]
+  reasonForRequestOther: string
   description: string
   notes: string
 } {
@@ -477,10 +496,26 @@ export function initialRfiState(args: {
     parseLongDateToIso(strongField(html, 'Date')) ||
     new Date().toISOString().slice(0, 10)
   const question = (typeof m.question === 'string' && m.question) || extractH3Block(html, 'Question') || ''
-  const reasonForRequest =
-    (typeof m.reasonForRequest === 'string' && m.reasonForRequest) ||
-    extractH3Block(html, 'Reason for Request') ||
-    ''
+
+  // Prefer the new array shape; fall back to legacy joined string, then to the
+  // HTML body's "Reason for Request" block. `parseLegacyReasons` routes
+  // canonical-label tokens to `selected[]` and keeps the rest in `other`.
+  let reasonsForRequest: string[] = []
+  let reasonForRequestOther = ''
+  if (Array.isArray(m.reasonsForRequest)) {
+    reasonsForRequest = m.reasonsForRequest.filter((v): v is string => typeof v === 'string')
+    reasonForRequestOther =
+      typeof m.reasonForRequestOther === 'string' ? m.reasonForRequestOther : ''
+  } else {
+    const legacy =
+      (typeof m.reasonForRequest === 'string' && m.reasonForRequest) ||
+      extractH3Block(html, 'Reason for Request') ||
+      ''
+    const parsed = parseLegacyReasons(legacy)
+    reasonsForRequest = parsed.selected
+    reasonForRequestOther = parsed.other
+  }
+
   let description = extractRfiNarrativeFromHtml(html)
   if (!description) {
     description =
@@ -489,7 +524,16 @@ export function initialRfiState(args: {
         .trim() || ''
   }
   const notes = (typeof m.notes === 'string' && m.notes) || extractH3Block(html, 'Notes') || ''
-  return { number, title, date: dateIso, question, reasonForRequest, description, notes }
+  return {
+    number,
+    title,
+    date: dateIso,
+    question,
+    reasonsForRequest,
+    reasonForRequestOther,
+    description,
+    notes,
+  }
 }
 
 export function initialSubmittalState(args: {

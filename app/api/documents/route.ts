@@ -6,6 +6,7 @@ import { insertDocument, listDocuments } from '@/lib/server/document-store'
 import { writeAuditLog } from '@/lib/server/audit'
 import {
   assertCanCreateDocument,
+  assertCanSyncDocumentAttachments,
   incrementMonthlyDocumentUsage,
 } from '@/lib/server/billing'
 import { initialStatus } from '@/lib/status'
@@ -73,6 +74,13 @@ export async function POST(req: Request) {
     .maybeSingle()
   if (projectError) return serverError(projectError.message)
   if (!projectRow) return badRequest('Project not found or access denied')
+
+  const attachmentGate = await assertCanSyncDocumentAttachments(
+    supabase as any,
+    auth.accountId,
+    metadataPayload.attachments
+  )
+  if (!attachmentGate.ok) return badRequest(attachmentGate.reason)
 
   const permission = await assertCanCreateDocument(supabase as any, auth.accountId)
   if (!permission.ok) return badRequest(permission.reason)

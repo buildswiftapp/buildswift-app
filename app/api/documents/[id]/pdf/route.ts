@@ -15,6 +15,7 @@ import { generateReviewPdfBuffer } from '@/lib/server/review-pdf'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 import { backfillFromLegacy, pdfStatusLabel, type DocType } from '@/lib/status'
+import { joinReasons } from '@/lib/rfi-reasons'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -201,7 +202,9 @@ export async function GET(req: Request, { params }: Params) {
           : 'Reviewer',
       action:
         row.decision === 'approve'
-          ? 'Approved'
+          ? document.doc_type === 'rfi'
+            ? 'Answered'
+            : 'Approved'
           : row.decision === 'reject'
             ? 'Rejected'
             : 'Pending review',
@@ -500,6 +503,14 @@ export async function GET(req: Request, { params }: Params) {
           (typeof metadata.scopeImpact === 'string' && metadata.scopeImpact) ||
           null,
         reasonForRequest:
+          (Array.isArray(metadata.reasonsForRequest) &&
+            metadata.reasonsForRequest.length > 0 &&
+            joinReasons(
+              metadata.reasonsForRequest.filter((v): v is string => typeof v === 'string'),
+              typeof metadata.reasonForRequestOther === 'string'
+                ? metadata.reasonForRequestOther
+                : ''
+            )) ||
           (typeof metadata.reasonForRequest === 'string' && metadata.reasonForRequest) ||
           (typeof metadata.reason === 'string' && metadata.reason) ||
           null,

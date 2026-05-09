@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { AppProvider } from '@/lib/app-context'
 import { AppSidebarWithProjects } from '@/app/components/app-sidebar-with-projects'
-import { AppHeader } from '@/components/app-header'
 import { Toaster } from '@/components/ui/sonner'
 import { createSupabaseBrowserClient } from '@/lib/supabase/client'
 
@@ -53,8 +52,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         collapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed((prev) => !prev)}
       />
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-        <AppHeader />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
         <main className="min-h-0 flex-1 overflow-auto">{children}</main>
       </div>
       <Toaster position="top-right" />

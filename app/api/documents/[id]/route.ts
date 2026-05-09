@@ -7,6 +7,7 @@ import {
   updateDocument,
 } from '@/lib/server/document-store'
 import { writeAuditLog } from '@/lib/server/audit'
+import { assertCanSyncDocumentAttachments } from '@/lib/server/billing'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 import { updateDocumentSchema } from '@/lib/server/validators'
@@ -113,6 +114,13 @@ export async function PATCH(req: Request, { params }: Params) {
     if (versionError) return serverError(versionError.message)
 
     if (payload.metadata && typeof payload.metadata === 'object' && 'attachments' in payload.metadata) {
+      const attachmentGate = await assertCanSyncDocumentAttachments(
+        supabase as any,
+        auth.accountId,
+        payload.metadata.attachments
+      )
+      if (!attachmentGate.ok) return badRequest(attachmentGate.reason)
+
       const attachmentError = await syncDocumentAttachments({
         supabase,
         accountId: auth.accountId,
