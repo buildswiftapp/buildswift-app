@@ -668,18 +668,55 @@ function NewDocumentContent() {
 
           <aside className="w-full min-w-0 space-y-6 lg:sticky lg:top-6 lg:self-start">
             <div className={formCardClassName()}>
-              <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">Categorization</h3>
-              <div className="mb-6">
-                <label className={capLabel}>Priority level</label>
-                <div className="flex gap-2">{priorityBtn('low', 'Low')}{priorityBtn('normal', 'Normal')}{priorityBtn('urgent', 'Urgent')}</div>
+              <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">Summary</h3>
+
+              <div className="mb-6 space-y-4">
+                <div>
+                  <p className="text-xs text-[#64748b]">Project</p>
+                  <p className="text-sm font-semibold text-[#0f172a]">{selectedProject?.name ?? '—'}</p>
+                  <p className="text-xs text-[#64748b]">
+                    {[selectedProject?.projectNumber, selectedProject?.address].filter(Boolean).join(' · ')}
+                  </p>
+                </div>
+                <div className="border-t border-[#e2e8f0] pt-4">
+                  <p className="text-xs text-[#64748b]">
+                    {formData.type === 'rfi' ? 'RFI number' : 'Submittal number'}
+                  </p>
+                  <p className="text-sm font-semibold text-[#0f172a]">{formData.number || '—'}</p>
+                </div>
+                <div className="border-t border-[#e2e8f0] pt-4">
+                  <p className="text-xs text-[#64748b]">Title</p>
+                  <p className="text-sm font-semibold leading-snug text-[#0f172a]">{formData.title || '—'}</p>
+                </div>
+                <div className="border-t border-[#e2e8f0] pt-4">
+                  <p className="text-xs text-[#64748b]">Document date</p>
+                  <p className="text-sm font-semibold text-[#0f172a]">
+                    {formData.date
+                      ? new Date(formData.date + 'T12:00:00').toLocaleDateString('en-US', {
+                          month: 'long',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })
+                      : '—'}
+                  </p>
+                </div>
               </div>
-              <div>
+
+              <div className="border-t border-[#e2e8f0] pt-6">
+                <label className={capLabel}>Priority level</label>
+                <div className="mt-3 flex gap-2">
+                  {priorityBtn('low', 'Low')}
+                  {priorityBtn('normal', 'Normal')}
+                  {priorityBtn('urgent', 'Urgent')}
+                </div>
+              </div>
+              <div className="mt-6">
                 <label className={capLabel}>Due date</label>
                 <Input
                   type="date"
                   value={formData.dueDate}
                   onChange={(e) => setFormData((p) => ({ ...p, dueDate: e.target.value }))}
-                  className={cn(dueDisplay && 'text-[#0f172a]')}
+                  className={cn('mt-2', dueDisplay && 'text-[#0f172a]')}
                 />
                 {dueDisplay ? <p className="mt-1.5 text-xs font-medium text-[#475569]">{dueDisplay}</p> : null}
               </div>

@@ -598,34 +598,110 @@ function NewChangeOrderContent() {
               <div className="border-b border-[#f1f5f9] pb-6">
                 <h2 className="text-lg font-semibold tracking-tight text-[#0f172a]">Change details</h2>
                 <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-[#64748b]">
-                  Set the reason, then capture schedule extension, project baseline length, and cost categories. Totals
-                  below update automatically.
+                  Capture baseline duration and schedule extension, plus cost categories. Totals below update
+                  automatically.
                 </p>
-              </div>
-
-              <div className="mt-6 max-w-xl">
-                <label className={capLabel}>Reason for change</label>
-                <Select
-                  value={formData.reason}
-                  onValueChange={(value) => setFormData((p) => ({ ...p, reason: value }))}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select reason" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {REASON_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
 
               <div className="mt-8">
                 <p className={capLabel}>Impacts</p>
                 <p className="mt-1 text-sm text-[#64748b]">Three independent blocks — validate and save separately.</p>
                 <div className="mt-5 grid grid-cols-1 gap-5">
+                  <CoImpactCardShell
+                    accentBorder="border-t-[3px] border-t-slate-400"
+                    iconBg="bg-slate-100"
+                    iconClass="text-slate-700"
+                    icon={<Timer aria-hidden />}
+                    title="Original project duration"
+                    description="Baseline length before this change order. Used with schedule impact for revised duration."
+                    footer={
+                      <p className="text-[11px] font-medium leading-relaxed text-[#64748b]">
+                        {baselineComputed.valid ? (
+                          <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-800">
+                            Baseline · {derived.baselineDaysTotal} calendar day
+                            {derived.baselineDaysTotal === 1 ? '' : 's'}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-amber-900">
+                            Enter a numeric duration
+                            {baseline.unit === 'days' ? ' and day type' : ''}
+                          </span>
+                        )}
+                      </p>
+                    }
+                  >
+                    <div className="space-y-3">
+                      <div>
+                        <label className={capLabel}>Duration</label>
+                        <Input
+                          id="co-baseline-duration"
+                          inputMode="numeric"
+                          value={baseline.value}
+                          onChange={(e) => {
+                            setImpactErrors((p) => ({ ...p, baselineDuration: undefined }))
+                            setBaseline((p) => ({ ...p, value: e.target.value }))
+                          }}
+                          placeholder="Whole number, e.g. 240"
+                          className="bg-white"
+                        />
+                        {impactErrors.baselineDuration ? (
+                          <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDuration}</p>
+                        ) : null}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className={capLabel}>Unit</label>
+                          <Select
+                            value={baseline.unit}
+                            onValueChange={(v) =>
+                              setBaseline((p) => ({
+                                ...p,
+                                unit: v === 'weeks' ? 'weeks' : 'days',
+                                dayType: v === 'weeks' ? '' : p.dayType,
+                              }))
+                            }
+                          >
+                            <SelectTrigger className="w-full bg-white">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="days">Days</SelectItem>
+                              <SelectItem value="weeks">Weeks</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {baseline.unit === 'days' ? (
+                          <div>
+                            <label className={capLabel}>Day type</label>
+                            <Select
+                              value={baseline.dayType}
+                              onValueChange={(v) => {
+                                setImpactErrors((p) => ({ ...p, baselineDayType: undefined }))
+                                setBaseline((p) => ({
+                                  ...p,
+                                  dayType: v === 'business' ? 'business' : v === 'calendar' ? 'calendar' : '',
+                                }))
+                              }}
+                            >
+                              <SelectTrigger className="w-full bg-white" id="co-baseline-day-type">
+                                <SelectValue placeholder="Select" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="calendar">Calendar</SelectItem>
+                                <SelectItem value="business">Business</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {impactErrors.baselineDayType ? (
+                              <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDayType}</p>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </CoImpactCardShell>
+
                   <CoImpactCardShell
                     accentBorder="border-t-[3px] border-t-sky-500"
                     iconBg="bg-sky-50"
@@ -755,101 +831,6 @@ function NewChangeOrderContent() {
                   </CoImpactCardShell>
 
                   <CoImpactCardShell
-                    accentBorder="border-t-[3px] border-t-slate-400"
-                    iconBg="bg-slate-100"
-                    iconClass="text-slate-700"
-                    icon={<Timer aria-hidden />}
-                    title="Original project duration"
-                    description="Baseline length before this change order. Used with schedule impact for revised duration."
-                    footer={
-                      <p className="text-[11px] font-medium leading-relaxed text-[#64748b]">
-                        {baselineComputed.valid ? (
-                          <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-800">
-                            Baseline · {derived.baselineDaysTotal} calendar day
-                            {derived.baselineDaysTotal === 1 ? '' : 's'}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-amber-900">
-                            Enter a numeric duration
-                            {baseline.unit === 'days' ? ' and day type' : ''}
-                          </span>
-                        )}
-                      </p>
-                    }
-                  >
-                    <div className="space-y-3">
-                      <div>
-                        <label className={capLabel}>Duration</label>
-                        <Input
-                          id="co-baseline-duration"
-                          inputMode="numeric"
-                          value={baseline.value}
-                          onChange={(e) => {
-                            setImpactErrors((p) => ({ ...p, baselineDuration: undefined }))
-                            setBaseline((p) => ({ ...p, value: e.target.value }))
-                          }}
-                          placeholder="Whole number, e.g. 240"
-                          className="bg-white"
-                        />
-                        {impactErrors.baselineDuration ? (
-                          <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDuration}</p>
-                        ) : null}
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className={capLabel}>Unit</label>
-                          <Select
-                            value={baseline.unit}
-                            onValueChange={(v) =>
-                              setBaseline((p) => ({
-                                ...p,
-                                unit: v === 'weeks' ? 'weeks' : 'days',
-                                dayType: v === 'weeks' ? '' : p.dayType,
-                              }))
-                            }
-                          >
-                            <SelectTrigger className="w-full bg-white">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="days">Days</SelectItem>
-                              <SelectItem value="weeks">Weeks</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        {baseline.unit === 'days' ? (
-                          <div>
-                            <label className={capLabel}>Day type</label>
-                            <Select
-                              value={baseline.dayType}
-                              onValueChange={(v) => {
-                                setImpactErrors((p) => ({ ...p, baselineDayType: undefined }))
-                                setBaseline((p) => ({
-                                  ...p,
-                                  dayType: v === 'business' ? 'business' : v === 'calendar' ? 'calendar' : '',
-                                }))
-                              }}
-                            >
-                              <SelectTrigger className="w-full bg-white" id="co-baseline-day-type">
-                                <SelectValue placeholder="Select" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="calendar">Calendar</SelectItem>
-                                <SelectItem value="business">Business</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            {impactErrors.baselineDayType ? (
-                              <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDayType}</p>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </CoImpactCardShell>
-
-                  <CoImpactCardShell
                     accentBorder="border-t-[3px] border-t-[#f97316]"
                     iconBg="bg-orange-50"
                     iconClass="text-[#c2410c]"
@@ -935,7 +916,6 @@ function NewChangeOrderContent() {
                               { key: 'materials', label: 'Materials' },
                               { key: 'equipment', label: 'Equipment' },
                               { key: 'subcontractor', label: 'Subcontractors' },
-                              { key: 'other', label: 'Other' },
                             ] as const
                           ).map((row, idx) => (
                             <div key={row.key}>
@@ -961,17 +941,37 @@ function NewChangeOrderContent() {
                               </div>
                             </div>
                           ))}
-                        </div>
-
-                        <div>
-                          <label className={capLabel}>Markup % (optional)</label>
-                          <Input
-                            inputMode="decimal"
-                            value={cost.markupPercent}
-                            onChange={(e) => setCost((p) => ({ ...p, markupPercent: e.target.value }))}
-                            placeholder="e.g. 10"
-                            className="bg-white"
-                          />
+                          <div>
+                            <label className={capLabel}>Other</label>
+                            <div className="relative">
+                              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">
+                                $
+                              </span>
+                              <Input
+                                inputMode="decimal"
+                                value={cost.other}
+                                onChange={(e) => {
+                                  setImpactErrors((p) => ({ ...p, costAtLeastOne: undefined }))
+                                  setCost((p) => ({ ...p, other: e.target.value }))
+                                }}
+                                className="bg-white pl-7 pr-14"
+                                placeholder="0.00"
+                              />
+                              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#94a3b8]">
+                                USD
+                              </span>
+                            </div>
+                          </div>
+                          <div>
+                            <label className={capLabel}>Markup % (optional)</label>
+                            <Input
+                              inputMode="decimal"
+                              value={cost.markupPercent}
+                              onChange={(e) => setCost((p) => ({ ...p, markupPercent: e.target.value }))}
+                              placeholder="e.g. 10"
+                              className="bg-white"
+                            />
+                          </div>
                         </div>
 
                         {impactErrors.costAtLeastOne ? (
@@ -1007,43 +1007,47 @@ function NewChangeOrderContent() {
                 <p className="mt-1 text-sm leading-relaxed text-[#64748b]">
                   Read-only totals derived from contract amount and impacts above — useful for PDFs and reviewers.
                 </p>
-                <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-sm">
-                    <label className={capLabel}>Original contract amount</label>
-                    <div className="relative mt-2">
-                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">
-                        $
-                      </span>
-                      <Input
-                        value={formData.originalContractAmount}
-                        onChange={(e) =>
-                          setFormData((p) => ({ ...p, originalContractAmount: e.target.value }))
-                        }
-                        className="pl-7 pr-14"
-                        placeholder="0.00"
-                        inputMode="decimal"
-                      />
-                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#94a3b8]">
-                        USD
-                      </span>
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-sm">
+                      <label className={capLabel}>Original contract amount</label>
+                      <div className="relative mt-2">
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#94a3b8]">
+                          $
+                        </span>
+                        <Input
+                          value={formData.originalContractAmount}
+                          onChange={(e) =>
+                            setFormData((p) => ({ ...p, originalContractAmount: e.target.value }))
+                          }
+                          className="pl-7 pr-14"
+                          placeholder="0.00"
+                          inputMode="decimal"
+                        />
+                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#94a3b8]">
+                          USD
+                        </span>
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-sm">
+                      <label className={capLabel}>Revised contract amount</label>
+                      <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-[#e2e8f0] bg-[#fafafa] px-3 font-mono text-sm font-semibold tabular-nums text-[#0f172a]">
+                        {derived.revisedContractAmount === null ? '—' : `$${formatUsd(derived.revisedContractAmount)}`}
+                      </div>
                     </div>
                   </div>
-                  <div className="rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-sm">
-                    <label className={capLabel}>Revised contract amount</label>
-                    <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-[#e2e8f0] bg-[#fafafa] px-3 font-mono text-sm font-semibold tabular-nums text-[#0f172a]">
-                      {derived.revisedContractAmount === null ? '—' : `$${formatUsd(derived.revisedContractAmount)}`}
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-sm">
+                      <label className={capLabel}>Original duration (normalized)</label>
+                      <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-[#e2e8f0] bg-[#fafafa] px-3 text-sm font-medium tabular-nums text-[#334155]">
+                        {derived.baselineDaysTotal ? `${derived.baselineDaysTotal} calendar days` : '—'}
+                      </div>
                     </div>
-                  </div>
-                  <div className="rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-sm">
-                    <label className={capLabel}>Original duration (normalized)</label>
-                    <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-[#e2e8f0] bg-[#fafafa] px-3 text-sm font-medium tabular-nums text-[#334155]">
-                      {derived.baselineDaysTotal ? `${derived.baselineDaysTotal} calendar days` : '—'}
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-sm">
-                    <label className={capLabel}>Revised duration (normalized)</label>
-                    <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-[#e2e8f0] bg-[#fafafa] px-3 text-sm font-medium tabular-nums text-[#334155]">
-                      {derived.revisedDaysTotal === null ? '—' : `${derived.revisedDaysTotal} calendar days`}
+                    <div className="rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-sm">
+                      <label className={capLabel}>Revised duration (normalized)</label>
+                      <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-[#e2e8f0] bg-[#fafafa] px-3 text-sm font-medium tabular-nums text-[#334155]">
+                        {derived.revisedDaysTotal === null ? '—' : `${derived.revisedDaysTotal} calendar days`}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1146,91 +1150,7 @@ function NewChangeOrderContent() {
 
           <aside className="w-full min-w-0 space-y-6 lg:sticky lg:top-6 lg:self-start">
             <div className={formCardClassName()}>
-              <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">
-                Categorization
-              </h3>
-              <div className="space-y-4">
-                <div>
-                  <label className={capLabel}>Priority level</label>
-                  <div className="grid grid-cols-3 gap-3">
-                    {(
-                      [
-                        { level: 'low', dot: 'bg-[#10B981]' },
-                        { level: 'normal', dot: 'bg-[#6366F1]' },
-                        { level: 'urgent', dot: 'bg-[#EF4444]' },
-                      ] as const
-                    ).map(({ level, dot }) => {
-                      const active = formData.priority === level
-                      return (
-                        <button
-                          key={level}
-                          type="button"
-                          onClick={() => setFormData((p) => ({ ...p, priority: level }))}
-                          className={cn(
-                            'flex h-10 items-center justify-center gap-1.5 rounded-xl border text-sm font-semibold transition-colors',
-                            active
-                              ? 'border-[#6366F1] bg-white text-[#6366F1]'
-                              : 'border-[#e2e8f0] bg-white text-[#334155] hover:bg-[#f8fafc]'
-                          )}
-                        >
-                          <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
-                          {level.charAt(0).toUpperCase() + level.slice(1)}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-                <div className="border-t border-[#e2e8f0] pt-4">
-                  <label className={capLabel}>Due date</label>
-                  <Input
-                    type="date"
-                    value={formData.dueDate}
-                    onChange={(e) => setFormData((p) => ({ ...p, dueDate: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className={capLabel}>Reason</label>
-                  <Select
-                    value={formData.reason}
-                    onValueChange={(value) => setFormData((p) => ({ ...p, reason: value }))}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {REASON_OPTIONS.map((o) => (
-                        <SelectItem key={o.value} value={o.value}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="border-t border-[#e2e8f0] pt-4">
-                  <label className={capLabel}>Schedule impact</label>
-                  <Select
-                    value={schedule.enabled ? 'has_impact' : 'no_impact'}
-                    onValueChange={(v) => {
-                      if (v === 'no_impact') setSchedule({ enabled: false, duration: '', unit: 'days', dayType: '' })
-                      else setSchedule((p) => ({ ...p, enabled: true }))
-                    }}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="no_impact">No Impact</SelectItem>
-                      <SelectItem value="has_impact">Has Schedule Impact</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-
-            <div className={formCardClassName()}>
-              <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">
-                Summary
-              </h3>
+              <h3 className="mb-5 text-lg font-semibold text-[#0f172a]">Summary</h3>
 
               <div className="space-y-4">
                 <div>
@@ -1282,24 +1202,64 @@ function NewChangeOrderContent() {
                   </p>
                 </div>
 
-                <div className="border-t border-slate-100 pt-4">
-                  <p className="text-xs text-muted-foreground">Priority</p>
-                  <p className="text-sm font-semibold" style={{ color: NAVY }}>
-                    {formData.priority.charAt(0).toUpperCase() + formData.priority.slice(1)}
-                  </p>
+                <div className="border-t border-[#e2e8f0] pt-4">
+                  <label className={capLabel}>Reason for change</label>
+                  <Select
+                    value={formData.reason}
+                    onValueChange={(value) => setFormData((p) => ({ ...p, reason: value }))}
+                  >
+                    <SelectTrigger className="mt-2 w-full">
+                      <SelectValue placeholder="Select reason" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REASON_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
-                <div className="border-t border-slate-100 pt-4">
-                  <p className="text-xs text-muted-foreground">Due Date</p>
-                  <p className="text-sm font-semibold" style={{ color: NAVY }}>
-                    {formData.dueDate
-                      ? new Date(formData.dueDate + 'T12:00:00').toLocaleDateString('en-US', {
-                          month: 'long',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })
-                      : '—'}
-                  </p>
+                <div>
+                  <label className={capLabel}>Priority level</label>
+                  <div className="mt-2 grid grid-cols-3 gap-3">
+                    {(
+                      [
+                        { level: 'low', dot: 'bg-[#10B981]' },
+                        { level: 'normal', dot: 'bg-[#6366F1]' },
+                        { level: 'urgent', dot: 'bg-[#EF4444]' },
+                      ] as const
+                    ).map(({ level, dot }) => {
+                      const active = formData.priority === level
+                      return (
+                        <button
+                          key={level}
+                          type="button"
+                          onClick={() => setFormData((p) => ({ ...p, priority: level }))}
+                          className={cn(
+                            'flex h-10 items-center justify-center gap-1.5 rounded-xl border text-sm font-semibold transition-colors',
+                            active
+                              ? 'border-[#6366F1] bg-white text-[#6366F1]'
+                              : 'border-[#e2e8f0] bg-white text-[#334155] hover:bg-[#f8fafc]'
+                          )}
+                        >
+                          <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
+                          {level.charAt(0).toUpperCase() + level.slice(1)}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="border-t border-[#e2e8f0] pt-4">
+                  <label className={capLabel}>Due date</label>
+                  <Input
+                    type="date"
+                    value={formData.dueDate}
+                    onChange={(e) => setFormData((p) => ({ ...p, dueDate: e.target.value }))}
+                    className="mt-2"
+                  />
                 </div>
               </div>
             </div>

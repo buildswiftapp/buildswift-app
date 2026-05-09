@@ -47,7 +47,7 @@ function getUiConfig(documentApiType: MissingScopeApiType) {
     return {
       prompt: 'Want to make this submittal description more complete and professional?',
       helperText: 'AI can review your description and suggest improvements.',
-      buttonLabel: '✨ Improve & Complete',
+      buttonLabel: '✨ Improve with AI',
       runningLabel: 'Improving…',
       icon: Sparkles,
     }
