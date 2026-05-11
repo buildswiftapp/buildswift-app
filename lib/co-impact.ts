@@ -89,6 +89,25 @@ export function computeBaseline(state: ChangeOrderBaselineState): { baselineDays
   return { baselineDaysTotal: normalizeDays(dur, state.unit), valid: true }
 }
 
+/** Collapse legacy weeks/business-day baseline into canonical calendar-days input for the simplified CO form UI. */
+export function coerceBaselineToNormalizedCalendarInput(
+  baseline: ChangeOrderBaselineState,
+): ChangeOrderBaselineState {
+  const c = computeBaseline(baseline)
+  if (!c.valid) {
+    return {
+      value: String(baseline.value ?? '').trim(),
+      unit: 'days',
+      dayType: baseline.dayType || 'calendar',
+    }
+  }
+  return {
+    value: String(c.baselineDaysTotal),
+    unit: 'days',
+    dayType: 'calendar',
+  }
+}
+
 function parsePercent(raw: string): number | null {
   const t = String(raw ?? '').trim()
   if (!t) return null

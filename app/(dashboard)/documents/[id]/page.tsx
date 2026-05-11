@@ -13,7 +13,6 @@ import {
   Eye,
   Send,
   Save,
-  Timer,
   Trash2,
   Upload,
   X,
@@ -33,7 +32,6 @@ import {
   parseMoneyInput,
 } from '@/lib/document-html'
 import {
-  computeBaseline,
   computeDerived,
   computeSchedule,
   formatScheduleLabel,
@@ -261,7 +259,7 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
     originalContractAmount: '',
     notes: '',
     schedule: { enabled: false, duration: '', unit: 'days', dayType: '' },
-    baseline: { value: '', unit: 'days', dayType: '' },
+    baseline: { value: '', unit: 'days', dayType: 'calendar' },
     cost: {
       type: 'increase',
       labor: '',
@@ -355,8 +353,6 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
   )
 
   const scheduleComputed = useMemo(() => computeSchedule(co.schedule), [co.schedule])
-  const baselineComputed = useMemo(() => computeBaseline(co.baseline), [co.baseline])
-
   const hintClass = 'mt-1.5 text-xs text-muted-foreground'
 
   // Canonical status read with legacy-fallback derivation so older rows that
@@ -522,9 +518,9 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
           : firstKey === 'scheduleDayType'
             ? 'co-schedule-day-type'
             : firstKey === 'baselineDuration'
-              ? 'co-baseline-duration'
+              ? 'co-original-duration-normalized'
               : firstKey === 'baselineDayType'
-                ? 'co-baseline-day-type'
+                ? 'co-original-duration-normalized'
                 : firstKey === 'costJustification'
                   ? 'co-cost-justification'
                   : firstKey === 'costAtLeastOne'
@@ -1004,118 +1000,17 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                 <div className="border-b border-border pb-6">
                   <h2 className="text-lg font-semibold tracking-tight text-foreground">Change details</h2>
                   <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                    Capture baseline duration and schedule extension, plus cost categories. Totals below update
-                    automatically.
+                    Capture schedule extension and cost categories. Enter normalized original duration alongside contract
+                    values in the snapshot below.
                   </p>
                 </div>
 
                 <div className="mt-8">
                   <p className={capLabel}>Impacts</p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Three independent blocks — validate and save separately.
+                    Schedule and cost sections — revise duration totals from the Contract & duration snapshot.
                   </p>
                   <div className="mt-5 grid grid-cols-1 gap-5">
-                    <CoImpactCardShell
-                      accentBorder="border-t-[3px] border-t-muted-foreground"
-                      iconBg="bg-muted"
-                      iconClass="text-foreground"
-                      icon={<Timer aria-hidden />}
-                      title="Original project duration"
-                      description="Baseline length before this change order. Used with schedule impact for revised duration."
-                      footer={
-                        <p className="text-[11px] font-medium leading-relaxed text-muted-foreground">
-                          {baselineComputed.valid ? (
-                            <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2.5 py-1 text-emerald-800 dark:text-emerald-300">
-                              Baseline · {derived.baselineDaysTotal} calendar day
-                              {derived.baselineDaysTotal === 1 ? '' : 's'}
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2.5 py-1 text-amber-900 dark:text-amber-200">
-                              Enter a numeric duration
-                              {co.baseline.unit === 'days' ? ' and day type' : ''}
-                            </span>
-                          )}
-                        </p>
-                      }
-                    >
-                      <div className="space-y-3">
-                        <div>
-                          <label className={capLabel}>Duration</label>
-                          <Input
-                            id="co-baseline-duration"
-                            inputMode="numeric"
-                            value={co.baseline.value}
-                            onChange={(e) => {
-                              setImpactErrors((p) => ({ ...p, baselineDuration: undefined }))
-                              setCo((p) => ({ ...p, baseline: { ...p.baseline, value: e.target.value } }))
-                            }}
-                            placeholder="Whole number, e.g. 240"
-                          />
-                          {impactErrors.baselineDuration ? (
-                            <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDuration}</p>
-                          ) : null}
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className={capLabel}>Unit</label>
-                            <Select
-                              value={co.baseline.unit}
-                              onValueChange={(v) =>
-                                setCo((p) => ({
-                                  ...p,
-                                  baseline: {
-                                    ...p.baseline,
-                                    unit: v === 'weeks' ? 'weeks' : 'days',
-                                    dayType: v === 'weeks' ? '' : p.baseline.dayType,
-                                  },
-                                }))
-                              }
-                            >
-                              <SelectTrigger className="w-full">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="days">Days</SelectItem>
-                                <SelectItem value="weeks">Weeks</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          {co.baseline.unit === 'days' ? (
-                            <div>
-                              <label className={capLabel}>Day type</label>
-                              <Select
-                                value={co.baseline.dayType}
-                                onValueChange={(v) => {
-                                  setImpactErrors((p) => ({ ...p, baselineDayType: undefined }))
-                                  setCo((p) => ({
-                                    ...p,
-                                    baseline: {
-                                      ...p.baseline,
-                                      dayType:
-                                        v === 'business' ? 'business' : v === 'calendar' ? 'calendar' : '',
-                                    },
-                                  }))
-                                }}
-                              >
-                                <SelectTrigger className="w-full" id="co-baseline-day-type">
-                                  <SelectValue placeholder="Select" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="calendar">Calendar</SelectItem>
-                                  <SelectItem value="business">Business</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              {impactErrors.baselineDayType ? (
-                                <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDayType}</p>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    </CoImpactCardShell>
-
                     <CoImpactCardShell
                       accentBorder="border-t-[3px] border-t-sky-500"
                       iconBg="bg-sky-500/10"
@@ -1444,7 +1339,8 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                 <div className="mt-10 rounded-2xl border border-border bg-gradient-to-b from-muted/50 to-muted/30 p-6">
                   <p className={capLabel}>Contract & duration snapshot</p>
                   <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                    Read-only totals derived from contract amount and impacts above — useful for PDFs and reviewers.
+                    Enter original contract amount and normalized duration below; revised values reflect cost and schedule
+                    impacts for PDFs and reviewers.
                   </p>
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
                     <div className="space-y-4">
@@ -1479,12 +1375,35 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
                     </div>
                     <div className="space-y-4">
                       <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
-                        <label className={capLabel}>Original duration (normalized)</label>
-                        <div className="mt-2 flex min-h-[2.75rem] items-center rounded-lg border border-border bg-muted/50 px-3 text-sm font-medium tabular-nums text-foreground">
-                          {derived.baselineDaysTotal
-                            ? `${derived.baselineDaysTotal} calendar days`
-                            : '—'}
-                        </div>
+                        <label className={capLabel}>
+                          Original duration (normalized) <span className="text-destructive">*</span>
+                        </label>
+                        <Input
+                          id="co-original-duration-normalized"
+                          inputMode="numeric"
+                          value={co.baseline.value}
+                          onChange={(e) => {
+                            setImpactErrors((p) => ({
+                              ...p,
+                              baselineDuration: undefined,
+                              baselineDayType: undefined,
+                            }))
+                            setCo((p) => ({
+                              ...p,
+                              baseline: {
+                                ...p.baseline,
+                                value: e.target.value,
+                                unit: 'days',
+                                dayType: 'calendar',
+                              },
+                            }))
+                          }}
+                          className="mt-2"
+                          placeholder="Whole calendar days, e.g., 240"
+                        />
+                        {impactErrors.baselineDuration ? (
+                          <p className="mt-1 text-xs text-destructive">{impactErrors.baselineDuration}</p>
+                        ) : null}
                       </div>
                       <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
                         <label className={capLabel}>Revised duration (normalized)</label>
