@@ -5,7 +5,10 @@ import type {
   ChangeOrderCostState,
   ChangeOrderScheduleState,
 } from '@/lib/co-impact'
-import { deserializeChangeOrderImpactFromMetadata } from '@/lib/co-impact'
+import {
+  coerceBaselineToNormalizedCalendarInput,
+  deserializeChangeOrderImpactFromMetadata,
+} from '@/lib/co-impact'
 import { parseLegacyReasons } from '@/lib/rfi-reasons'
 
 export const CO_REASON_OPTIONS = [
@@ -707,7 +710,7 @@ export function initialChangeOrderState(args: {
     scheduleImpact: scheduleLabelToValue(scheduleLabelFromMeta),
     notes: (typeof m.notes === 'string' && m.notes) || extractH3Block(html, 'Notes') || '',
     schedule: impact.schedule,
-    baseline: impact.baseline,
+    baseline: coerceBaselineToNormalizedCalendarInput(impact.baseline),
     cost: impact.cost,
   }
 }
