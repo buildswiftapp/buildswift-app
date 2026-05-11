@@ -600,7 +600,75 @@ function NewChangeOrderContent() {
                 </p>
               </div>
 
-              <div className="mt-8">
+              <div className="mt-8 space-y-8">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:gap-x-6 lg:gap-x-8">
+                  <label htmlFor="co-change-reason" className={cn(capLabel, '!mb-0')}>
+                    Reason for change
+                  </label>
+                  <label htmlFor="co-due-date" className={cn(capLabel, '!mb-0')}>
+                    Due date
+                  </label>
+                  <div className="min-w-0">
+                    <Select
+                      value={formData.reason}
+                      onValueChange={(value) => setFormData((p) => ({ ...p, reason: value }))}
+                    >
+                      <SelectTrigger id="co-change-reason" className="w-full bg-white">
+                        <SelectValue placeholder="Select reason" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {REASON_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="min-w-0">
+                    <Input
+                      id="co-due-date"
+                      type="date"
+                      value={formData.dueDate}
+                      onChange={(e) => setFormData((p) => ({ ...p, dueDate: e.target.value }))}
+                      className="bg-white [color-scheme:light]"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className={capLabel}>Priority level</label>
+                  <div className="mt-2 grid max-w-xl grid-cols-3 gap-3">
+                    {(
+                      [
+                        { level: 'low', dot: 'bg-[#10B981]' },
+                        { level: 'normal', dot: 'bg-[#6366F1]' },
+                        { level: 'urgent', dot: 'bg-[#EF4444]' },
+                      ] as const
+                    ).map(({ level, dot }) => {
+                      const active = formData.priority === level
+                      return (
+                        <button
+                          key={level}
+                          type="button"
+                          onClick={() => setFormData((p) => ({ ...p, priority: level }))}
+                          className={cn(
+                            'flex h-10 items-center justify-center gap-1.5 rounded-xl border text-sm font-semibold transition-colors',
+                            active
+                              ? 'border-[#6366F1] bg-white text-[#6366F1]'
+                              : 'border-[#e2e8f0] bg-white text-[#334155] hover:bg-[#f8fafc]'
+                          )}
+                        >
+                          <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
+                          {level.charAt(0).toUpperCase() + level.slice(1)}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-10">
                 <p className={capLabel}>Impacts</p>
                 <p className="mt-1 text-sm text-[#64748b]">
                   Schedule and cost sections — revise duration totals from the Contract & duration snapshot.
@@ -1125,64 +1193,31 @@ function NewChangeOrderContent() {
                   </p>
                 </div>
 
-                <div className="border-t border-[#e2e8f0] pt-4">
-                  <label className={capLabel}>Reason for change</label>
-                  <Select
-                    value={formData.reason}
-                    onValueChange={(value) => setFormData((p) => ({ ...p, reason: value }))}
-                  >
-                    <SelectTrigger className="mt-2 w-full">
-                      <SelectValue placeholder="Select reason" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {REASON_OPTIONS.map((o) => (
-                        <SelectItem key={o.value} value={o.value}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">Reason for change</p>
+                  <p className="text-sm font-semibold" style={{ color: NAVY }}>
+                    {reasonLabel}
+                  </p>
                 </div>
 
-                <div>
-                  <label className={capLabel}>Priority level</label>
-                  <div className="mt-2 grid grid-cols-3 gap-3">
-                    {(
-                      [
-                        { level: 'low', dot: 'bg-[#10B981]' },
-                        { level: 'normal', dot: 'bg-[#6366F1]' },
-                        { level: 'urgent', dot: 'bg-[#EF4444]' },
-                      ] as const
-                    ).map(({ level, dot }) => {
-                      const active = formData.priority === level
-                      return (
-                        <button
-                          key={level}
-                          type="button"
-                          onClick={() => setFormData((p) => ({ ...p, priority: level }))}
-                          className={cn(
-                            'flex h-10 items-center justify-center gap-1.5 rounded-xl border text-sm font-semibold transition-colors',
-                            active
-                              ? 'border-[#6366F1] bg-white text-[#6366F1]'
-                              : 'border-[#e2e8f0] bg-white text-[#334155] hover:bg-[#f8fafc]'
-                          )}
-                        >
-                          <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
-                          {level.charAt(0).toUpperCase() + level.slice(1)}
-                        </button>
-                      )
-                    })}
-                  </div>
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">Priority level</p>
+                  <p className="text-sm font-semibold" style={{ color: NAVY }}>
+                    {formData.priority.charAt(0).toUpperCase() + formData.priority.slice(1)}
+                  </p>
                 </div>
 
-                <div className="border-t border-[#e2e8f0] pt-4">
-                  <label className={capLabel}>Due date</label>
-                  <Input
-                    type="date"
-                    value={formData.dueDate}
-                    onChange={(e) => setFormData((p) => ({ ...p, dueDate: e.target.value }))}
-                    className="mt-2"
-                  />
+                <div className="border-t border-slate-100 pt-4">
+                  <p className="text-xs text-muted-foreground">Due date</p>
+                  <p className="text-sm font-semibold" style={{ color: NAVY }}>
+                    {formData.dueDate
+                      ? new Date(formData.dueDate + 'T12:00:00').toLocaleDateString('en-US', {
+                          month: '2-digit',
+                          day: '2-digit',
+                          year: 'numeric',
+                        })
+                      : '—'}
+                  </p>
                 </div>
               </div>
             </div>
