@@ -32,6 +32,10 @@ import { docTypeToMissingScopeType } from '@/lib/missing-scope-client'
 import { buildRfiDescriptionBody, buildSubmittalDescriptionBody } from '@/lib/document-html'
 import { RfiReasonsField } from '@/app/components/rfi-reasons-field'
 import { joinReasons } from '@/lib/rfi-reasons'
+import {
+  CLASH_GAP_RFI_PREFILL_STORAGE_KEY,
+  type ClashGapRfiPrefillPayload,
+} from '@/lib/clash-gap-rfi-prefill'
 
 const PAGE_BG = '#f1f5f9'
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
@@ -109,6 +113,19 @@ function NewDocumentContent() {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
+    let prefill: ClashGapRfiPrefillPayload | null = null
+    if (typeof window !== 'undefined' && resolvedType === 'rfi') {
+      try {
+        const raw = sessionStorage.getItem(CLASH_GAP_RFI_PREFILL_STORAGE_KEY)
+        if (raw) {
+          sessionStorage.removeItem(CLASH_GAP_RFI_PREFILL_STORAGE_KEY)
+          prefill = JSON.parse(raw) as ClashGapRfiPrefillPayload
+        }
+      } catch {
+        sessionStorage.removeItem(CLASH_GAP_RFI_PREFILL_STORAGE_KEY)
+      }
+    }
+
     const loadProjects = async () => {
       try {
         const data = await apiFetch<{
@@ -130,16 +147,33 @@ function NewDocumentContent() {
             updatedAt: p.updated_at,
           }))
         )
-        if (!formData.projectId && data.projects[0]?.id) {
-          setFormData((prev) => ({ ...prev, projectId: data.projects[0].id }))
-        }
+        setFormData((prev) => {
+          const next = { ...prev }
+          if (!next.projectId && data.projects[0]?.id) {
+            next.projectId = data.projects[0].id
+          }
+          if (prefill && resolvedType === 'rfi') {
+            if (data.projects.some((p) => p.id === prefill!.projectId)) {
+              next.projectId = prefill!.projectId
+            }
+            if (prefill.title?.trim()) next.title = prefill.title.trim()
+            if (prefill.description?.trim()) next.description = prefill.description.trim()
+            if (prefill.dueDate) next.dueDate = prefill.dueDate
+            if (prefill.priority) next.priority = prefill.priority
+            if (prefill.detailReferences?.trim()) next.detailReferences = prefill.detailReferences.trim()
+            if (prefill.drawingSheetNumbers?.trim())
+              next.drawingSheetNumbers = prefill.drawingSheetNumbers.trim()
+            if (prefill.notes?.trim()) next.notes = prefill.notes.trim()
+            toast.success('Draft imported from Clash/Gap Detection')
+          }
+          return next
+        })
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Failed to load projects')
       }
     }
     void loadProjects()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [resolvedType])
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === formData.projectId),

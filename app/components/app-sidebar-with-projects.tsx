@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   PanelLeftClose,
   PanelLeftOpen,
+  ScanSearch,
   Settings,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -71,6 +72,7 @@ const navigation = [
   { name: 'RFIs', href: '/documents', query: 'type=rfi', icon: FileQuestion },
   { name: 'Submittals', href: '/documents', query: 'type=submittal', icon: FileStack },
   { name: 'Change Orders', href: '/documents', query: 'type=change_order', icon: FileDollarSign },
+  { name: 'Clash/Gap Detection Tool', href: '/clash-gap-detection', icon: ScanSearch },
 ]
 
 const bottomNavigation = [
