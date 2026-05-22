@@ -212,6 +212,7 @@ export default function DashboardPage() {
           />
         </div>
 
+
         {/* Recent docs + Documents by Type */}
         <div className="grid gap-6 lg:grid-cols-3">
           <section className="app-surface lg:col-span-2 p-6">

@@ -34,6 +34,7 @@ export interface Project {
   isArchived?: boolean
   status: 'active' | 'completed' | 'on_hold'
   address?: string
+  jobNumber?: string
   clientName?: string
   startDate: string
   endDate?: string

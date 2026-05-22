@@ -1,12 +1,17 @@
 'use client'
 
-import type { ReactNode, RefObject } from 'react'
-import type { DetectionSettings } from '@/lib/clash-gap-types'
+import { useState, type ReactNode, type RefObject } from 'react'
 import {
   DOCUMENT_LABEL_TYPES,
   type DocumentLabelType,
   type DocumentUploadRow,
 } from '@/lib/clash-gap-types'
+import {
+  assignDocumentTypesForIngest,
+  canRunClashGapDetection,
+  hasPlansDocument,
+  hasSpecsDocument,
+} from '@/lib/clash-gap-document-inference'
 import { stubPagesForFilename } from '@/lib/clash-gap-mock-detection'
 import type { Project } from '@/lib/types'
 import { Button } from '@/components/ui/button'
@@ -20,8 +25,17 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { Upload } from 'lucide-react'
+import { CloudUpload, FileText, ImageIcon, Plus } from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 
 const ACCEPT = new Set([
   'application/pdf',
@@ -38,8 +52,6 @@ const ACCEPT_EXT = /\.(pdf|docx|doc|txt|jpe?g|png|webp|tiff?)$/i
 
 const PAGE_BG = '#f9fafb'
 
-const TRADE_OPTIONS = ['Structural', 'Architectural', 'MEP', 'Civil', 'Landscape'] as const
-
 function humanLabelType(t: DocumentLabelType): string {
   return t.replace(/_/g, ' ')
 }
@@ -48,17 +60,41 @@ function formatAllowed(): string {
   return 'PDF, DOCX, plain text exports, common image scans'
 }
 
+function FormatTypeChip(props: {
+  label: string
+  icon: ReactNode
+  iconClassName: string
+}) {
+  return (
+    <span className="inline-flex items-center gap-3 text-sm font-medium text-[#475569]">
+      <span
+        className={cn(
+          'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg',
+          props.iconClassName,
+        )}
+      >
+        {props.icon}
+      </span>
+      {props.label}
+    </span>
+  )
+}
+
 export function UploadSetupStep(props: {
   projects: Project[]
   projectId: string
   onProjectIdChange: (id: string) => void
   rows: DocumentUploadRow[]
   onRowsChange: (rows: DocumentUploadRow[]) => void
-  settings: DetectionSettings
-  onSettingsChange: (s: DetectionSettings) => void
-  selectedTrades: string[]
-  onSelectedTradesChange: (next: string[]) => void
   fileInputRef: RefObject<HTMLInputElement | null>
+  analysisId?: string | null
+  onUploadRow?: (row: DocumentUploadRow) => Promise<void>
+  onRowTypeChange?: (row: DocumentUploadRow, type: DocumentLabelType) => void | Promise<void>
+  onCreateProject?: (input: {
+    name: string
+    address?: string
+    jobNumber?: string
+  }) => Promise<void>
 }) {
   const {
     projects,
@@ -66,14 +102,18 @@ export function UploadSetupStep(props: {
     onProjectIdChange,
     rows,
     onRowsChange,
-    settings,
-    onSettingsChange,
-    selectedTrades,
-    onSelectedTradesChange,
     fileInputRef,
+    analysisId,
+    onUploadRow,
+    onRowTypeChange,
+    onCreateProject,
   } = props
 
-  const scopeNeedsTrades = settings.scope === 'selected_trades'
+  const [createOpen, setCreateOpen] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newAddress, setNewAddress] = useState('')
+  const [newJobNumber, setNewJobNumber] = useState('')
+  const [creating, setCreating] = useState(false)
 
   const ingestFiles = (list: FileList | File[]) => {
     const files = Array.from(list)
@@ -99,7 +139,16 @@ export function UploadSetupStep(props: {
         file,
       })
     }
-    if (nextRows.length) onRowsChange([...rows, ...nextRows])
+    const typedRows = assignDocumentTypesForIngest(nextRows, rows)
+    if (typedRows.length) {
+      const merged = [...rows, ...typedRows]
+      onRowsChange(merged)
+      if (analysisId && onUploadRow) {
+        for (const row of typedRows) {
+          void onUploadRow(row)
+        }
+      }
+    }
   }
 
   const onDrop = (e: React.DragEvent) => {
@@ -108,7 +157,11 @@ export function UploadSetupStep(props: {
   }
 
   const onRowType = (id: string, type: DocumentLabelType) => {
-    onRowsChange(rows.map((r) => (r.id === id ? { ...r, type } : r)))
+    const row = rows.find((r) => r.id === id)
+    if (!row) return
+    const updated = { ...row, type }
+    onRowsChange(rows.map((r) => (r.id === id ? updated : r)))
+    void onRowTypeChange?.(updated, type)
   }
 
   const removeRow = (id: string) => {
@@ -120,59 +173,112 @@ export function UploadSetupStep(props: {
       <div className="grid gap-6 lg:grid-cols-[1fr,min(340px,100%)]">
           <Card className="rounded-2xl border-[#e2e8f0] shadow-[0_2px_12px_rgba(15,23,42,0.06)]">
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Documents & setup</CardTitle>
+              <CardTitle className="flex items-center gap-3 text-lg">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100">
+                  <FileText
+                    className="h-[22px] w-[22px] text-violet-600"
+                    strokeWidth={2.25}
+                    aria-hidden
+                  />
+                </span>
+                Documents &amp; setup
+              </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-6 px-6 pb-6">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <Label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">
-                    Project
-                  </Label>
+              <div className="flex flex-col gap-2">
+                <Label className="text-[11px] font-bold uppercase tracking-[0.12em] text-violet-600">
+                  Project
+                </Label>
+                <div className="flex max-w-md flex-wrap items-center gap-2">
                   <Select value={projectId} onValueChange={onProjectIdChange}>
-                    <SelectTrigger className="mt-1.5 h-11 rounded-xl border-[#e2e8f0]">
+                    <SelectTrigger className="h-11 min-w-[220px] flex-1 rounded-xl border-[#e2e8f0] sm:min-w-[260px]">
                       <SelectValue placeholder="Select project" />
                     </SelectTrigger>
                     <SelectContent>
                       {projects.map((p) => (
                         <SelectItem key={p.id} value={p.id}>
                           {p.name}
+                          {p.jobNumber ? ` (${p.jobNumber})` : ''}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-
-                {!scopeNeedsTrades ? null : (
-                  <div>
-                    <Label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">
-                      Trades in scope
-                    </Label>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {TRADE_OPTIONS.map((trade) => {
-                        const on = selectedTrades.includes(trade)
-                        return (
-                          <button
-                            key={trade}
+                  {onCreateProject ? (
+                    <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+                      <DialogTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-11 w-11 shrink-0 rounded-xl border-violet-200 text-violet-600 hover:bg-violet-50"
+                          aria-label="Create project"
+                        >
+                          <Plus className="h-4 w-4" aria-hidden />
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Create project</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-3 py-2">
+                          <div>
+                            <Label>Project name</Label>
+                            <Input
+                              className="mt-1"
+                              value={newName}
+                              onChange={(e) => setNewName(e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <Label>Address (optional)</Label>
+                            <Input
+                              className="mt-1"
+                              value={newAddress}
+                              onChange={(e) => setNewAddress(e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <Label>Job number (optional)</Label>
+                            <Input
+                              className="mt-1"
+                              value={newJobNumber}
+                              onChange={(e) => setNewJobNumber(e.target.value)}
+                            />
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button
                             type="button"
-                            onClick={() =>
-                              onSelectedTradesChange(
-                                on ? selectedTrades.filter((t) => t !== trade) : [...selectedTrades, trade]
-                              )
-                            }
-                            className={cn(
-                              'rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-                              on
-                                ? 'border-primary bg-primary/10 text-primary'
-                                : 'border-[#e2e8f0] bg-white text-[#475569] hover:bg-[#f8fafc]',
-                            )}
+                            disabled={creating || !newName.trim()}
+                            onClick={() => {
+                              void (async () => {
+                                setCreating(true)
+                                try {
+                                  await onCreateProject({
+                                    name: newName.trim(),
+                                    address: newAddress.trim() || undefined,
+                                    jobNumber: newJobNumber.trim() || undefined,
+                                  })
+                                  setCreateOpen(false)
+                                  setNewName('')
+                                  setNewAddress('')
+                                  setNewJobNumber('')
+                                } catch (e) {
+                                  toast.error(
+                                    e instanceof Error ? e.message : 'Could not create project',
+                                  )
+                                } finally {
+                                  setCreating(false)
+                                }
+                              })()
+                            }}
                           >
-                            {trade}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
+                            {creating ? 'Creating…' : 'Create'}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  ) : null}
+                </div>
               </div>
 
               <div
@@ -180,8 +286,7 @@ export function UploadSetupStep(props: {
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={onDrop}
                 className={cn(
-                  'relative flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#cbd5e1] bg-[#f8fafc] px-6 py-14 text-center transition-colors hover:border-primary/40 hover:bg-white',
-                  'shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]',
+                  'relative flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[#bfdbfe] bg-[#f0f7ff] px-6 py-14 text-center transition-colors hover:border-sky-400 hover:bg-[#eaf4ff]',
                 )}
                 onClick={() => fileInputRef.current?.click()}
               >
@@ -197,13 +302,70 @@ export function UploadSetupStep(props: {
                     e.target.value = ''
                   }}
                 />
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                  <Upload className="h-6 w-6 text-primary" strokeWidth={1.6} aria-hidden />
+                <div className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-sky-100">
+                  <CloudUpload
+                    className="h-9 w-9 text-sky-500"
+                    strokeWidth={2}
+                    aria-hidden
+                  />
                 </div>
-                <p className="mt-4 text-sm font-semibold text-[#0f172a]">
+                <p className="mt-5 text-lg font-bold text-[#0f172a]">
                   Drag and drop documents here
                 </p>
-                <p className="mt-2 max-w-md text-xs text-[#64748b]">{formatAllowed()}.</p>
+                <p className="mt-2 max-w-md text-sm text-[#64748b]">{formatAllowed()}.</p>
+                <div className="mt-6 flex flex-wrap items-center justify-center gap-x-10 gap-y-4">
+                  <FormatTypeChip
+                    label="PDF"
+                    iconClassName="bg-red-500"
+                    icon={
+                      <span className="text-[11px] font-bold leading-none text-white">PDF</span>
+                    }
+                  />
+                  <FormatTypeChip
+                    label="DOCX"
+                    iconClassName="bg-blue-600"
+                    icon={
+                      <span className="text-[10px] font-bold leading-none text-white">DOCX</span>
+                    }
+                  />
+                  <FormatTypeChip
+                    label="Image scans"
+                    iconClassName="bg-emerald-100"
+                    icon={
+                      <ImageIcon
+                        className="h-5 w-5 text-emerald-600"
+                        strokeWidth={2.25}
+                        aria-hidden
+                      />
+                    }
+                  />
+                </div>
+              </div>
+
+              <div
+                className={cn(
+                  'rounded-xl border px-4 py-3 text-xs',
+                  canRunClashGapDetection(rows)
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                    : 'border-amber-200 bg-amber-50 text-amber-900',
+                )}
+              >
+                <span className="font-semibold">Required for detection:</span>{' '}
+                <span className={hasPlansDocument(rows) ? 'text-emerald-800' : ''}>
+                  Plans {hasPlansDocument(rows) ? '✓' : '— missing'}
+                </span>
+                {' · '}
+                <span className={hasSpecsDocument(rows) ? 'text-emerald-800' : ''}>
+                  Specifications {hasSpecsDocument(rows) ? '✓' : '— missing'}
+                </span>
+                {!canRunClashGapDetection(rows) ? (
+                  <span className="mt-1 block">
+                    Set <span className="font-semibold">Document type</span> in the table below
+                    (e.g. Specifications for your spec PDF). Types are suggested from filenames.
+                  </span>
+                ) : (
+                  <span className="mt-1 block">Drawings are reviewed against the specifications.</span>
+                )}
               </div>
 
               {rows.length > 0 ? (
@@ -271,82 +433,6 @@ export function UploadSetupStep(props: {
                   </table>
                 </div>
               ) : null}
-
-              <div className="grid gap-6 rounded-xl border border-[#e2e8f0] bg-white p-5 sm:grid-cols-2 lg:grid-cols-4">
-                <SettingBlock label="Detection mode">
-                  <Select
-                    value={settings.mode}
-                    onValueChange={(v) =>
-                      onSettingsChange({ ...settings, mode: v as DetectionSettings['mode'] })
-                    }
-                  >
-                    <SelectTrigger className="mt-2 rounded-xl">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="gaps">Gaps</SelectItem>
-                      <SelectItem value="conflicts">Conflicts</SelectItem>
-                      <SelectItem value="both">Both</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </SettingBlock>
-                <SettingBlock label="Scope">
-                  <Select
-                    value={settings.scope}
-                    onValueChange={(v) =>
-                      onSettingsChange({ ...settings, scope: v as DetectionSettings['scope'] })
-                    }
-                  >
-                    <SelectTrigger className="mt-2 rounded-xl">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="entire_project">Entire project</SelectItem>
-                      <SelectItem value="selected_trades">Selected trades</SelectItem>
-                      <SelectItem value="selected_documents">Selected documents only</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </SettingBlock>
-                <SettingBlock label="Sensitivity">
-                  <Select
-                    value={settings.sensitivity}
-                    onValueChange={(v) =>
-                      onSettingsChange({
-                        ...settings,
-                        sensitivity: v as DetectionSettings['sensitivity'],
-                      })
-                    }
-                  >
-                    <SelectTrigger className="mt-2 rounded-xl">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </SettingBlock>
-                <SettingBlock label="RFI output format">
-                  <Select
-                    value={settings.rfiFormat}
-                    onValueChange={(v) =>
-                      onSettingsChange({
-                        ...settings,
-                        rfiFormat: v as DetectionSettings['rfiFormat'],
-                      })
-                    }
-                  >
-                    <SelectTrigger className="mt-2 rounded-xl">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="short">Short</SelectItem>
-                      <SelectItem value="detailed">Detailed</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </SettingBlock>
-              </div>
             </CardContent>
           </Card>
 
@@ -356,15 +442,28 @@ export function UploadSetupStep(props: {
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-[#475569]">
               <p>
-                A document-forward pass that highlights narrative conflicts, omissions, and
-                cross-reference alignment — no 3D model, coordinates, or geometry clash spheres.
+                Drawings are reviewed exclusively against the uploaded specifications. Every issue
+                traces back to a specific specification requirement — no 3D geometry or
+                coordinates required.
               </p>
               <ul className="list-inside list-disc space-y-2">
-                <li>Spec versus drawing wording for key assemblies</li>
-                <li>Missing details where specifications require depiction</li>
-                <li>Addenda and revision alignment on reviewed uploads</li>
-                <li>Trade-scoped notes when you narrow scope</li>
+                <li>
+                  <span className="font-medium text-[#0f172a]">Gaps</span> — spec requirements
+                  absent or under-detailed in drawings
+                </li>
+                <li>
+                  <span className="font-medium text-[#0f172a]">Clashes</span> — cross-discipline
+                  drawing conflicts that deviate from the spec
+                </li>
+                <li>
+                  <span className="font-medium text-[#0f172a]">Mismatches</span> — drawings that
+                  actively contradict a spec requirement
+                </li>
               </ul>
+              <p className="rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-3 py-2 text-xs">
+                Upload <span className="font-medium">Plans</span> and{' '}
+                <span className="font-medium">Specifications</span> to run the analysis.
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -372,13 +471,3 @@ export function UploadSetupStep(props: {
   )
 }
 
-function SettingBlock({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div>
-      <Label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">
-        {label}
-      </Label>
-      {children}
-    </div>
-  )
-}

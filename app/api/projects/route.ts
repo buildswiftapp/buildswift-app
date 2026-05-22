@@ -20,7 +20,8 @@ export async function GET(req: Request) {
     return ok({ projects: [] })
   }
 
-  const selectColumns = 'id,name,description,address,client_owner_name,status,created_at,updated_at'
+  const selectColumns =
+    'id,name,description,address,client_owner_name,job_number,status,created_at,updated_at'
   let query = supabase
     .from('projects')
     .select(selectColumns)
@@ -66,6 +67,7 @@ export async function POST(req: Request) {
       description: payload.description || null,
       address: payload.address || null,
       client_owner_name: payload.client_owner || null,
+      job_number: payload.job_number || null,
       status: 'active',
     })
     .select('*')

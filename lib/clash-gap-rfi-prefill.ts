@@ -12,4 +12,7 @@ export type ClashGapRfiPrefillPayload = {
   detailReferences?: string
   drawingSheetNumbers?: string
   notes?: string
+  sourceAnalysisId?: string
+  sourceIssueId?: string
+  suggestedAction?: string
 }

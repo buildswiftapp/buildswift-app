@@ -32,6 +32,9 @@ export async function PATCH(req: Request, { params }: Params) {
   if (typeof parsed.data.client_owner !== 'undefined') {
     updates.client_owner_name = parsed.data.client_owner || null
   }
+  if (typeof parsed.data.job_number !== 'undefined') {
+    updates.job_number = parsed.data.job_number || null
+  }
   if (typeof parsed.data.status !== 'undefined') updates.status = parsed.data.status
 
   const { data, error } = await supabase

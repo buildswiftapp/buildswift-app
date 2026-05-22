@@ -39,10 +39,17 @@ const ASSIGNEE_ROLES = [
   'Owner',
 ] as const
 
-function buildChipList(issue: ClashGapIssue | null, uploadFilenames: string[]): string[] {
-  if (!issue) return []
-  const fromSources = issue.sources.map((s) => `${s.documentLabel} — p. ${s.page}`)
-  return [...fromSources, ...uploadFilenames].slice(0, 16)
+function buildChipList(uploadFilenames: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const name of uploadFilenames) {
+    const trimmed = name.trim()
+    const key = trimmed.toLowerCase()
+    if (!trimmed || seen.has(key)) continue
+    seen.add(key)
+    out.push(trimmed)
+  }
+  return out.slice(0, 16)
 }
 
 const PRI_DOT: Record<RfiDraftState['priority'], string> = {
@@ -73,8 +80,12 @@ export function RfiDraftPanel(props: {
   const [chips, setChips] = useState<string[]>([])
 
   useEffect(() => {
-    setChips(buildChipList(issue, uploadFilenames))
-  }, [issue?.id, uploadFilenames, issue])
+    if (!issue) {
+      setChips([])
+      return
+    }
+    setChips(buildChipList(uploadFilenames))
+  }, [issue?.id, uploadFilenames])
 
   const syncRelatedFromChips = useCallback(
     (next: string[]) => {
