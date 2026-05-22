@@ -34,6 +34,10 @@ import { MissingScopeEditorSection } from '../../../components/missing-scope-edi
 import { docTypeToMissingScopeType } from '@/lib/missing-scope-client'
 import { apiFetch } from '@/lib/api'
 import {
+  CLASH_GAP_CO_PREFILL_STORAGE_KEY,
+  type ClashGapCoPrefillPayload,
+} from '@/lib/clash-gap-co-prefill'
+import {
   computeDerived,
   computeSchedule,
   formatScheduleLabel,
@@ -216,19 +220,52 @@ function NewChangeOrderContent() {
   const [impactErrors, setImpactErrors] = useState<ChangeOrderImpactValidationErrors>({})
 
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [clashGapSourceIssueId, setClashGapSourceIssueId] = useState<string | null>(null)
 
   useEffect(() => {
     const loadProjects = async () => {
+      let coPrefill: ClashGapCoPrefillPayload | null = null
+      try {
+        const raw = sessionStorage.getItem(CLASH_GAP_CO_PREFILL_STORAGE_KEY)
+        if (raw) {
+          sessionStorage.removeItem(CLASH_GAP_CO_PREFILL_STORAGE_KEY)
+          coPrefill = JSON.parse(raw) as ClashGapCoPrefillPayload
+        }
+      } catch {
+        sessionStorage.removeItem(CLASH_GAP_CO_PREFILL_STORAGE_KEY)
+      }
+
       try {
         const data = await apiFetch<{ projects: ApiProject[] }>('/api/projects')
         setProjects(data.projects)
         setFormData((prev) => {
-          if (prev.projectId) return prev
-          const nextId =
-            (projectFromUrl && data.projects.some((p) => p.id === projectFromUrl) ? projectFromUrl : null) ||
-            data.projects[0]?.id ||
-            ''
-          return { ...prev, projectId: nextId }
+          let next = { ...prev }
+          if (!next.projectId) {
+            const nextId =
+              (projectFromUrl && data.projects.some((p) => p.id === projectFromUrl)
+                ? projectFromUrl
+                : null) ||
+              data.projects[0]?.id ||
+              ''
+            next = { ...next, projectId: nextId }
+          }
+          if (coPrefill) {
+            if (data.projects.some((p) => p.id === coPrefill!.projectId)) {
+              next.projectId = coPrefill.projectId
+            }
+            if (coPrefill.title?.trim()) next.title = coPrefill.title.trim()
+            if (coPrefill.description?.trim()) next.description = coPrefill.description.trim()
+            if (coPrefill.notes?.trim()) next.notes = coPrefill.notes.trim()
+            if (coPrefill.costPlaceholder) {
+              next = {
+                ...next,
+                notes: [next.notes, coPrefill.costPlaceholder].filter(Boolean).join('\n'),
+              }
+            }
+            setClashGapSourceIssueId(coPrefill.sourceIssueId ?? null)
+            toast.success('Draft imported from Clash/Gap Detection')
+          }
+          return next
         })
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Failed to load projects')
@@ -405,6 +442,7 @@ function NewChangeOrderContent() {
         description: content,
         save_as_draft: asDraft,
         metadata: {
+          source_issue_id: clashGapSourceIssueId ?? undefined,
           reason: reasonLabel,
           changeOrderNumber: formData.changeOrderNumber,
           changeOrderDate: formData.date,
@@ -422,6 +460,18 @@ function NewChangeOrderContent() {
         },
       },
     })
+
+    if (clashGapSourceIssueId) {
+      try {
+        await apiFetch(`/api/clash-gap/issues/${clashGapSourceIssueId}`, {
+          method: 'PATCH',
+          json: { status: 'resolved', resolved_document_id: created.document.id },
+        })
+      } catch {
+        /* non-blocking */
+      }
+    }
+
     return created.document.id
   }
 

@@ -5,6 +5,7 @@ export const createProjectSchema = z.object({
   description: z.string().trim().max(5000).optional().nullable(),
   address: z.string().trim().max(500).optional().nullable(),
   client_owner: z.string().trim().max(200).optional().nullable(),
+  job_number: z.string().trim().max(120).optional().nullable(),
 })
 
 export const updateProjectSchema = z.object({
@@ -12,7 +13,36 @@ export const updateProjectSchema = z.object({
   description: z.string().trim().max(5000).optional().nullable(),
   address: z.string().trim().max(500).optional().nullable(),
   client_owner: z.string().trim().max(200).optional().nullable(),
+  job_number: z.string().trim().max(120).optional().nullable(),
   status: z.enum(['active', 'archived', 'deleted']).optional(),
+})
+
+export const clashGapDetectionSettingsSchema = z.object({
+  mode: z.enum(['gaps', 'conflicts', 'both']).default('both'),
+  scope: z.enum(['entire_project', 'selected_trades', 'selected_documents']).default('entire_project'),
+  sensitivity: z.enum(['low', 'medium', 'high']).default('medium'),
+  rfiFormat: z.enum(['short', 'detailed']).default('detailed'),
+  selectedTrades: z.array(z.string().trim().max(80)).optional().default([]),
+})
+
+export const createClashGapAnalysisSchema = z.object({
+  project_id: z.string().uuid(),
+  settings: clashGapDetectionSettingsSchema.optional(),
+})
+
+export const updateClashGapAnalysisSchema = z.object({
+  project_id: z.string().uuid().optional(),
+  settings: clashGapDetectionSettingsSchema.optional(),
+  status: z.enum(['draft', 'uploading', 'queued']).optional(),
+})
+
+export const patchClashGapIssueSchema = z.object({
+  status: z.enum(['pending', 'reviewed', 'dismissed', 'resolved']).optional(),
+  resolved_document_id: z.string().uuid().optional().nullable(),
+})
+
+export const uploadClashGapFileMetaSchema = z.object({
+  file_role: z.enum(['plans', 'specs', 'addenda']),
 })
 
 export const createDocumentSchema = z.object({

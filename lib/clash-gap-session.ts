@@ -12,6 +12,7 @@ export type ClashGapSessionRow = Omit<DocumentUploadRow, 'file'> & {
 
 export type ClashGapSessionV1 = {
   version: 1
+  analysisId?: string | null
   projectId: string
   settings: DetectionSettings
   rows: ClashGapSessionRow[]

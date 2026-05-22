@@ -26,8 +26,8 @@ export function stubPagesForFilename(name: string): number {
 
 function issueShouldInclude(type: IssueType, settings: DetectionSettings): boolean {
   if (settings.mode === 'both') return true
-  if (settings.mode === 'gaps') return type === 'missing' || type === 'verified'
-  return type === 'conflict' || type === 'verified'
+  if (settings.mode === 'gaps') return type === 'missing' || type === 'mismatch'
+  return type === 'conflict' || type === 'mismatch'
 }
 
 const DISCIPLINES = ['Structural', 'Architectural', 'MEP', 'Civil', 'General'] as const
@@ -61,7 +61,7 @@ function templatesFromContext(
   s: number,
   rows: DocumentUploadRow[],
   settings: DetectionSettings,
-): { conflict: Template[]; missing: Template[]; verified: Template[] } {
+): { conflict: Template[]; missing: Template[]; mismatch: Template[] } {
   const strip = (fn: string) => fn.replace(/\.[^.]+$/, '')
 
   const conflict: Template[] = [
@@ -443,9 +443,9 @@ function templatesFromContext(
     },
   ]
 
-  const verified: Template[] = [
+  const mismatch: Template[] = [
     {
-      type: 'verified',
+      type: 'mismatch',
       title: `${strip(addendumLabel)} aligns with waterproofing notes`,
       summary:
         'Addendum updates membrane; drawings reference revised product line consistently on reviewed sheets.',
@@ -470,7 +470,7 @@ function templatesFromContext(
       ],
     },
     {
-      type: 'verified',
+      type: 'mismatch',
       title: 'Structural load path callouts match general notes',
       summary: 'Brace frame designations on plan match legend and general structural notes index.',
       confidence: 'high',
@@ -495,7 +495,7 @@ function templatesFromContext(
       ],
     },
     {
-      type: 'verified',
+      type: 'mismatch',
       title: 'Door hardware set schedule cross-check',
       summary: 'Hardware sets cited on door schedule match index in specifications for reviewed door types.',
       confidence: 'medium',
@@ -520,7 +520,7 @@ function templatesFromContext(
       ],
     },
     {
-      type: 'verified',
+      type: 'mismatch',
       title: 'Commissioning scope references aligned',
       summary: 'Mechanical drawing note references CX spec section that appears in uploaded spec bundle.',
       confidence: 'medium',
@@ -545,7 +545,7 @@ function templatesFromContext(
       ],
     },
     {
-      type: 'verified',
+      type: 'mismatch',
       title: 'Lighting fixture type tags consistent',
       summary: 'RCP tags reference fixture types that match electrical fixture schedule symbols.',
       confidence: 'high',
@@ -570,7 +570,7 @@ function templatesFromContext(
       ],
     },
     {
-      type: 'verified',
+      type: 'mismatch',
       title: 'Occupant load factors footnote',
       summary: 'Architectural life-safety plan footnote matches building code summary occupant load assumptions.',
       confidence: 'medium',
@@ -595,7 +595,7 @@ function templatesFromContext(
       ],
     },
     {
-      type: 'verified',
+      type: 'mismatch',
       title: 'Elevator machine room ventilation note',
       summary: 'Architectural room data matches mechanical note for minimum outdoor air at machine room.',
       confidence: 'high',
@@ -634,7 +634,7 @@ function templatesFromContext(
   return {
     conflict: clean(conflict),
     missing: clean(missing),
-    verified: clean(verified),
+    mismatch: clean(mismatch),
   }
 }
 
@@ -665,7 +665,7 @@ export function generateMockIssues(
         ? 'Review flagged only high-confidence inconsistencies.'
         : 'Medium sensitivity balancing recall and precision.'
 
-  const { conflict, missing, verified } = templatesFromContext(
+  const { conflict, missing, mismatch } = templatesFromContext(
     planLabel,
     specLabel,
     addendumLabel,
@@ -678,7 +678,7 @@ export function generateMockIssues(
   const picks: Template[] = [
     ...conflict.slice(0, 6),
     ...missing.slice(0, 11),
-    ...verified.slice(0, 6),
+    ...mismatch.slice(0, 6),
   ]
 
   const ids = picks.map((_, i) => `iss-${s % 100000}-${i}`)

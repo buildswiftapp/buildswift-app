@@ -4,6 +4,7 @@ import type { RefObject } from 'react'
 import { useMemo, useState } from 'react'
 import type { ClashGapIssue, IssueType } from '@/lib/clash-gap-types'
 import { HighlightedExcerpt } from '@/app/components/clash-gap-detection/highlighted-excerpt'
+import { SummaryStatCard } from '@/app/components/clash-gap-detection/summary-stat-card'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -25,9 +26,13 @@ import {
   CircleAlert,
   CircleCheck,
   ExternalLink,
+  FileText,
   Filter,
-  SquarePlus,
+  Hammer,
   Search,
+  ShieldCheck,
+  SquarePlus,
+  Tag,
   X,
 } from 'lucide-react'
 import type { RfiDraftState } from '@/lib/clash-gap-types'
@@ -44,43 +49,68 @@ function detectionDisplayTitle(title: string): string {
     .join(' ')
 }
 
+function issueTypeTheme(type: IssueType) {
+  if (type === 'conflict') {
+    return {
+      accent: 'border-l-red-500',
+      iconBox: 'bg-red-50',
+      iconClass: 'text-red-600',
+      badge: 'bg-red-50 text-red-700',
+      badgeLabel: 'CONFLICT',
+      chipColor: 'red' as const,
+    }
+  }
+  if (type === 'missing') {
+    return {
+      accent: 'border-l-orange-500',
+      iconBox: 'bg-orange-50',
+      iconClass: 'text-orange-600',
+      badge: 'bg-orange-50 text-orange-700',
+      badgeLabel: 'MISSING',
+      chipColor: 'orange' as const,
+    }
+  }
+  return {
+    accent: 'border-l-emerald-500',
+    iconBox: 'bg-emerald-50',
+    iconClass: 'text-emerald-600',
+    badge: 'bg-emerald-50 text-emerald-800',
+    badgeLabel: 'VERIFIED',
+    chipColor: 'emerald' as const,
+  }
+}
+
 function issueBadge(issue: ClashGapIssue, compact?: boolean) {
-  if (issue.type === 'conflict') {
-    return (
-      <span className="rounded-full border border-red-200 bg-red-100 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-900">
-        Conflict
-      </span>
-    )
-  }
-  if (issue.type === 'missing') {
-    return (
-      <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-950">
-        {compact ? 'Missing' : 'Missing info'}
-      </span>
-    )
-  }
+  const theme = issueTypeTheme(issue.type)
+  const label =
+    issue.type === 'missing' && !compact ? 'MISSING INFO' : theme.badgeLabel
   return (
-    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-900">
-      Verified
+    <span
+      className={cn(
+        'rounded-md px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide',
+        theme.badge,
+      )}
+    >
+      {label}
     </span>
   )
 }
 
-function ConfidenceDots({ level }: { level: ClashGapIssue['confidence'] }) {
+function SeverityDots({ level }: { level: ClashGapIssue['severity'] }) {
   const n = level === 'high' ? 3 : level === 'medium' ? 2 : 1
   const fill =
     level === 'medium'
-      ? 'bg-amber-400'
+      ? 'bg-orange-400'
       : level === 'low'
         ? 'bg-slate-400'
         : 'bg-emerald-500'
   return (
-    <div className="flex gap-0.5" aria-label={`Confidence ${level}`}>
+    <div className="flex gap-1" aria-label={`Confidence ${level}`}>
       {[0, 1, 2].map((i) => (
         <span
           key={i}
           className={cn(
-            'h-1.5 w-1.5 rounded-full',
+            'h-2 w-2 rounded-full',
             i < n ? fill : 'bg-[#e2e8f0]',
           )}
         />
@@ -89,13 +119,27 @@ function ConfidenceDots({ level }: { level: ClashGapIssue['confidence'] }) {
   )
 }
 
-function issueIcon(type: IssueType) {
-  const common = 'h-4 w-4 shrink-0'
-  if (type === 'conflict')
-    return <AlertTriangle className={cn(common, 'text-red-600')} aria-hidden />
-  if (type === 'missing')
-    return <CircleAlert className={cn(common, 'text-amber-600')} aria-hidden />
-  return <CircleCheck className={cn(common, 'text-emerald-600')} aria-hidden />
+function IssueListIcon({ type }: { type: IssueType }) {
+  const theme = issueTypeTheme(type)
+  const common = cn('h-[18px] w-[18px]', theme.iconClass)
+  const icon =
+    type === 'conflict' ? (
+      <AlertTriangle className={common} strokeWidth={2.5} aria-hidden />
+    ) : type === 'missing' ? (
+      <CircleAlert className={common} strokeWidth={2.5} aria-hidden />
+    ) : (
+      <CircleCheck className={common} strokeWidth={2.5} aria-hidden />
+    )
+  return (
+    <div
+      className={cn(
+        'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg',
+        theme.iconBox,
+      )}
+    >
+      {icon}
+    </div>
+  )
 }
 
 function sheetTags(sources: ClashGapIssue['sources']) {
@@ -116,12 +160,14 @@ function sourceColumnKind(idx: number): 'specification' | 'drawing' {
 function SourceTypeBadge({ kind }: { kind: 'specification' | 'drawing' }) {
   if (kind === 'specification')
     return (
-      <span className="mb-2 inline-block rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+      <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-violet-600 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
+        <FileText className="h-3 w-3" strokeWidth={2.5} aria-hidden />
         Specification
       </span>
     )
   return (
-    <span className="mb-2 inline-block rounded-md bg-emerald-600/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+    <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+      <FileText className="h-3 w-3" strokeWidth={2.5} aria-hidden />
       Drawing
     </span>
   )
@@ -129,8 +175,8 @@ function SourceTypeBadge({ kind }: { kind: 'specification' | 'drawing' }) {
 
 export function DetectionResultsWorkspace(props: {
   issues: ClashGapIssue[]
-  ignoredIds: Set<string>
-  onIgnore: (id: string) => void
+  onDismiss: (id: string) => void
+  onMarkReviewed: (id: string) => void
   filter: IssueType | 'all'
   onFilterChange: (f: IssueType | 'all') => void
   disciplineFilter: string
@@ -150,15 +196,18 @@ export function DetectionResultsWorkspace(props: {
   onClearDraft: () => void
   onSaveDraftLocal: () => void
   onCreateRfi: () => void
+  onCreateChangeOrder: () => void
   rfiPanelRef: RefObject<HTMLDivElement | null>
   onBackToPrepare: () => void
 }) {
   const [page, setPage] = useState(1)
 
-  const visible = props.issues.filter((i) => !props.ignoredIds.has(i.id))
+  const visible = props.issues
   const conflicts = visible.filter((i) => i.type === 'conflict').length
   const missing = visible.filter((i) => i.type === 'missing').length
-  const verified = visible.filter((i) => i.type === 'verified').length
+  const verified = visible.filter((i) => i.type === 'mismatch').length
+  const issueTotal = conflicts + missing + verified
+  const barRatio = (n: number) => (issueTotal > 0 ? n / issueTotal : 0)
 
   const disciplines = useMemo(() => {
     const set = new Set<string>()
@@ -196,20 +245,19 @@ export function DetectionResultsWorkspace(props: {
   const chipClass = (
     label: string,
     value: IssueType | 'all',
-    color: 'red' | 'amber' | 'emerald' | 'neutral',
+    color: 'red' | 'orange' | 'emerald' | 'neutral',
     active: boolean,
   ) => {
-    /** Reference: pastel fills + dark text; “All” solid blue when active, gray outline when not */
     const colors = {
       red: active
-        ? 'border-red-300 bg-red-100 text-red-900'
+        ? 'border-red-200 bg-red-100 text-red-800'
         : 'border-transparent bg-red-50 text-red-700 hover:bg-red-100/80',
-      amber: active
-        ? 'border-amber-300 bg-amber-100 text-amber-950'
-        : 'border-transparent bg-amber-50 text-amber-800 hover:bg-amber-100/80',
+      orange: active
+        ? 'border-orange-200 bg-orange-100 text-orange-800'
+        : 'border-transparent bg-orange-50 text-orange-700 hover:bg-orange-100/80',
       emerald: active
-        ? 'border-emerald-300 bg-emerald-100 text-emerald-950'
-        : 'border-transparent bg-emerald-50 text-emerald-800 hover:bg-emerald-100/80',
+        ? 'border-emerald-200 bg-emerald-100 text-emerald-800'
+        : 'border-transparent bg-emerald-50 text-emerald-700 hover:bg-emerald-100/80',
       neutral: active
         ? 'border-violet-600 bg-violet-600 text-white shadow-sm hover:bg-violet-700'
         : 'border-[#e2e8f0] bg-white text-[#475569] hover:bg-slate-50',
@@ -256,19 +304,25 @@ export function DetectionResultsWorkspace(props: {
         <div className="flex min-h-0 min-w-0 flex-col gap-5 xl:rounded-2xl xl:border xl:border-[#e2e8f0] xl:bg-white xl:p-6 xl:shadow-sm">
           <h3 className="text-base font-semibold text-[#0f172a]">Issues found</h3>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-xl border border-[#e2e8f0] border-t-4 border-t-red-600 bg-white px-3 py-3 text-center shadow-sm">
-              <div className="text-xl font-bold tabular-nums text-[#991b1b]">{conflicts}</div>
-              <div className="mt-1 text-xs font-semibold text-[#991b1b]">Conflicts</div>
-            </div>
-            <div className="rounded-xl border border-[#e2e8f0] border-t-4 border-t-amber-500 bg-white px-3 py-3 text-center shadow-sm">
-              <div className="text-xl font-bold tabular-nums text-[#92400e]">{missing}</div>
-              <div className="mt-1 text-xs font-semibold text-[#92400e]">Missing info</div>
-            </div>
-            <div className="rounded-xl border border-[#e2e8f0] border-t-4 border-t-emerald-600 bg-white px-3 py-3 text-center shadow-sm">
-              <div className="text-xl font-bold tabular-nums text-[#166534]">{verified}</div>
-              <div className="mt-1 text-xs font-semibold text-[#166534]">Verified</div>
-            </div>
+          <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
+            <SummaryStatCard
+              variant="conflict"
+              count={conflicts}
+              label="Conflicts"
+              barRatio={barRatio(conflicts)}
+            />
+            <SummaryStatCard
+              variant="missing"
+              count={missing}
+              label="Missing info"
+              barRatio={barRatio(missing)}
+            />
+            <SummaryStatCard
+              variant="verified"
+              count={verified}
+              label="Verified"
+              barRatio={barRatio(verified)}
+            />
           </div>
 
           <div className="flex gap-2">
@@ -300,8 +354,8 @@ export function DetectionResultsWorkspace(props: {
           <div className="grid w-full min-w-0 grid-cols-[auto_auto_auto_auto_minmax(0,1fr)] items-center gap-1.5">
             {chipClass('All', 'all', 'neutral', props.filter === 'all')}
             {chipClass('Conflicts', 'conflict', 'red', props.filter === 'conflict')}
-            {chipClass('Missing', 'missing', 'amber', props.filter === 'missing')}
-            {chipClass('Verified', 'verified', 'emerald', props.filter === 'verified')}
+            {chipClass('Missing', 'missing', 'orange', props.filter === 'missing')}
+            {chipClass('Verified', 'mismatch', 'emerald', props.filter === 'mismatch')}
             <Select value={props.disciplineFilter} onValueChange={props.onDisciplineFilterChange}>
               <SelectTrigger className="h-9 min-h-9 w-full min-w-0 rounded-full border-[#d1d5db] bg-white px-2.5 text-xs font-medium text-[#374151] shadow-none hover:bg-slate-50 [&_[data-slot=select-value]]:truncate">
                 <SelectValue placeholder="Discipline" />
@@ -322,62 +376,53 @@ export function DetectionResultsWorkspace(props: {
             ) : (
               pageRows.map((issue) => {
                 const sel = activeId === issue.id
-                const selClass =
-                  issue.type === 'conflict'
-                    ? 'border border-red-200 bg-gradient-to-br from-red-50 via-white to-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
-                    : issue.type === 'missing'
-                      ? 'border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
-                      : 'border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
+                const theme = issueTypeTheme(issue.type)
                 return (
                   <button
                     key={issue.id}
                     type="button"
                     onClick={() => props.onSelectIssue(issue.id)}
                     className={cn(
-                      'group w-full rounded-xl px-3.5 py-3.5 text-left transition-colors',
-                      sel
-                        ? selClass
-                        : 'border border-[#e5e7eb] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] hover:border-[#d1d5db]',
+                      'group flex w-full gap-3 rounded-xl border border-[#e5e7eb] border-l-4 bg-white px-3.5 py-4 text-left shadow-sm transition-colors hover:border-[#d1d5db]',
+                      theme.accent,
+                      sel && 'ring-2 ring-violet-200 ring-offset-1',
                     )}
                   >
-                    <div className="flex gap-3">
-                      <div className="mt-0.5 shrink-0">{issueIcon(issue.type)}</div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="line-clamp-3 text-left text-sm font-semibold leading-snug text-[#111827]">
-                            {detectionDisplayTitle(issue.title)}
-                          </span>
-                          <ChevronRight
-                            className="mt-0.5 h-5 w-5 shrink-0 text-[#9ca3af] transition-colors group-hover:text-[#6b7280]"
-                            strokeWidth={2}
-                            aria-hidden
-                          />
+                    <IssueListIcon type={issue.type} />
+                    <div className="min-w-0 flex-1">
+                      <span className="line-clamp-2 text-left text-[15px] font-semibold leading-snug text-[#111827]">
+                        {detectionDisplayTitle(issue.title)}
+                      </span>
+                      <p className="mt-1.5 line-clamp-2 text-left text-[13px] leading-relaxed text-[#6b7280]">
+                        {issue.summary}
+                      </p>
+                      {sheetTags(issue.sources).length > 0 ? (
+                        <div className="mt-2.5 flex flex-wrap gap-1.5">
+                          {sheetTags(issue.sources).map((t) => (
+                            <span
+                              key={t}
+                              className="rounded-md bg-[#f3f4f6] px-2 py-0.5 text-[11px] font-medium text-[#4b5563]"
+                            >
+                              {t}
+                            </span>
+                          ))}
                         </div>
-                        <p className="mt-1 line-clamp-3 text-left text-xs leading-relaxed text-[#6b7280]">
-                          {issue.summary}
-                        </p>
-                        <div className="mt-2 flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
-                          <div className="flex flex-wrap gap-1">
-                            {sheetTags(issue.sources).map((t) => (
-                              <span
-                                key={t}
-                                className="rounded bg-[#f3f4f6] px-1.5 py-0.5 text-[10px] font-medium text-[#4b5563]"
-                              >
-                                {t}
-                              </span>
-                            ))}
-                          </div>
-                          <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-                            {issueBadge(issue, true)}
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] font-medium capitalize text-[#6b7280]">
-                                {issue.confidence}
-                              </span>
-                              <ConfidenceDots level={issue.confidence} />
-                            </div>
-                          </div>
+                      ) : null}
+                      <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                        {issueBadge(issue, true)}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-medium capitalize text-[#6b7280]">
+                            {issue.severity}
+                          </span>
+                          <SeverityDots level={issue.severity} />
                         </div>
                       </div>
+                    </div>
+                    <div
+                      className="flex h-8 w-8 shrink-0 items-center justify-center self-center rounded-lg border border-[#e2e8f0] bg-white text-[#9ca3af] transition-colors group-hover:border-[#cbd5e1] group-hover:text-[#6b7280]"
+                      aria-hidden
+                    >
+                      <ChevronRight className="h-4 w-4" strokeWidth={2} />
                     </div>
                   </button>
                 )
@@ -413,7 +458,7 @@ export function DetectionResultsWorkspace(props: {
                       className={cn(
                         'h-9 min-w-[2.25rem] rounded-lg px-2 text-xs font-semibold',
                         pn === safePage
-                          ? 'border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-50'
+                          ? 'border-violet-600 bg-violet-600 text-white hover:bg-violet-600'
                           : 'border-[#e2e8f0] bg-white font-semibold text-violet-600 hover:bg-slate-50',
                       )}
                       onClick={() => setPage(pn)}
@@ -481,50 +526,55 @@ export function DetectionResultsWorkspace(props: {
               </div>
 
               <CardContent className="flex flex-1 flex-col gap-5 overflow-y-auto p-5">
-                <p className="text-sm font-medium leading-relaxed text-[#334155]">
-                  {selected.summary}
-                </p>
+                <p className="text-sm leading-relaxed text-[#475569]">{selected.summary}</p>
+                {selected.suggestedAction ? (
+                  <p className="text-sm leading-relaxed text-[#475569]">
+                    <span className="font-semibold text-[#334155]">Suggested action: </span>
+                    {selected.suggestedAction}
+                  </p>
+                ) : null}
 
-                <div className="text-muted-foreground flex flex-wrap items-center gap-x-1 gap-y-1 text-xs">
-                  <span>
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-[#64748b]">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Hammer className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
                     Discipline:{' '}
                     <span className="font-semibold text-[#0f172a]">
                       {selected.discipline ?? '—'}
                     </span>
                   </span>
                   {selected.category ? (
-                    <>
-                      <span className="mx-1 text-[#cbd5e1]">•</span>
-                      <span>Category: </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <Tag className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+                      Category:{' '}
                       <span className="font-semibold text-[#0f172a]">{selected.category}</span>
-                    </>
+                    </span>
                   ) : null}
-                  <span className="flex items-center gap-1 capitalize">
-                    <span className="mx-1 text-[#cbd5e1]">•</span>
+                  <span className="inline-flex items-center gap-1.5 capitalize">
+                    <ShieldCheck className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
                     Confidence:{' '}
                     <span className="font-semibold text-[#0f172a]">{selected.confidence}</span>
-                    <ConfidenceDots level={selected.confidence} />
+                    <SeverityDots level={selected.severity} />
                   </span>
                 </div>
 
                 <div>
-                  <h3 className="text-sm font-semibold text-[#475569]">
+                  <h3 className="text-sm font-semibold text-[#0f172a]">
                     Sources ({selected.sources.length})
                   </h3>
-                  <div className="mt-3 grid gap-4 md:grid-cols-2">
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
                     {selected.sources.slice(0, 2).map((src, idx) => {
                       const kind = sourceColumnKind(idx)
                       return (
                         <div
                           key={`${selected.id}-${idx}`}
-                          className="flex flex-col gap-2 rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)]"
+                          className="flex flex-col gap-2 rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
                         >
                           <SourceTypeBadge kind={kind} />
                           <div className="text-sm font-semibold leading-snug text-[#0f172a]">
                             {src.documentLabel}
                           </div>
-                          <div className="text-muted-foreground text-xs">Page {src.page}</div>
-                          <p className="text-sm leading-relaxed text-[#334155]">
+                          <div className="text-xs text-[#64748b]">Page {src.page}</div>
+                          <p className="text-sm leading-relaxed text-[#475569]">
                             <HighlightedExcerpt
                               text={src.excerpt}
                               highlight={src.highlight}
@@ -538,7 +588,7 @@ export function DetectionResultsWorkspace(props: {
                   <Button
                     type="button"
                     variant="outline"
-                    className="mt-3 rounded-xl border-violet-200 bg-white text-violet-700 hover:bg-violet-50"
+                    className="mt-3 rounded-xl border-[#e2e8f0] bg-white text-violet-700 hover:bg-violet-50"
                     onClick={() => props.onOpenSources(selected)}
                   >
                     <ExternalLink className="mr-2 h-4 w-4" strokeWidth={1.8} />
@@ -550,48 +600,77 @@ export function DetectionResultsWorkspace(props: {
                   <div
                     className={cn(
                       'rounded-xl border p-4',
-                      selected.type === 'conflict' &&
-                        'border-rose-100 bg-rose-50/90 dark:border-rose-950/40 dark:bg-rose-950/25',
-                      selected.type === 'missing' &&
-                        'border-amber-100 bg-amber-50/60 dark:bg-amber-950/25',
-                      selected.type === 'verified' &&
-                        'border-emerald-100 bg-emerald-50/60 dark:bg-emerald-950/20',
+                      selected.type === 'conflict' && 'border-red-200 bg-red-50',
+                      selected.type === 'missing' && 'border-orange-200 bg-orange-50',
+                      selected.type === 'mismatch' && 'border-emerald-200 bg-emerald-50',
                     )}
                   >
-                    <h3 className="text-sm font-semibold text-[#0f172a]">
-                      {selected.type === 'conflict'
-                        ? 'Why this is a conflict'
-                        : selected.type === 'missing'
-                          ? 'Why information may be missing'
-                          : 'Verification note'}
-                    </h3>
-                    <p className="mt-2 text-sm leading-relaxed text-[#334155]">{selected.rationale}</p>
+                    <div className="flex items-start gap-2.5">
+                      <CircleAlert
+                        className={cn(
+                          'mt-0.5 h-4 w-4 shrink-0',
+                          selected.type === 'conflict' && 'text-red-600',
+                          selected.type === 'missing' && 'text-orange-500',
+                          selected.type === 'mismatch' && 'text-emerald-600',
+                        )}
+                        strokeWidth={2.5}
+                        aria-hidden
+                      />
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-bold text-[#0f172a]">
+                          {selected.type === 'conflict'
+                            ? 'Why this is a conflict'
+                            : selected.type === 'missing'
+                              ? 'Why information may be missing'
+                              : 'Verification note'}
+                        </h3>
+                        <p className="mt-1.5 text-sm leading-relaxed text-[#475569]">
+                          {selected.rationale}
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 ) : null}
 
                 {relatedTitles.length > 0 ? (
                   <div>
-                    <h3 className="text-sm font-semibold text-[#475569]">
+                    <h3 className="text-sm font-semibold text-[#0f172a]">
                       Related issues ({relatedTitles.length})
                     </h3>
-                    <ul className="mt-2 space-y-2">
-                      {relatedTitles.map((ri) => (
-                        <li key={ri.id}>
-                          <button
-                            type="button"
-                            onClick={() => props.onSelectIssue(ri.id)}
-                            className="flex w-full flex-wrap items-center gap-2 text-left text-sm font-medium text-violet-700 hover:underline"
-                          >
-                            <span>{detectionDisplayTitle(ri.title)}</span>
-                            <span className="inline-flex scale-90">{issueBadge(ri)}</span>
-                          </button>
-                        </li>
-                      ))}
+                    <ul className="mt-2 space-y-1.5">
+                      {relatedTitles.map((ri) => {
+                        const theme = issueTypeTheme(ri.type)
+                        const Icon =
+                          ri.type === 'conflict'
+                            ? AlertTriangle
+                            : ri.type === 'missing'
+                              ? CircleAlert
+                              : CircleCheck
+                        return (
+                          <li key={ri.id}>
+                            <button
+                              type="button"
+                              onClick={() => props.onSelectIssue(ri.id)}
+                              className="flex w-full items-center gap-2 rounded-md py-1 text-left text-sm transition-colors hover:bg-slate-50"
+                            >
+                              <Icon
+                                className={cn('h-4 w-4 shrink-0', theme.iconClass)}
+                                strokeWidth={2.5}
+                                aria-hidden
+                              />
+                              <span className="min-w-0 flex-1 truncate font-medium text-violet-700 hover:underline">
+                                {detectionDisplayTitle(ri.title)}
+                              </span>
+                              {issueBadge(ri, true)}
+                            </button>
+                          </li>
+                        )
+                      })}
                     </ul>
                     <Button
                       type="button"
                       variant="outline"
-                      className="mt-3 rounded-xl border-[#e2e8f0] text-violet-700 hover:bg-violet-50"
+                      className="mt-3 rounded-xl border-[#e2e8f0] text-[#475569] hover:bg-slate-50"
                       onClick={() => {
                         const next =
                           relatedTitles.find((ri) => ri.id !== props.selectedIssueId) ??
@@ -600,6 +679,7 @@ export function DetectionResultsWorkspace(props: {
                       }}
                     >
                       View all related
+                      <ChevronRight className="ml-1 h-4 w-4" strokeWidth={2} aria-hidden />
                     </Button>
                   </div>
                 ) : null}
@@ -608,18 +688,16 @@ export function DetectionResultsWorkspace(props: {
                   <Button
                     type="button"
                     variant="outline"
-                    className="rounded-xl border-[#e2e8f0]"
-                    onClick={() => props.onIgnore(selected.id)}
+                    className="rounded-xl border-[#e2e8f0] text-[#475569]"
+                    onClick={() => props.onDismiss(selected.id)}
                   >
-                    <Ban className="mr-2 h-4 w-4" strokeWidth={1.8} />
+                    <Ban className="mr-2 h-4 w-4" strokeWidth={2} aria-hidden />
                     Ignore Issue
                   </Button>
                   <Button
                     type="button"
                     className="rounded-xl bg-violet-600 text-white hover:bg-violet-700"
-                    onClick={() => {
-                      props.onFocusRfi()
-                    }}
+                    onClick={() => props.onFocusRfi()}
                   >
                     <SquarePlus className="mr-2 h-4 w-4" strokeWidth={2} aria-hidden />
                     Add to RFI

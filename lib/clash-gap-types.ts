@@ -18,15 +18,18 @@ export interface DocumentUploadRow {
   pages: number | '—'
   status: UploadStatus
   file?: File
+  /** Server file id after upload */
+  serverFileId?: string
 }
 
-export type IssueType = 'conflict' | 'missing' | 'verified'
+export type IssueType = 'conflict' | 'missing' | 'mismatch'
+
+export type IssueStatus = 'pending' | 'reviewed' | 'dismissed' | 'resolved'
 
 export interface IssueSourceReference {
   documentLabel: string
   page: number | string
   excerpt: string
-  /** substring of excerpt to wrap in highlight (visual only) */
   highlight?: string
 }
 
@@ -38,12 +41,15 @@ export interface ClashGapIssue {
   confidence: 'low' | 'medium' | 'high'
   severity: 'low' | 'medium' | 'high'
   sources: IssueSourceReference[]
-  /** For filters and detail metadata (mock / future API). */
+  location?: string
+  sheetReference?: string
+  suggestedAction?: string
+  confidenceScore?: number
+  status?: IssueStatus
+  resolvedDocumentId?: string
   discipline?: string
   category?: string
-  /** Explainer copy for the center column. */
   rationale?: string
-  /** Other issue ids in the same run (for “Related issues”). */
   relatedIssueIds?: string[]
 }
 
@@ -60,7 +66,23 @@ export interface DetectionSettings {
   scope: DetectionScope
   sensitivity: SensitivityLevel
   rfiFormat: RfiOutputFormat
+  selectedTrades?: string[]
 }
+
+export interface ClashGapAnalysisSummary {
+  total: number
+  by_type: { clash: number; gap: number; mismatch: number }
+}
+
+export type AnalysisStatus =
+  | 'draft'
+  | 'uploading'
+  | 'queued'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+
+export type ProcessingStep = 'extract' | 'classify' | 'structure' | 'analyze' | 'done'
 
 export interface RfiDraftState {
   title: string

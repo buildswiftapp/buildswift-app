@@ -33,6 +33,10 @@ import { buildRfiDescriptionBody, buildSubmittalDescriptionBody } from '@/lib/do
 import { RfiReasonsField } from '@/app/components/rfi-reasons-field'
 import { joinReasons } from '@/lib/rfi-reasons'
 import {
+  CLASH_GAP_CO_PREFILL_STORAGE_KEY,
+  type ClashGapCoPrefillPayload,
+} from '@/lib/clash-gap-co-prefill'
+import {
   CLASH_GAP_RFI_PREFILL_STORAGE_KEY,
   type ClashGapRfiPrefillPayload,
 } from '@/lib/clash-gap-rfi-prefill'
@@ -111,18 +115,31 @@ function NewDocumentContent() {
 
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [clashGapSourceIssueId, setClashGapSourceIssueId] = useState<string | null>(null)
 
   useEffect(() => {
-    let prefill: ClashGapRfiPrefillPayload | null = null
+    let rfiPrefill: ClashGapRfiPrefillPayload | null = null
+    let coPrefill: ClashGapCoPrefillPayload | null = null
     if (typeof window !== 'undefined' && resolvedType === 'rfi') {
       try {
         const raw = sessionStorage.getItem(CLASH_GAP_RFI_PREFILL_STORAGE_KEY)
         if (raw) {
           sessionStorage.removeItem(CLASH_GAP_RFI_PREFILL_STORAGE_KEY)
-          prefill = JSON.parse(raw) as ClashGapRfiPrefillPayload
+          rfiPrefill = JSON.parse(raw) as ClashGapRfiPrefillPayload
         }
       } catch {
         sessionStorage.removeItem(CLASH_GAP_RFI_PREFILL_STORAGE_KEY)
+      }
+    }
+    if (typeof window !== 'undefined' && resolvedType === 'change_order') {
+      try {
+        const raw = sessionStorage.getItem(CLASH_GAP_CO_PREFILL_STORAGE_KEY)
+        if (raw) {
+          sessionStorage.removeItem(CLASH_GAP_CO_PREFILL_STORAGE_KEY)
+          coPrefill = JSON.parse(raw) as ClashGapCoPrefillPayload
+        }
+      } catch {
+        sessionStorage.removeItem(CLASH_GAP_CO_PREFILL_STORAGE_KEY)
       }
     }
 
@@ -152,19 +169,29 @@ function NewDocumentContent() {
           if (!next.projectId && data.projects[0]?.id) {
             next.projectId = data.projects[0].id
           }
-          if (prefill && resolvedType === 'rfi') {
-            if (data.projects.some((p) => p.id === prefill!.projectId)) {
-              next.projectId = prefill!.projectId
+          if (rfiPrefill && resolvedType === 'rfi') {
+            if (data.projects.some((p) => p.id === rfiPrefill!.projectId)) {
+              next.projectId = rfiPrefill!.projectId
             }
-            if (prefill.title?.trim()) next.title = prefill.title.trim()
-            if (prefill.description?.trim()) next.description = prefill.description.trim()
-            if (prefill.dueDate) next.dueDate = prefill.dueDate
-            if (prefill.priority) next.priority = prefill.priority
-            if (prefill.detailReferences?.trim()) next.detailReferences = prefill.detailReferences.trim()
-            if (prefill.drawingSheetNumbers?.trim())
-              next.drawingSheetNumbers = prefill.drawingSheetNumbers.trim()
-            if (prefill.notes?.trim()) next.notes = prefill.notes.trim()
+            if (rfiPrefill.title?.trim()) next.title = rfiPrefill.title.trim()
+            if (rfiPrefill.description?.trim()) next.description = rfiPrefill.description.trim()
+            if (rfiPrefill.dueDate) next.dueDate = rfiPrefill.dueDate
+            if (rfiPrefill.priority) next.priority = rfiPrefill.priority
+            if (rfiPrefill.detailReferences?.trim()) next.detailReferences = rfiPrefill.detailReferences.trim()
+            if (rfiPrefill.drawingSheetNumbers?.trim())
+              next.drawingSheetNumbers = rfiPrefill.drawingSheetNumbers.trim()
+            if (rfiPrefill.notes?.trim()) next.notes = rfiPrefill.notes.trim()
+            setClashGapSourceIssueId(rfiPrefill.sourceIssueId ?? null)
             toast.success('Draft imported from Clash/Gap Detection')
+          }
+          if (coPrefill && resolvedType === 'change_order') {
+            if (data.projects.some((p) => p.id === coPrefill!.projectId)) {
+              next.projectId = coPrefill!.projectId
+            }
+            if (coPrefill.title?.trim()) next.title = coPrefill.title.trim()
+            if (coPrefill.description?.trim()) next.description = coPrefill.description.trim()
+            if (coPrefill.notes?.trim()) next.notes = coPrefill.notes.trim()
+            toast.success('Change Order draft imported from Clash/Gap Detection')
           }
           return next
         })
@@ -314,9 +341,21 @@ function NewDocumentContent() {
             notes: formData.notes || undefined,
             attachments: docAttachments,
             priority: formData.priority,
+            source_issue_id: clashGapSourceIssueId ?? undefined,
           },
         },
       })
+
+      if (clashGapSourceIssueId) {
+        try {
+          await apiFetch(`/api/clash-gap/issues/${clashGapSourceIssueId}`, {
+            method: 'PATCH',
+            json: { status: 'resolved', resolved_document_id: document.id },
+          })
+        } catch {
+          /* non-blocking */
+        }
+      }
 
       if (asDraft) {
         toast.success('Draft saved successfully')
