@@ -10,12 +10,15 @@ import {
   FolderKanban,
   HelpCircle,
   LayoutDashboard,
+  LogOut,
   PanelLeftClose,
   PanelLeftOpen,
   ScanSearch,
   Settings,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useApp } from '@/lib/app-context'
+import { createSupabaseBrowserClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 
 // Custom Lucide-style icon: a file outline with a dollar sign inside.
@@ -89,6 +92,16 @@ type AppSidebarWithProjectsProps = {
 export function AppSidebarWithProjects({ collapsed, onToggleSidebar }: AppSidebarWithProjectsProps) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const { logout } = useApp()
+
+  const handleLogout = async () => {
+    const supabase = createSupabaseBrowserClient()
+    if (supabase) {
+      await supabase.auth.signOut()
+    }
+    logout()
+    window.location.href = '/login'
+  }
 
   const isActive = (item: (typeof navigation)[0]) => {
     if (item.query) {
@@ -207,6 +220,18 @@ export function AppSidebarWithProjects({ collapsed, onToggleSidebar }: AppSideba
               </Link>
             )
           })}
+          <button
+            type="button"
+            onClick={() => void handleLogout()}
+            title={collapsed ? 'Log out' : undefined}
+            className={cn(
+              row(collapsed, 'py-2.5 w-full'),
+              'text-white/80 hover:bg-white/[0.06] hover:text-white'
+            )}
+          >
+            <LogOut {...iconProps} />
+            {!collapsed && <span className="truncate">Log out</span>}
+          </button>
         </div>
       </div>
     </aside>

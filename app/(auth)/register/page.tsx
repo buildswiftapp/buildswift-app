@@ -9,12 +9,15 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { apiFetch } from '@/lib/api'
 import { createSupabaseBrowserClient } from '@/lib/supabase/client'
+import { toast } from 'sonner'
 
 export default function RegisterPage() {
   const router = useRouter()
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
   const [isLoading, setIsLoading] = useState(false)
+  const [isResending, setIsResending] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -40,6 +43,32 @@ export default function RegisterPage() {
 
     void checkSession()
   }, [router, supabase])
+
+  const handleResendVerification = async () => {
+    setError('')
+    if (!supabase) {
+      setError('Supabase is not configured. Add your Supabase URL and anon key in .env.local.')
+      return
+    }
+    const email = formData.email.trim()
+    if (!email) {
+      setError('Enter your email above, then resend verification.')
+      return
+    }
+    setIsResending(true)
+    try {
+      const { error: resendError } = await supabase.auth.resend({
+        type: 'signup',
+        email,
+      })
+      if (resendError) throw resendError
+      toast.success('Verification email sent. Check your inbox (and spam).')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not resend verification email')
+    } finally {
+      setIsResending(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -70,30 +99,25 @@ export default function RegisterPage() {
       return
     }
 
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email: formData.email,
-      password: formData.password,
-      options: {
-        data: {
-          full_name: formData.name,
-          company: formData.company,
+    try {
+      const result = await apiFetch<{ message?: string }>('/api/auth/register', {
+        method: 'POST',
+        json: {
+          name: formData.name.trim(),
+          email: formData.email.trim(),
+          company: formData.company.trim() || formData.name.trim(),
+          password: formData.password,
         },
-      },
-    })
-
-    if (signUpError) {
-      setError(signUpError.message)
+      })
+      setSuccessMessage(
+        result.message ||
+          'Account created. Check your email to verify your account before signing in.'
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to create account')
+    } finally {
       setIsLoading(false)
-      return
     }
-
-    if (data.session) {
-      router.replace('/dashboard')
-      return
-    }
-
-    setSuccessMessage('Account created. Check your email to verify your account before signing in.')
-    setIsLoading(false)
   }
 
   return (
@@ -189,7 +213,20 @@ export default function RegisterPage() {
                 <p className="mt-4 text-sm text-destructive">{error}</p>
               )}
               {successMessage && (
-                <p className="mt-4 text-sm text-emerald-600">{successMessage}</p>
+                <div className="mt-4 space-y-2">
+                  <p className="text-sm text-emerald-600">{successMessage}</p>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      disabled={isResending}
+                      onClick={() => void handleResendVerification()}
+                    >
+                      {isResending ? 'Resending…' : 'Resend verification email'}
+                    </Button>
+                  </div>
+                </div>
               )}
 
               <Button type="submit" className="mt-6 w-full" disabled={isLoading}>
