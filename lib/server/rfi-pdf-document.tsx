@@ -15,11 +15,8 @@ import { stripHtmlToPlainParagraphs } from '@/lib/document-html'
 export type RfiApprovalRow = {
   name: string
   role: string
-  /** Resolved signature image (typically data URI) when the reviewer signed digitally */
   signatureImageUri: string | null
-  /** Shown in the Signature column when no image (typed name or status) */
   signatureTextFallback: string
-  /** Review outcome — used for Response section fallback, not shown as its own column */
   reviewDecision: 'approved' | 'rejected' | 'pending'
   date: string
   notes: string
@@ -66,9 +63,6 @@ export type RfiPdfViewModel = {
   footerNote: string
 }
 
-// ── Color tokens ───────────────────────────────────────────────────────────────
-/** Default brand navy used for the page frame, RFI# tile, section titles, icons,
- *  table headers, footer band, and avatar tiles. Single source of truth. */
 const BRAND_NAVY = '#002162'
 const BORDER = '#e8edf2'
 const CARD_BORDER = '#c8d8e8'
@@ -83,13 +77,8 @@ const ICON_TILE_BG = '#eaf2fb'
 const ICON_NAVY = BRAND_NAVY
 const PDF_RED = '#dc2626'
 
-// ── Page geometry ──────────────────────────────────────────────────────────────
-/**
- * Custom page (portrait): 8" × 13" in points (576 × 936).
- * Single sheet: wrap=false; tight typography + clamps; overflow truncates with …
- */
-const PAGE_WIDTH_PT = 8 * 72 // 576pt — 8in canvas width
-const PAGE_HEIGHT_PT = 13 * 72 // 936
+const PAGE_WIDTH_PT = 8 * 72 
+const PAGE_HEIGHT_PT = 13 * 72 
 const BASE_FONT = 8.05
 const LABEL_FONT = 6.5
 const VALUE_FONT = 8.05
@@ -97,12 +86,10 @@ const BODY_LINE_HEIGHT = 1.24
 const SECTION_GAP = 6
 const PAGE_MARGIN_PT = 11
 const FRAME_INNER_PADDING = 10
-/** Narrative clamps */
 const MAX_QUESTION_CHARS = 520
 const MAX_RESPONSE_CHARS = 1320
 const MAX_ATTACHMENTS_ROWS = 5
 const MAX_APPROVAL_ROWS = 7
-/** Max wrapped lines shown for sender/recipient columns in metadata grid */
 const META_PARTY_MAX_LINES = 2
 
 function statusBadgeStyle(status: string): { backgroundColor: string; color: string } {
@@ -131,7 +118,6 @@ function formatAddressLines(value: string): string[] {
   const nl = splitLines(raw)
   if (nl.length > 1) return nl
 
-  // Common DB storage is "street, city, state zip" (comma-separated). Convert to 2 lines.
   const parts = raw
     .split(',')
     .map((p) => p.trim())
@@ -142,14 +128,12 @@ function formatAddressLines(value: string): string[] {
     return [first, rest].filter(Boolean)
   }
 
-  // Fallback: try to split before a trailing country token.
   const m = raw.match(/^(.*?)(\s+(?:USA|United States|US)\b.*)$/i)
   if (m && m[1] && m[2]) return [m[1].trim(), m[2].trim()]
 
   return [raw]
 }
 
-// ── SVG icon helpers (Lucide-style strokes) ────────────────────────────────────
 
 type StrokeIconProps = {
   size?: number
@@ -309,7 +293,6 @@ const IconShieldCheck = (p: { size?: number; color?: string }) => (
   />
 )
 
-/** Filled red PDF document icon with little "PDF" mark. */
 const IconPdf = ({ size = 10 }: { size?: number }) => (
   <Svg viewBox="0 0 24 24" width={size} height={size}>
     <Path
@@ -324,7 +307,6 @@ const IconPdf = ({ size = 10 }: { size?: number }) => (
   </Svg>
 )
 
-/** Soft rounded tile with a centered icon. */
 function IconTile({
   children,
   size = 18,
@@ -350,7 +332,6 @@ function IconTile({
   )
 }
 
-/** Circular tile with a centered icon (used by the 3-col RFI summary). */
 function CircleTile({
   children,
   size = 26,
@@ -386,7 +367,6 @@ const IconMapPin = ({ size = 10, color = ICON_NAVY }: { size?: number; color?: s
   </Svg>
 )
 
-/** Rounded-square avatar tile (navy fill, white person silhouette). */
 const IconAvatarTile = ({
   size = 22,
   color = HEADER_BG,
@@ -403,9 +383,6 @@ const IconAvatarTile = ({
   </Svg>
 )
 
-// ── Re-usable building blocks ──────────────────────────────────────────────────
-
-/** Section card with an icon + uppercase title at the top (no border-overlap). */
 function Section({
   icon,
   title,
@@ -457,7 +434,6 @@ function Section({
   )
 }
 
-/** Uppercase muted small label. */
 function Label({ children, style }: { children: React.ReactNode; style?: any }) {
   return (
     <Text
@@ -475,7 +451,6 @@ function Label({ children, style }: { children: React.ReactNode; style?: any }) 
   )
 }
 
-/** Decide which file-type icon to render based on attachment fileType. */
 function attachmentIcon(fileType: string): React.ReactNode {
   const t = (fileType || '').toLowerCase()
   if (t.includes('pdf')) return <IconPdf size={11} />
@@ -554,7 +529,6 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
             padding: FRAME_INNER_PADDING,
           }}
         >
-          {/* ── 1. Brand row ───────────────────────────────────────────────── */}
           <View
             style={{
               flexDirection: 'row',
@@ -634,7 +608,6 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
             </View>
           </View>
 
-          {/* ── 2. Header info row: Contact+Project card | Status card ──────── */}
           <View
             style={{
               flexDirection: 'row',
@@ -642,7 +615,6 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
               minHeight: 110,
             }}
           >
-            {/* Left card: Contact + Project (two cells) */}
             <View
               style={{
                 flex: 62,
@@ -654,7 +626,6 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
                 backgroundColor: CARD_BG,
               }}
             >
-            {/* Cell A: Contact */}
             <View style={{ flex: 32, padding: 9 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
                 <IconMapPin size={10} color={TITLE_BLUE} />
@@ -710,7 +681,6 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
 
             <View style={{ width: 1, backgroundColor: BORDER }} />
 
-            {/* Cell B: Project */}
             <View style={{ flex: 30, padding: 9, alignItems: 'flex-start' }}>
               <IconTile size={36}>
                 <IconBuilding size={22} color={TITLE_BLUE} />
@@ -741,7 +711,6 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
             </View>
             </View>
 
-            {/* Right card: Status / Dates / Priority */}
             <View
               style={{
                 flex: 38,
@@ -835,7 +804,6 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
             </View>
           </View>
 
-          {/* ── 3. Sent From / Sent To row ──────────────────────────────────── */}
           <View
             style={{
               borderWidth: 1,
@@ -889,7 +857,6 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
             </View>
           </View>
 
-          {/* ── 4. RFI Summary (3 cols) ─────────────────────────────────────── */}
           <Section icon={<IconFileText size={11} color={TITLE_BLUE} />} title="RFI Summary">
             <View style={{ flexDirection: 'row' }}>
               <View style={{ flex: 1, paddingRight: 9, flexDirection: 'row' }}>
@@ -949,7 +916,6 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
             </View>
           </Section>
 
-          {/* ── 5. Attachments ──────────────────────────────────────────────── */}
           {hasAttachments ? (
             <Section
               icon={<IconPaperclip size={11} color={TITLE_BLUE} />}
@@ -1063,7 +1029,6 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
             </Section>
           ) : null}
 
-          {/* ── 6. Response ─────────────────────────────────────────────────── */}
           <Section
             icon={<IconChat size={11} color={TITLE_BLUE} />}
             title="Response"
@@ -1120,7 +1085,6 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
             </View>
           </Section>
 
-          {/* ── 7. Approval / Tracking ──────────────────────────────────────── */}
           <Section
             icon={<IconShieldCheck size={11} color={TITLE_BLUE} />}
             title="Approval / Tracking"
@@ -1268,7 +1232,6 @@ export function RfiPdfDocument({ data }: { data: RfiPdfViewModel }) {
             </View>
           </Section>
 
-          {/* ── 8. Footer (orange divider + navy band) ──────────────────────── */}
           <View style={{ marginTop: 4 }}>
             <View style={{ height: 2, backgroundColor: ORANGE_ACCENT, borderRadius: 1 }} />
             <View

@@ -65,14 +65,7 @@ export function MissingScopeEditorSection(props: {
   documentApiType: MissingScopeApiType
   value: string
   onChange: (next: string) => void
-  /** When user applies RFI improvement; merge into document metadata via parent. */
   onRfiStructuredImprove?: (structured: RfiStructuredImprovement) => void
-  /**
-   * RFI multi-select reasons: when the AI's improved `reasonForRequest` is
-   * applied, the section parses the string against the canonical reason list
-   * (case-insensitive) and forwards the result so the parent can pre-check
-   * matching boxes and route any leftover text into the "Other" field.
-   */
   onRfiReasonsApply?: (next: { selected: string[]; other: string }) => void
   rows?: number
   textareaClassName?: string

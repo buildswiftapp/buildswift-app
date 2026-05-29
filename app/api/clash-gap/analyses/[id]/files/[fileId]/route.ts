@@ -1,6 +1,8 @@
 import { badRequest, notFound, ok, serverError, unauthorized } from '@/lib/server/api-response'
 import { getAuthContext } from '@/lib/server/auth'
 import { getAnalysisForAccount } from '@/lib/server/clash-gap/access'
+import { deleteClashGapFile } from '@/lib/server/clash-gap/storage'
+import { incrementAccountStorageBytes } from '@/lib/server/storage-usage'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 import { z } from 'zod'
@@ -39,4 +41,58 @@ export async function PATCH(req: Request, { params }: Params) {
   if (!data) return notFound('File not found')
 
   return ok({ file: data })
+}
+
+export async function DELETE(_req: Request, { params }: Params) {
+  const auth = await getAuthContext(_req)
+  if (!auth) return unauthorized()
+  if (!auth.accountId) return badRequest('Account context is unavailable.')
+
+  const { id: analysisId, fileId } = await params
+  const supabase = createSupabaseAdminClient() ?? (await createSupabaseServerClient())
+  if (!supabase) return serverError('Supabase is not configured')
+
+  const analysis = await getAnalysisForAccount(supabase, analysisId, auth.accountId)
+  if (!analysis) return notFound('Analysis not found')
+
+  const { data: file, error: fetchError } = await supabase
+    .from('clash_gap_analysis_files')
+    .select('id, storage_path, size_bytes')
+    .eq('id', fileId)
+    .eq('analysis_id', analysisId)
+    .eq('account_id', auth.accountId)
+    .maybeSingle()
+
+  if (fetchError) return serverError(fetchError.message)
+  if (!file) return notFound('File not found')
+
+  await supabase.from('clash_gap_extracted_sheets').delete().eq('analysis_file_id', fileId)
+
+  const { error: deleteError } = await supabase
+    .from('clash_gap_analysis_files')
+    .delete()
+    .eq('id', fileId)
+    .eq('analysis_id', analysisId)
+    .eq('account_id', auth.accountId)
+
+  if (deleteError) return serverError(deleteError.message)
+
+  if (file.storage_path) {
+    try {
+      await deleteClashGapFile(file.storage_path)
+    } catch (e) {
+      console.error('[clash-gap] storage delete failed:', file.storage_path, e)
+    }
+  }
+
+  try {
+    const bytes =
+      typeof (file as any).size_bytes === 'number' && Number.isFinite((file as any).size_bytes)
+        ? Math.max(0, Math.floor((file as any).size_bytes))
+        : 0
+    if (bytes > 0) await incrementAccountStorageBytes(supabase as any, auth.accountId, -bytes)
+  } catch {
+  }
+
+  return ok({ deleted: true, id: fileId })
 }

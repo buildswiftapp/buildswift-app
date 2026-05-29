@@ -1,8 +1,3 @@
-/**
- * Change Order PDF — view model + render.
- * Structured description / cost categories come from document metadata and HTML (`document-html` extractors).
- * AI assistance for scope refinement: POST `/api/ai/analyze-change-order` (used by the Improve-with-AI UI).
- */
 import { readFileSync } from 'fs'
 import React from 'react'
 import { renderToBuffer } from '@react-pdf/renderer'
@@ -20,49 +15,30 @@ export type ChangeOrderPdfInput = {
   title: string
   projectName: string
   descriptionHtml: string
-  /**
-   * Visual status for the summary block. Accepts any uppercase canonical
-   * label string (e.g. 'PENDING', 'APPROVED', 'UNDER REVIEW',
-   * 'REVISE & RESUBMIT', 'CLOSED'). Produced by `pdfStatusLabel(...)`.
-   */
   status: string
 
   coNumber?: string | null
-  /** ISO or display — issued date */
   dateIssued?: string | null
-  /** Physical project address (multiline ok) */
   projectAddress?: string | null
-  /** Owner / recipient (TO). */
   toOwner?: string | null
   fromContractor?: string | null
   submittedBy?: string | null
-  /** Original / prime contract number for traceability */
   originalContractNumber?: string | null
-  /** Review-by / response due date — shown only when provided (optional card line). */
   requiredReviewDate?: string | null
   actionNeededBy?: string | null
-  /** Line quantity for legacy forms — not emphasized in newest CO layout */
   quantity?: string | number | null
-  /** Prime contract value (original contract amount). */
   primeContractValue?: number | string | null
-  /** Owner Request | Design Change | … */
   changeType?: string | null
   priority?: string | null
-  /** Reason narrative */
   reason?: string | null
-  /** Scope gap | Design conflict | … */
   reasonCategory?: string | null
   scheduleImpact?: string | null
   newCompletionDate?: string | null
   scheduleDays?: string | number | null
-  /** Whole calendar days — original project duration before this CO */
   originalProjectDurationDays?: string | number | null
-  /** Optional — proposed schedule duration (whole days); when absent, PDF derives proposed impact from schedule days + impact type */
   proposedProjectDurationDays?: string | number | null
-  /** Whole calendar days — new total duration after this CO (optional; derived from original ± delta when possible) */
   revisedProjectDurationDays?: string | number | null
   totalCost?: number | null
-  /** Line-item table from the change-order form (PDF Cost Breakdown table) */
   costBreakdownItems?: Array<{
     description: string
     quantity: number
@@ -76,7 +52,6 @@ export type ChangeOrderPdfInput = {
   overheadProfit?: number | string | null
   updatedContractValue?: number | string | null
 
-  /** Canonical cost impact typing (new model). */
   costImpactType?: 'increase' | 'decrease' | 'none' | null
   markupPercent?: number | string | null
   justificationNote?: string | null
@@ -90,7 +65,6 @@ export type ChangeOrderPdfInput = {
     signature: 'approved' | 'rejected' | 'pending'
     signatureName: string | null
     signatureUrl?: string | null
-    /** When present (submission / workflow), overrides signature mapping. */
     action?: string | null
     date: string
     notes: string
@@ -118,7 +92,6 @@ function resolveFallbackLogoDataUri(): string {
       cachedLogoDataUri = `data:image/png;base64,${bytes.toString('base64')}`
       return cachedLogoDataUri
     } catch {
-      // try next
     }
   }
   cachedLogoDataUri = ''
@@ -142,7 +115,6 @@ function fmtUsd(n: number): string {
   return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-/** CO line total as signed currency (+$1,234.56) for the summary strip */
 function formatChangeOrderAmountSigned(totalChangeDisplay: string): string {
   if (totalChangeDisplay === 'N/A') return 'N/A'
   const n = Number.parseFloat(totalChangeDisplay.replace(/[^0-9.-]/g, ''))
@@ -265,7 +237,6 @@ function cleanCoReviewerDisplayName(raw: string): string {
   return n
 }
 
-/** Prefer the most recent Approved/Rejected reviewer; otherwise a single invitee awaiting review. */
 function pickChangeOrderReviewedByDisplay(
   rows: Array<{ name: string; action: string }>
 ): string {
@@ -282,7 +253,6 @@ function pickChangeOrderReviewedByDisplay(
   return '—'
 }
 
-/** When metadata has no explicit TO, list invited reviewers (cycle order, de-duped). */
 function pickChangeOrderSentToFromReviewers(rows: Array<{ name: string }>): string {
   const seen = new Set<string>()
   const parts: string[] = []
@@ -301,7 +271,6 @@ function pickChangeOrderSentToFromReviewers(rows: Array<{ name: string }>): stri
 function isChangeOrderReviewerRole(role: string | null | undefined): boolean {
   const t = (role ?? '').trim().toLowerCase()
   if (!t) return true
-  // Exclude submission rows / non-review activity.
   if (t.includes('contractor') || t.includes('submitter')) return false
   return true
 }
@@ -349,7 +318,6 @@ function extractDeltaSigned(choice: 'none' | 'adds' | 'reduces', daysRaw: string
   return choice === 'adds' ? mag : -mag
 }
 
-/** Calendar days of schedule impact (add/reduce magnitude); 0 when no impact */
 function extractImpactDaysMagnitude(choice: 'none' | 'adds' | 'reduces', daysRaw: string): number | null {
   if (choice === 'none') return 0
   const trimmed = daysRaw.trim()
@@ -399,7 +367,6 @@ export async function generateChangeOrderPdfBuffer(input: ChangeOrderPdfInput): 
       ? input.brandingLogoDataUri.trim()
       : resolveFallbackLogoDataUri()
 
-  // Match submittal-pdf: prefer account contact; same defaults when unset (no "Not Provided" placeholders).
   const defaultContactAddress = '123 Main Street\nAnytown, USA 12345'
   const addressSource =
     input.contactAddress?.trim().length > 0 ? input.contactAddress.trim() : defaultContactAddress

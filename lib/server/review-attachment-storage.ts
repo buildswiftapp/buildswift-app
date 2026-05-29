@@ -1,6 +1,5 @@
 const DEFAULT_BUCKET = 'document-attachments'
 
-/** Resolve Supabase Storage object path from DB `attachments.storage_path` (URL or relative path). */
 export function objectPathFromStoredPath(stored: string | null | undefined, bucket = DEFAULT_BUCKET): string | null {
   const s = typeof stored === 'string' ? stored.trim() : ''
   if (!s || s === '#') return null

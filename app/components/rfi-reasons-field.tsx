@@ -11,13 +11,6 @@ import { RFI_REASON_OPTIONS, RFI_REASON_OTHER_LABEL } from '@/lib/rfi-reasons'
 const labelClass =
   'mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-[#64748b]'
 
-/**
- * Multi-select dropdown for "Reason for Request". Renders as a Select-style
- * trigger button that opens a popover containing checkboxes for each canonical
- * reason plus an "Other (specify)" row that reveals a free-text input. The
- * trigger summarizes the selection ("Select reasons...", "Drawing Conflict",
- * or "N selected") so the field stays a single row in the form.
- */
 export function RfiReasonsField(props: {
   selected: string[]
   other: string

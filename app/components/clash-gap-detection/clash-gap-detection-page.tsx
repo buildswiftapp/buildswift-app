@@ -3,15 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { apiFetch } from '@/lib/api'
-import { apiDownloadBlob, apiUpload } from '@/lib/api-upload'
+import { downloadAndSaveBlob, uploadClashGapFile } from '@/lib/api-upload'
 import {
   mapApiIssueToClashGapIssue,
   type ApiClashGapAnalysisDetail,
 } from '@/lib/clash-gap-api'
-import {
-  CLASH_GAP_CO_PREFILL_STORAGE_KEY,
-  type ClashGapCoPrefillPayload,
-} from '@/lib/clash-gap-co-prefill'
 import {
   CLASH_GAP_RFI_PREFILL_STORAGE_KEY,
   type ClashGapRfiPrefillPayload,
@@ -23,25 +19,53 @@ import {
 import {
   canRunClashGapDetection,
   fileRoleFromDocType,
+  hasPlansDocument,
+  hasSpecsDocument,
   missingDocumentRolesMessage,
   reconcileDocumentTypes,
+  sanitizeClashGapDocumentType,
+  uploadsStillPending,
 } from '@/lib/clash-gap-document-inference'
+import { displayPageCount, mapApiFilesToUploadRows } from '@/lib/clash-gap-file-rows'
+import {
+  CLASH_GAP_STAGES,
+  allStagesComplete,
+  anyStageRunning,
+  isStageComplete,
+  parseStages,
+  stageGateMet,
+  stageStatus,
+  type ClashGapStage,
+  type StagesMap,
+} from '@/lib/clash-gap-stages'
 import type {
   ClashGapIssue,
   DetectionSettings,
+  DetectionWizardStep,
   DocumentLabelType,
   DocumentUploadRow,
   IssueType,
-  ProcessingStep,
   RfiDraftState,
 } from '@/lib/clash-gap-types'
 import type { Project } from '@/lib/types'
 import { toast } from 'sonner'
-import { AnalysisLoadingOverlay } from './analysis-loading-overlay'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 import { DetectionResultsWorkspace } from './detection-results-workspace'
-import { DetectionStepper } from './detection-stepper'
+import { DetectionResultViewer } from './detection-result-viewer'
+import { DetectionSettingsStep } from './detection-settings-step'
+import { DetectionStepFooter } from './detection-step-footer'
+import { DetectionStepper, type StepDisplayStatus, type StepperItem } from './detection-stepper'
 import { DetectionToolShell } from './detection-tool-shell'
 import { SourceComparisonSheet } from './source-comparison-sheet'
+import { StagePanel } from './stage-panel'
 import { UploadSetupStep } from './upload-setup-step'
 
 const defaultSettings: DetectionSettings = {
@@ -55,17 +79,22 @@ const defaultSettings: DetectionSettings = {
 const SUBJECT_MAX = 255
 const DESC_MAX = 2000
 
+const STEP_TO_STAGE: Record<Exclude<DetectionWizardStep, 'upload' | 'result'>, ClashGapStage> = {
+  chunk: 'chunk',
+  ocr: 'ocr',
+  detection: 'detect',
+}
+
+const STAGE_RUN_LABEL: Record<ClashGapStage, string> = {
+  chunk: 'chunking',
+  ocr: 'OCR',
+  detect: 'detection',
+}
+
 function defaultDueDate(): string {
   const d = new Date()
   d.setDate(d.getDate() + 14)
   return d.toISOString().slice(0, 10)
-}
-
-function formatSettingsSummary(s: DetectionSettings): string {
-  const modeLabel =
-    s.mode === 'both' ? 'Conflicts & Gaps' : s.mode === 'gaps' ? 'Gaps' : 'Conflicts'
-  const sens = s.sensitivity.slice(0, 1).toUpperCase() + s.sensitivity.slice(1)
-  return `${modeLabel} • ${sens} sensitivity`
 }
 
 function titleCaseWords(s: string): string {
@@ -159,8 +188,7 @@ function buildRfiDraftFromIssue(
     description,
     relatedDocuments: related,
     discipline,
-    priority:
-      issue.severity === 'high' && issue.type === 'conflict' ? 'urgent' : 'normal',
+    priority: issue.severity === 'high' && issue.type === 'conflict' ? 'urgent' : 'normal',
     dueDate: defaultDueDate(),
     assignee: defaultAssigneeForDiscipline(discipline),
     notes: [
@@ -188,10 +216,14 @@ function buildPrefillExtras(issue: ClashGapIssue) {
   return { drawingSheetNumbers, detailReferences }
 }
 
-function coReasonFromIssue(issue: ClashGapIssue): string {
-  if (issue.type === 'missing') return 'Scope gap identified during document analysis'
-  if (issue.type === 'mismatch') return 'Specification vs plan mismatch'
-  return 'Coordination conflict between disciplines'
+function firstIncompleteStep(stages: StagesMap, hasFiles: boolean): DetectionWizardStep {
+  if (!hasFiles) return 'upload'
+  for (const stage of CLASH_GAP_STAGES) {
+    if (!isStageComplete(stages, stage)) {
+      return stage === 'detect' ? 'detection' : (stage as DetectionWizardStep)
+    }
+  }
+  return 'result'
 }
 
 export function ClashGapDetectionPage() {
@@ -201,15 +233,18 @@ export function ClashGapDetectionPage() {
   const rfiPanelRef = useRef<HTMLDivElement>(null)
 
   const [analysisId, setAnalysisId] = useState<string | null>(null)
-  const [phase, setPhase] = useState<'prepare' | 'results'>('prepare')
+  const [activeStep, setActiveStep] = useState<DetectionWizardStep>('upload')
   const [projects, setProjects] = useState<Project[]>([])
   const [projectId, setProjectId] = useState('')
   const [rows, setRows] = useState<DocumentUploadRow[]>([])
   const [settings, setSettings] = useState<DetectionSettings>(defaultSettings)
   const [selectedTrades, setSelectedTrades] = useState<string[]>([])
-  const [isRunning, setIsRunning] = useState(false)
-  const [isGeneratingReport, setIsGeneratingReport] = useState(false)
-  const [processingStep, setProcessingStep] = useState<ProcessingStep | null>(null)
+  const [stages, setStages] = useState<StagesMap>({})
+  const [runningStage, setRunningStage] = useState<ClashGapStage | null>(null)
+  const [clientUploadLabel, setClientUploadLabel] = useState<string | null>(null)
+  const [downloadingKey, setDownloadingKey] = useState<string | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [isFinishing, setIsFinishing] = useState(false)
   const [issues, setIssues] = useState<ClashGapIssue[]>([])
   const [bookmarkedIds, setBookmarkedIds] = useState(() => new Set<string>())
   const [disciplineFilter, setDisciplineFilter] = useState('all')
@@ -219,6 +254,7 @@ export function ClashGapDetectionPage() {
   const [sheetIssue, setSheetIssue] = useState<ClashGapIssue | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [rfiDraft, setRfiDraft] = useState<RfiDraftState | null>(null)
+  const [viewerOpen, setViewerOpen] = useState(false)
 
   const setRfiDraftFromPanel = useCallback(
     (updater: RfiDraftState | ((prev: RfiDraftState) => RfiDraftState)) => {
@@ -231,36 +267,64 @@ export function ClashGapDetectionPage() {
   )
 
   const sessionRestored = useRef(false)
+  const analysisIdRef = useRef<string | null>(analysisId)
+  const creatingAnalysisRef = useRef<Promise<string> | null>(null)
+  const pollingRef = useRef(false)
 
-  const loadAnalysis = useCallback(async (id: string) => {
-    const data = await apiFetch<ApiClashGapAnalysisDetail>(`/api/clash-gap/analyses/${id}`)
-    setAnalysisId(id)
-    setProjectId(data.analysis.project_id)
-    setSettings({ ...defaultSettings, ...data.analysis.settings, selectedTrades: data.analysis.settings.selectedTrades ?? selectedTrades })
-    setProcessingStep((data.analysis.processing_step as ProcessingStep) || null)
+  useEffect(() => {
+    analysisIdRef.current = analysisId
+  }, [analysisId])
 
+  const applyAnalysis = useCallback((data: ApiClashGapAnalysisDetail) => {
+    const nextStages = parseStages(data.analysis.stages)
+    setStages(nextStages)
     const mapped = (data.issues ?? []).map(mapApiIssueToClashGapIssue)
     setIssues(mapped)
+    if (data.files?.length) setRows(mapApiFilesToUploadRows(data.files))
+    return nextStages
+  }, [])
 
-    if (data.analysis.status === 'completed' && mapped.length) {
-      setPhase('results')
-      setSelectedIssueId((prev) => prev || mapped[0]?.id || null)
-    }
+  const loadAnalysis = useCallback(
+    async (id: string) => {
+      const data = await apiFetch<ApiClashGapAnalysisDetail>(`/api/clash-gap/analyses/${id}`)
+      setAnalysisId(id)
+      setProjectId(data.analysis.project_id)
+      setSettings({
+        ...defaultSettings,
+        ...data.analysis.settings,
+        selectedTrades: data.analysis.settings.selectedTrades ?? selectedTrades,
+      })
+      applyAnalysis(data)
+      return data
+    },
+    [applyAnalysis, selectedTrades],
+  )
 
-    if (data.files?.length) {
-      setRows(
-        data.files.map((f) => ({
-          id: f.id,
-          serverFileId: f.id,
-          filename: f.file_name,
-          type: f.file_role === 'specs' ? 'specs' : f.file_role === 'addenda' ? 'addenda' : 'plans',
-          pages: f.page_count ?? '—',
-          status: 'ready' as const,
-        })),
-      )
-    }
-    return data
-  }, [selectedTrades])
+  const pollStage = useCallback(
+    async (id: string, stage: ClashGapStage) => {
+      pollingRef.current = true
+      const started = Date.now()
+      const maxMs = 12 * 60 * 1000
+      try {
+        for (;;) {
+          const data = await apiFetch<ApiClashGapAnalysisDetail>(`/api/clash-gap/analyses/${id}`)
+          const nextStages = applyAnalysis(data)
+          const status = stageStatus(nextStages, stage)
+          if (status === 'completed') return
+          if (status === 'failed') {
+            throw new Error(nextStages[stage]?.error || `${STAGE_RUN_LABEL[stage]} failed`)
+          }
+          if (Date.now() - started > maxMs) {
+            throw new Error('This stage is taking longer than expected. Try again in a few minutes.')
+          }
+          await new Promise((r) => setTimeout(r, 2500))
+        }
+      } finally {
+        pollingRef.current = false
+      }
+    },
+    [applyAnalysis],
+  )
 
   useEffect(() => {
     const load = async () => {
@@ -301,9 +365,6 @@ export function ClashGapDetectionPage() {
   useEffect(() => {
     const analysisParam = searchParams.get('analysis')
 
-    // One-time session restore when landing without ?analysis= (merged here so hook
-    // dependency array length stays stable — a separate effect caused React 19 errors
-    // when its deps changed from [] to [searchParams, router] during hot reload).
     if (!sessionRestored.current) {
       sessionRestored.current = true
       if (!analysisParam && typeof window !== 'undefined') {
@@ -322,14 +383,12 @@ export function ClashGapDetectionPage() {
                 (s.rows ?? []).map((r) => ({
                   ...r,
                   file: undefined,
+                  type: sanitizeClashGapDocumentType(r.type),
                 })) as DocumentUploadRow[],
               )
-              setSelectedIssueId(s.selectedIssueId ?? null)
-              setPhase(s.phase === 'results' ? 'results' : 'prepare')
             }
           }
         } catch {
-          /* ignore corrupt session */
         }
       }
     }
@@ -337,23 +396,41 @@ export function ClashGapDetectionPage() {
     if (analysisParam && analysisParam !== analysisId) {
       void (async () => {
         try {
-          let data = await loadAnalysis(analysisParam)
-          while (data.analysis.status === 'processing' || data.analysis.status === 'queued') {
-            setIsRunning(true)
-            await new Promise((r) => setTimeout(r, 2500))
-            data = await loadAnalysis(analysisParam)
-          }
-          if (data.analysis.status === 'failed') {
-            toast.error(data.analysis.error_message || 'Analysis failed')
+          const data = await loadAnalysis(analysisParam)
+          const loaded = parseStages(data.analysis.stages)
+          setActiveStep(firstIncompleteStep(loaded, Boolean(data.files?.length)))
+          const running = CLASH_GAP_STAGES.find((s) => stageStatus(loaded, s) === 'running')
+          if (running && !pollingRef.current) {
+            setRunningStage(running)
+            try {
+              await pollStage(analysisParam, running)
+            } catch (e) {
+              toast.error(e instanceof Error ? e.message : 'Stage failed')
+            } finally {
+              setRunningStage(null)
+            }
           }
         } catch (e) {
+          const status = typeof (e as { status?: number })?.status === 'number' ? (e as { status?: number }).status : null
+          if (status === 404) {
+            toast.error('This analysis link is no longer available. Starting a new draft.')
+            setAnalysisId(null)
+            setStages({})
+            setIssues([])
+            setRows([])
+            setActiveStep('upload')
+            try {
+              localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
+            } catch {
+            }
+            router.replace('/clash-gap-detection')
+            return
+          }
           toast.error(e instanceof Error ? e.message : 'Failed to load analysis')
-        } finally {
-          setIsRunning(false)
         }
       })()
     }
-  }, [searchParams, projectId, analysisId, router, loadAnalysis, settings, selectedTrades])
+  }, [searchParams])
 
   const linkedIssue = useMemo(
     () => issues.find((i) => i.id === selectedIssueId) ?? null,
@@ -382,7 +459,6 @@ export function ClashGapDetectionPage() {
           }
         }
       } catch {
-        /* keep generated draft */
       }
     }
     setRfiDraft(draft)
@@ -392,10 +468,7 @@ export function ClashGapDetectionPage() {
     async (issueId: string, status: 'dismissed' | 'reviewed' | 'resolved', resolvedDocumentId?: string) => {
       await apiFetch(`/api/clash-gap/issues/${issueId}`, {
         method: 'PATCH',
-        json: {
-          status,
-          ...(resolvedDocumentId ? { resolved_document_id: resolvedDocumentId } : {}),
-        },
+        json: { status, ...(resolvedDocumentId ? { resolved_document_id: resolvedDocumentId } : {}) },
       })
       setIssues((prev) =>
         prev.map((i) =>
@@ -408,179 +481,231 @@ export function ClashGapDetectionPage() {
 
   const uploadRowFile = useCallback(
     async (row: DocumentUploadRow, targetAnalysisId: string): Promise<DocumentUploadRow> => {
-      if (!row.file) return row
-      setRows((prev) =>
-        prev.map((r) => (r.id === row.id ? { ...r, status: 'pending' as const } : r)),
-      )
-      const fd = new FormData()
-      fd.append('file', row.file)
-      fd.append('file_role', fileRoleFromDocType(row.type))
-      const res = await apiUpload<{ file: { id: string; page_count: number | null } }>(
-        `/api/clash-gap/analyses/${targetAnalysisId}/files`,
-        fd,
-      )
-      const updated: DocumentUploadRow = {
-        ...row,
-        serverFileId: res.file.id,
-        status: 'ready',
-        pages: res.file.page_count ?? row.pages,
-        file: undefined,
+      if (!row.file) {
+        if (row.serverFileId) return row
+        throw new Error('File is no longer available in this browser session. Remove and re-add it.')
       }
-      setRows((prev) => prev.map((r) => (r.id === row.id ? updated : r)))
-      return updated
+      setClientUploadLabel(`Uploading ${row.filename}…`)
+      setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: 'pending' as const } : r)))
+      try {
+        const uploaded = await uploadClashGapFile({
+          analysisId: targetAnalysisId,
+          file: row.file,
+          fileRole: fileRoleFromDocType(row.type),
+        })
+        const updated: DocumentUploadRow = {
+          ...row,
+          serverFileId: uploaded.id,
+          status: 'ready',
+          pages: displayPageCount(uploaded.page_count),
+          file: undefined,
+        }
+        setRows((prev) => {
+          if (!prev.some((r) => r.id === row.id)) return prev
+          return prev.map((r) => (r.id === row.id ? updated : r))
+        })
+        return updated
+      } finally {
+        setClientUploadLabel(null)
+      }
     },
     [],
   )
 
   const ensureAnalysis = useCallback(async (): Promise<string> => {
-    if (analysisId) return analysisId
-    if (!projectId) throw new Error('Select a project')
-    const res = await apiFetch<{ analysis: { id: string } }>('/api/clash-gap/analyses', {
-      method: 'POST',
-      json: {
-        project_id: projectId,
-        settings: { ...settings, selectedTrades },
-      },
-    })
-    setAnalysisId(res.analysis.id)
-    router.replace(`/clash-gap-detection?analysis=${res.analysis.id}`)
-    return res.analysis.id
-  }, [analysisId, projectId, settings, selectedTrades, router])
+    const existing = analysisIdRef.current
+    if (existing) return existing
+    if (!projectId) throw new Error('Select a project before uploading files')
 
-  const syncFileRoleToServer = useCallback(
-    async (analysisId: string, row: DocumentUploadRow) => {
-      if (!row.serverFileId) return
-      await apiFetch(`/api/clash-gap/analyses/${analysisId}/files/${row.serverFileId}`, {
-        method: 'PATCH',
-        json: { file_role: fileRoleFromDocType(row.type) },
+    if (!creatingAnalysisRef.current) {
+      creatingAnalysisRef.current = (async () => {
+        const res = await apiFetch<{ analysis: { id: string } }>('/api/clash-gap/analyses', {
+          method: 'POST',
+          json: { project_id: projectId, settings: { ...settings, selectedTrades } },
+        })
+        const id = res.analysis.id
+        analysisIdRef.current = id
+        setAnalysisId(id)
+        router.replace(`/clash-gap-detection?analysis=${id}`)
+        return id
+      })().finally(() => {
+        creatingAnalysisRef.current = null
       })
+    }
+
+    return creatingAnalysisRef.current
+  }, [projectId, settings, selectedTrades, router])
+
+  const syncFileRoleToServer = useCallback(async (id: string, row: DocumentUploadRow) => {
+    if (!row.serverFileId) return
+    await apiFetch(`/api/clash-gap/analyses/${id}/files/${row.serverFileId}`, {
+      method: 'PATCH',
+      json: { file_role: fileRoleFromDocType(row.type) },
+    })
+  }, [])
+
+  const ensureUploadsReady = useCallback(
+    async (id: string) => {
+      let working = reconcileDocumentTypes(rows)
+      setRows(working)
+
+      const updatedById = new Map(working.map((r) => [r.id, r]))
+      const toUpload = working.filter((r) => !r.serverFileId && r.file)
+      const missingBlob = working.filter((r) => !r.serverFileId && !r.file)
+      if (missingBlob.length) {
+        throw new Error(
+          'Some files are only in this browser session. Re-add them or open the analysis from your saved link.',
+        )
+      }
+      for (let u = 0; u < toUpload.length; u++) {
+        const row = toUpload[u]!
+        setClientUploadLabel(
+          toUpload.length > 1
+            ? `Uploading ${row.filename} (${u + 1}/${toUpload.length})…`
+            : `Uploading ${row.filename}…`,
+        )
+        try {
+          updatedById.set(row.id, await uploadRowFile(row, id))
+        } catch (e) {
+          setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: 'error' as const } : r)))
+          throw e
+        }
+      }
+      setClientUploadLabel(null)
+      const synced = working.map((r) => updatedById.get(r.id) ?? r)
+      setRows(synced)
+      working = reconcileDocumentTypes(synced)
+      for (const row of working) {
+        if (row.serverFileId) await syncFileRoleToServer(id, row)
+      }
+      if (!working.some((r) => r.serverFileId)) {
+        throw new Error('No files were uploaded to the server. Add documents and try again.')
+      }
+    },
+    [rows, uploadRowFile, syncFileRoleToServer],
+  )
+
+  const hasUploadsReady = useMemo(
+    () => hasPlansDocument(rows) && hasSpecsDocument(rows),
+    [rows],
+  )
+  const uploadDocsHint = useMemo(() => {
+    if (hasUploadsReady) return null
+    const missing: string[] = []
+    if (!hasPlansDocument(rows)) missing.push('Plans')
+    if (!hasSpecsDocument(rows)) missing.push('Specifications')
+    return `Upload and set the Document type for both Plans and Specifications — ${missing.join(' and ')} still missing.`
+  }, [hasUploadsReady, rows])
+
+  const stageOf = useCallback((step: DetectionWizardStep): ClashGapStage | null => {
+    return step === 'upload' || step === 'result' ? null : STEP_TO_STAGE[step]
+  }, [])
+
+  const runStage = useCallback(
+    async (stage: ClashGapStage) => {
+      if (runningStage) return
+      setRunningStage(stage)
+      try {
+        const id = await ensureAnalysis()
+
+        if (stage === 'chunk') {
+          await ensureUploadsReady(id)
+        }
+        if (stage === 'detect') {
+          await apiFetch(`/api/clash-gap/analyses/${id}`, {
+            method: 'PATCH',
+            json: { settings: { ...settings, selectedTrades } },
+          })
+          const reconciled = reconcileDocumentTypes(rows)
+          if (!canRunClashGapDetection(reconciled)) {
+            const msg = missingDocumentRolesMessage(reconciled)
+            setActiveStep('upload')
+            throw new Error(msg ?? 'Set one Plans file and one Specifications file before detection.')
+          }
+        }
+
+        await apiFetch(`/api/clash-gap/analyses/${id}/stages/${stage}/run`, { method: 'POST' })
+        await pollStage(id, stage)
+        toast.success(`${STAGE_RUN_LABEL[stage][0]!.toUpperCase()}${STAGE_RUN_LABEL[stage].slice(1)} complete.`)
+        
+        if (stage === 'chunk') setActiveStep('ocr')
+        else if (stage === 'ocr') setActiveStep('detection')
+        else if (stage === 'detect') setActiveStep('result')
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Stage failed')
+      } finally {
+        setRunningStage(null)
+        setClientUploadLabel(null)
+      }
+    },
+    [runningStage, ensureAnalysis, ensureUploadsReady, pollStage, settings, selectedTrades, rows],
+  )
+
+  const autoRunRef = useRef(false)
+  useEffect(() => {
+    const stage: ClashGapStage | null =
+      activeStep === 'chunk'
+        ? 'chunk'
+        : activeStep === 'ocr'
+          ? 'ocr'
+          : activeStep === 'detection'
+            ? 'detect'
+            : null
+    if (!stage || runningStage || autoRunRef.current) return
+    if (stageStatus(stages, stage) !== 'pending') return
+    if (!stageGateMet(stages, stage, hasUploadsReady)) return
+    autoRunRef.current = true
+    void runStage(stage).finally(() => {
+      autoRunRef.current = false
+    })
+  }, [activeStep, hasUploadsReady, runningStage, stages, runStage])
+
+  const downloadArtifact = useCallback(
+    async (key: string, path: string, filename: string, init?: RequestInit) => {
+      setDownloadingKey(key)
+      try {
+        await downloadAndSaveBlob(path, filename, init)
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Download failed')
+      } finally {
+        setDownloadingKey(null)
+      }
     },
     [],
   )
 
-  const runDetection = useCallback(async () => {
-    if (!projectId) return toast.error('Select a project')
-    if (!rows.length) return toast.error('Add at least one document')
-
-    let rowsForRun = rows
-    if (!canRunClashGapDetection(rowsForRun)) {
-      rowsForRun = reconcileDocumentTypes(rowsForRun)
-      if (!canRunClashGapDetection(rowsForRun)) {
-        const msg = missingDocumentRolesMessage(rowsForRun)
-        return toast.error(msg ?? 'Upload plans and specifications documents')
-      }
-      setRows(rowsForRun)
-    }
-
-    setIsRunning(true)
+  const finishAndCleanup = useCallback(async () => {
+    const id = analysisIdRef.current
+    if (!id) return
+    setIsFinishing(true)
     try {
-      const id = await ensureAnalysis()
-
-      await apiFetch(`/api/clash-gap/analyses/${id}`, {
-        method: 'PATCH',
-        json: { settings: { ...settings, selectedTrades } },
-      })
-
-      const notOnServer = rowsForRun.filter((r) => !r.serverFileId)
-      const missingBlob = notOnServer.filter((r) => !r.file)
-      if (missingBlob.length) {
-        throw new Error(
-          'Some files are only in this browser session and were not saved to the server. Re-add the PDFs or open the analysis from your saved link (?analysis=…).',
-        )
+      await downloadAndSaveBlob(
+        `/api/clash-gap/analyses/${id}/report`,
+        `clash-gap-report-${id.slice(0, 8)}.pdf`,
+        { method: 'POST' },
+      )
+      await apiFetch(`/api/clash-gap/analyses/${id}`, { method: 'DELETE' })
+      try {
+        localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
+      } catch {
       }
-
-      const updatedById = new Map(rowsForRun.map((r) => [r.id, r]))
-      for (const row of notOnServer) {
-        if (!row.file) continue
-        try {
-          const updated = await uploadRowFile(row, id)
-          updatedById.set(row.id, updated)
-        } catch (e) {
-          setRows((prev) =>
-            prev.map((r) => (r.id === row.id ? { ...r, status: 'error' as const } : r)),
-          )
-          throw e
-        }
-      }
-
-      const rowsForSync = rowsForRun.map((r) => updatedById.get(r.id) ?? r)
-      for (const row of rowsForSync) {
-        if (row.serverFileId) {
-          await syncFileRoleToServer(id, row)
-        }
-      }
-
-      if (!rowsForSync.some((r) => r.serverFileId)) {
-        throw new Error('No files were uploaded to the server. Add PDF plans and specifications and try again.')
-      }
-
-      const runRes = await apiFetch<{ status: string }>(`/api/clash-gap/analyses/${id}/run`, {
-        method: 'POST',
-      })
-      if (runRes.status === 'completed') {
-        const data = await apiFetch<ApiClashGapAnalysisDetail>(`/api/clash-gap/analyses/${id}`)
-        const mapped = (data.issues ?? []).map(mapApiIssueToClashGapIssue)
-        setIssues(mapped)
-        setBookmarkedIds(new Set())
-        setDisciplineFilter('all')
-        setFilter('all')
-        setSearch('')
-        setSelectedIssueId(mapped[0]?.id ?? null)
-        setPhase('results')
-        toast.success(`Detection finished — ${mapped.length} issues found.`)
-        return
-      }
-
-      const poll = async (): Promise<void> => {
-        const data = await apiFetch<ApiClashGapAnalysisDetail>(`/api/clash-gap/analyses/${id}`)
-        setProcessingStep((data.analysis.processing_step as ProcessingStep) || null)
-        if (data.analysis.status === 'processing' || data.analysis.status === 'queued') {
-          await new Promise((r) => setTimeout(r, 2500))
-          return poll()
-        }
-        if (data.analysis.status === 'failed') {
-          throw new Error(data.analysis.error_message || 'Analysis failed')
-        }
-        const mapped = (data.issues ?? []).map(mapApiIssueToClashGapIssue)
-        setIssues(mapped)
-        setBookmarkedIds(new Set())
-        setDisciplineFilter('all')
-        setFilter('all')
-        setSearch('')
-        setSelectedIssueId(mapped[0]?.id ?? null)
-        setPhase('results')
-        toast.success(`Detection finished — ${mapped.length} issues found.`)
-      }
-
-      await poll()
+      setAnalysisId(null)
+      analysisIdRef.current = null
+      setStages({})
+      setIssues([])
+      setRows([])
+      setSelectedIssueId(null)
+      setBookmarkedIds(new Set())
+      setActiveStep('upload')
+      setConfirmOpen(false)
+      router.replace('/clash-gap-detection')
+      toast.success('Report saved. All uploaded files and analysis data were deleted.')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Detection failed')
+      toast.error(e instanceof Error ? e.message : 'Could not finish and clean up')
     } finally {
-      setIsRunning(false)
-      setProcessingStep(null)
+      setIsFinishing(false)
     }
-  }, [projectId, rows, settings, selectedTrades, ensureAnalysis, uploadRowFile, syncFileRoleToServer])
-
-  const generateReport = useCallback(async () => {
-    if (!analysisId) return toast.error('No analysis to report')
-    setIsGeneratingReport(true)
-    try {
-      const blob = await apiDownloadBlob(`/api/clash-gap/analyses/${analysisId}/report`, {
-        method: 'POST',
-      })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `clash-gap-report-${analysisId.slice(0, 8)}.pdf`
-      a.click()
-      URL.revokeObjectURL(url)
-      toast.success('Report downloaded')
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Report failed')
-    } finally {
-      setIsGeneratingReport(false)
-    }
-  }, [analysisId])
+  }, [router])
 
   const openSources = useCallback((issue: ClashGapIssue) => {
     setSheetIssue(issue)
@@ -596,8 +721,8 @@ export function ClashGapDetectionPage() {
     })
   }, [])
 
-  const saveSession = useCallback(() => {
-    const payload: ClashGapSessionV1 = {
+  const buildSessionPayload = useCallback(
+    (): ClashGapSessionV1 => ({
       version: 1,
       analysisId: analysisId ?? null,
       projectId,
@@ -607,15 +732,36 @@ export function ClashGapDetectionPage() {
       ignoredIds: [],
       bookmarkedIds: [...bookmarkedIds],
       selectedIssueId,
-      phase,
+      phase: allStagesComplete(stages) ? 'results' : 'prepare',
+      activeStep,
+    }),
+    [analysisId, projectId, settings, rows, bookmarkedIds, selectedIssueId, stages, activeStep],
+  )
+
+  const persistSession = useCallback(
+    (opts?: { silent?: boolean }) => {
+      if (typeof window === 'undefined') return
+      try {
+        localStorage.setItem(CLASH_GAP_SESSION_STORAGE_KEY, JSON.stringify(buildSessionPayload()))
+        if (!opts?.silent) toast.success('Session saved.')
+      } catch {
+        if (!opts?.silent) toast.error('Could not save session.')
+      }
+    },
+    [buildSessionPayload],
+  )
+
+  const saveSession = useCallback(() => persistSession(), [persistSession])
+
+  const autosaveMountedRef = useRef(false)
+  useEffect(() => {
+    if (!autosaveMountedRef.current) {
+      autosaveMountedRef.current = true
+      return
     }
-    try {
-      localStorage.setItem(CLASH_GAP_SESSION_STORAGE_KEY, JSON.stringify(payload))
-      toast.success('Session saved.')
-    } catch {
-      toast.error('Could not save session.')
-    }
-  }, [analysisId, projectId, settings, rows, bookmarkedIds, selectedIssueId, phase])
+    const timer = setTimeout(() => persistSession({ silent: true }), 800)
+    return () => clearTimeout(timer)
+  }, [persistSession])
 
   const clearDraft = useCallback(() => {
     if (!linkedIssue) return
@@ -650,8 +796,7 @@ export function ClashGapDetectionPage() {
       priority: rfiDraft.priority,
       drawingSheetNumbers: drawingSheetNumbers || undefined,
       detailReferences: detailReferences || undefined,
-      notes:
-        `${rfiDraft.relatedDocuments.trim()}\n\n${rfiDraft.notes.trim()}`.trim() || undefined,
+      notes: `${rfiDraft.relatedDocuments.trim()}\n\n${rfiDraft.notes.trim()}`.trim() || undefined,
       sourceAnalysisId: analysisId || undefined,
       sourceIssueId: linkedIssue.id,
       suggestedAction: linkedIssue.suggestedAction,
@@ -666,213 +811,427 @@ export function ClashGapDetectionPage() {
     router.push(`/documents/new?type=rfi&project=${encodeURIComponent(projectId)}`)
   }, [rfiDraft, linkedIssue, projectId, router, analysisId])
 
-  const createCoNavigate = useCallback(() => {
-    if (!linkedIssue || !projectId) return
-    const payload: ClashGapCoPrefillPayload = {
-      projectId,
-      title: `${titleCaseWords(linkedIssue.title)} — Change Order`,
-      description: linkedIssue.summary,
-      reason: coReasonFromIssue(linkedIssue),
-      costPlaceholder: 'TBD — quantify cost impact during review',
-      sourceAnalysisId: analysisId || undefined,
-      sourceIssueId: linkedIssue.id,
-      notes: linkedIssue.suggestedAction,
-    }
-    try {
-      sessionStorage.setItem(CLASH_GAP_CO_PREFILL_STORAGE_KEY, JSON.stringify(payload))
-    } catch {
-      toast.error('Could not prepare Change Order draft.')
-      return
-    }
-    router.push(`/change-orders/new?project=${encodeURIComponent(projectId)}`)
-  }, [linkedIssue, projectId, router, analysisId])
-
-  const scrollToRfi = useCallback(() => {
-    rfiPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-  }, [])
-
-  const visibleIssues = useMemo(
-    () => issues.filter((i) => i.status !== 'dismissed'),
-    [issues],
+  const addIssueToRfiDraft = useCallback(
+    (issueId: string) => {
+      const issue = issues.find((i) => i.id === issueId)
+      if (!issue) return
+      if (issue.status === 'dismissed') {
+        toast.error('This issue was ignored. Select another issue.')
+        return
+      }
+      setSelectedIssueId(issueId)
+      setRfiDraft(buildRfiDraftFromIssue(issue, settings, selectedTrades, rows))
+      requestAnimationFrame(() => {
+        rfiPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      })
+      toast.success('Added to RFI draft')
+    },
+    [issues, settings, selectedTrades, rows],
   )
 
+  const ignoreIssue = useCallback(
+    (issueId: string) => {
+      void patchIssueStatus(issueId, 'dismissed')
+        .then(() => {
+          setSelectedIssueId((sel) => {
+            if (sel !== issueId) return sel
+            const visible = issues.filter((i) => i.id !== issueId && i.status !== 'dismissed')
+            return visible[0]?.id ?? null
+          })
+          toast.success('Issue ignored')
+        })
+        .catch((e) => {
+          toast.error(e instanceof Error ? e.message : 'Could not ignore issue')
+        })
+    },
+    [patchIssueStatus, issues],
+  )
+
+  const visibleIssues = useMemo(() => issues.filter((i) => i.status !== 'dismissed'), [issues])
   const uploadFilenames = useMemo(() => uniqueUploadFilenames(rows), [rows])
 
-  const sensitivityLabel = `${settings.sensitivity.slice(0, 1).toUpperCase()}${settings.sensitivity.slice(1)} sensitivity`
+  const stepDisplayStatus = useCallback(
+    (step: DetectionWizardStep): StepDisplayStatus => {
+      if (step === 'upload') return hasUploadsReady ? 'completed' : 'ready'
+      if (step === 'result') return isStageComplete(stages, 'detect') ? 'completed' : 'locked'
+      const stage = STEP_TO_STAGE[step]
+      const st = stageStatus(stages, stage)
+      if (runningStage === stage || st === 'running') return 'running'
+      if (st === 'completed') return 'completed'
+      if (st === 'failed') return 'failed'
+      return stageGateMet(stages, stage, hasUploadsReady) ? 'ready' : 'locked'
+    },
+    [stages, runningStage, hasUploadsReady],
+  )
+
+  const canNavigateTo = useCallback(
+    (step: DetectionWizardStep): boolean => {
+      if (step === 'upload') return true
+      if (step === 'result') return isStageComplete(stages, 'detect')
+      const stage = STEP_TO_STAGE[step]
+      if (stageStatus(stages, stage) !== 'pending') return true
+      return stageGateMet(stages, stage, hasUploadsReady)
+    },
+    [stages, hasUploadsReady],
+  )
+
+  const stepperItems: StepperItem[] = useMemo(
+    () => [
+      {
+        id: 'upload',
+        title: 'Upload',
+        description: 'Add plans & specs, set document type and options.',
+        status: stepDisplayStatus('upload'),
+      },
+      {
+        id: 'chunk',
+        title: 'Chunk',
+        description: 'Split each PDF into one image per page.',
+        status: stepDisplayStatus('chunk'),
+      },
+      {
+        id: 'ocr',
+        title: 'OCR',
+        description: 'Read text from each page and merge per document.',
+        status: stepDisplayStatus('ocr'),
+      },
+      {
+        id: 'detection',
+        title: 'Detection',
+        description: 'Find gaps, clashes & mismatches.',
+        status: stepDisplayStatus('detection'),
+      },
+      {
+        id: 'result',
+        title: 'Final result',
+        description: 'Review issues, draft RFIs & download report.',
+        status: stepDisplayStatus('result'),
+      },
+    ],
+    [stepDisplayStatus],
+  )
+
+  const canGoNext = useMemo(() => {
+    const order: DetectionWizardStep[] = ['upload', 'chunk', 'ocr', 'detection', 'result']
+    const idx = order.indexOf(activeStep)
+    const next = idx >= 0 && idx < order.length - 1 ? order[idx + 1]! : null
+    return next ? canNavigateTo(next) : false
+  }, [activeStep, canNavigateTo])
+
+  const detectComplete = isStageComplete(stages, 'detect')
+
   const stepper = (
     <DetectionStepper
-      phase={phase}
-      uploadComplete={rows.length > 0}
-      uploadLabel={`${rows.length} file${rows.length === 1 ? '' : 's'} uploaded`}
-      settingsLabel={sensitivityLabel}
-      resultsLabel={
-        phase === 'results'
-          ? `${visibleIssues.length} issues found`
-          : processingStep
-            ? `Processing: ${processingStep}`
-            : 'Not started'
-      }
+      steps={stepperItems}
+      activeStep={activeStep}
+      onStepChange={setActiveStep}
+      canNavigateTo={canNavigateTo}
     />
   )
 
-  const handleCreateProject = useCallback(
-    async (input: { name: string; address?: string; jobNumber?: string }) => {
-      const res = await apiFetch<{ project: { id: string; name: string; job_number?: string | null } }>(
-        '/api/projects',
-        {
-          method: 'POST',
-          json: {
-            name: input.name,
-            address: input.address || null,
-            job_number: input.jobNumber || null,
+  const base = analysisId ? `clash-gap-${analysisId.slice(0, 8)}` : 'clash-gap'
+
+  const renderProcessingStage = (step: 'chunk' | 'ocr') => {
+    const stage = STEP_TO_STAGE[step]
+    const state = stages[stage]
+    const gateMet = stageGateMet(stages, stage, hasUploadsReady)
+    const id = analysisId
+    const meta: Record<typeof step, { title: string; description: string; runLabel: string; gateHint: string }> = {
+      chunk: {
+        title: 'Chunk — split PDFs into page images',
+        description: 'Every PDF page becomes a single image (a 5-page PDF → 5 images). Uploaded images count as one page each.',
+        runLabel: 'chunking',
+        gateHint: 'Upload at least one document on the Upload step first.',
+      },
+      ocr: {
+        title: 'OCR — read text from each image',
+        description: 'Each page image is transcribed with OpenAI vision OCR, then merged into one text stream per document.',
+        runLabel: 'OCR',
+        gateHint: 'Run the Chunk stage first.',
+      },
+    } as const
+    const m = meta[step]
+    const isOcr = step === 'ocr'
+    const preview = isOcr ? { label: 'View result', onClick: () => setViewerOpen(true) } : undefined
+    const downloads = isOcr
+      ? [
+          {
+            label: 'Per-page PDFs (.zip)',
+            busy: downloadingKey === 'ocr-pdf-zip',
+            onClick: () =>
+              id && downloadArtifact('ocr-pdf-zip', `/api/clash-gap/analyses/${id}/artifacts/ocr`, `${base}-ocr-pages.zip`, { method: 'GET' }),
           },
-        },
-      )
-      const p = res.project
-      setProjects((prev) => [
-        {
-          id: p.id,
-          name: p.name,
-          description: '',
-          companyId: '',
-          status: 'active',
-          jobNumber: p.job_number ?? input.jobNumber,
-          startDate: new Date().toISOString(),
-          documentsCount: 0,
-          teamMembers: [],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        ...prev,
-      ])
-      setProjectId(p.id)
-      if (analysisId) {
-        await apiFetch(`/api/clash-gap/analyses/${analysisId}`, {
-          method: 'PATCH',
-          json: { project_id: p.id },
-        })
-      }
-      toast.success('Project created')
-    },
-    [analysisId],
-  )
+          {
+            label: 'Merged PDF (.pdf)',
+            busy: downloadingKey === 'merged-pdf',
+            onClick: () =>
+              id && downloadArtifact('merged-pdf', `/api/clash-gap/analyses/${id}/artifacts/merged`, `${base}-merged.pdf`, { method: 'GET' }),
+          },
+          {
+            label: '.json',
+            busy: downloadingKey === 'ocr-json',
+            onClick: () =>
+              id && downloadArtifact('ocr-json', `/api/clash-gap/analyses/${id}/artifacts/ocr?format=json`, `${base}-ocr.json`, { method: 'GET' }),
+          },
+        ]
+      : []
+
+    return (
+      <StagePanel
+        title={m.title}
+        description={m.description}
+        status={runningStage === stage ? 'running' : stageStatus(stages, stage)}
+        detail={state?.detail}
+        error={state?.error}
+        gateMet={gateMet}
+        gateHint={m.gateHint}
+        isRunning={runningStage === stage}
+        onRun={() => void runStage(stage)}
+        runLabel={m.runLabel}
+        preview={preview}
+        downloads={downloads}
+      >
+        <div className="rounded-xl border border-[#e2e8f0] bg-[#f8fafc] px-4 py-3 text-sm text-[#475569]">
+          {step === 'chunk' && (state?.total != null ? `${state.total} page image(s) generated.` : 'Page images generated.')}
+          {step === 'ocr' && (state?.total != null ? `OCR completed for ${state.total} page(s).` : 'OCR completed.')}
+        </div>
+      </StagePanel>
+    )
+  }
 
   return (
     <>
       <DetectionToolShell
         stepper={stepper}
         onSaveSession={saveSession}
-        onRunDetection={() => void runDetection()}
-        canRunDetection={Boolean(projectId) && canRunClashGapDetection(rows) && !isRunning}
-        isRunning={isRunning}
-        showRunDetection={phase === 'prepare'}
-        showGenerateReport={phase === 'results'}
-        onGenerateReport={() => void generateReport()}
-        isGeneratingReport={isGeneratingReport}
+        onRunDetection={() => {}}
+        canRunDetection={false}
+        isRunning={Boolean(runningStage)}
+        showRunDetection={false}
       >
-        {phase === 'prepare' ? (
-          <UploadSetupStep
-            projects={projects}
-            projectId={projectId}
-            onProjectIdChange={setProjectId}
-            rows={rows}
-            onRowsChange={setRows}
-            fileInputRef={fileInputRef}
-            analysisId={analysisId}
-            onUploadRow={async (row) => {
-              try {
-                const id = await ensureAnalysis()
-                setAnalysisId(id)
-                setRows((prev) =>
-                  prev.map((r) => (r.id === row.id ? { ...r, status: 'pending' } : r)),
+        {activeStep === 'upload' ? (
+          <div className="flex flex-col gap-6">
+            <UploadSetupStep
+              projects={projects}
+              projectId={projectId}
+              onProjectIdChange={setProjectId}
+              rows={rows}
+              onRowsChange={setRows}
+              fileInputRef={fileInputRef}
+              analysisId={analysisId}
+              onUploadRow={async (row) => {
+                try {
+                  if (!projectId) {
+                    toast.error('Select a project before uploading files')
+                    throw new Error('No project selected')
+                  }
+                  const id = await ensureAnalysis()
+                  await uploadRowFile(row, id)
+                } catch (e) {
+                  setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: 'error' as const } : r)))
+                  const msg = e instanceof Error ? e.message : 'Upload failed'
+                  if (!msg.includes('No project')) toast.error(msg)
+                }
+              }}
+              onCreateProject={async (input) => {
+                const res = await apiFetch<{ project: { id: string; name: string; job_number?: string | null } }>(
+                  '/api/projects',
+                  { method: 'POST', json: { name: input.name, address: input.address || null, job_number: input.jobNumber || null } },
                 )
-                const fd = new FormData()
-                if (!row.file) return
-                fd.append('file', row.file)
-                fd.append('file_role', fileRoleFromDocType(row.type))
-                const res = await apiUpload<{ file: { id: string; page_count: number | null } }>(
-                  `/api/clash-gap/analyses/${id}/files`,
-                  fd,
-                )
-                setRows((prev) =>
-                  prev.map((r) =>
-                    r.id === row.id
-                      ? {
-                          ...r,
-                          serverFileId: res.file.id,
-                          status: 'ready',
-                          pages: res.file.page_count ?? r.pages,
-                          file: undefined,
-                        }
-                      : r,
-                  ),
-                )
-              } catch (e) {
-                setRows((prev) =>
-                  prev.map((r) => (r.id === row.id ? { ...r, status: 'error' } : r)),
-                )
-                toast.error(e instanceof Error ? e.message : 'Upload failed')
-              }
-            }}
-            onCreateProject={handleCreateProject}
-            onRowTypeChange={async (row) => {
-              if (!analysisId || !row.serverFileId) return
-              try {
-                await syncFileRoleToServer(analysisId, row)
-              } catch (e) {
-                toast.error(e instanceof Error ? e.message : 'Could not update document type')
-              }
-            }}
-          />
-        ) : (
-          <DetectionResultsWorkspace
-            issues={visibleIssues}
-            onDismiss={(id) => {
-              void patchIssueStatus(id, 'dismissed').then(() => {
-                setSelectedIssueId((sel) => {
-                  if (sel !== id) return sel
-                  const visible = visibleIssues.filter((i) => i.id !== id)
-                  return visible[0]?.id ?? null
-                })
-                toast.message('Issue dismissed')
-              })
-            }}
-            onMarkReviewed={(id) => {
-              void patchIssueStatus(id, 'reviewed').then(() => toast.success('Marked as reviewed'))
-            }}
-            filter={filter}
-            onFilterChange={setFilter}
-            disciplineFilter={disciplineFilter}
-            onDisciplineFilterChange={setDisciplineFilter}
-            search={search}
-            onSearchChange={setSearch}
-            selectedIssueId={selectedIssueId}
-            onSelectIssue={setSelectedIssueId}
-            bookmarkedIds={bookmarkedIds}
-            onToggleBookmark={toggleBookmark}
-            onOpenSources={openSources}
-            onFocusRfi={scrollToRfi}
-            draft={rfiDraft}
-            setDraft={setRfiDraftFromPanel}
-            uploadFilenames={uploadFilenames}
-            linkedIssue={linkedIssue}
-            onClearDraft={clearDraft}
-            onSaveDraftLocal={saveDraftLocal}
-            onCreateRfi={createRfiNavigate}
-            onCreateChangeOrder={createCoNavigate}
-            rfiPanelRef={rfiPanelRef}
-            onBackToPrepare={() => {
-              setPhase('prepare')
-              setSheetOpen(false)
-              setSheetIssue(null)
-            }}
-          />
-        )}
+                const p = res.project
+                setProjects((prev) => [
+                  {
+                    id: p.id,
+                    name: p.name,
+                    description: '',
+                    companyId: '',
+                    status: 'active',
+                    jobNumber: p.job_number ?? input.jobNumber,
+                    startDate: new Date().toISOString(),
+                    documentsCount: 0,
+                    teamMembers: [],
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  },
+                  ...prev,
+                ])
+                setProjectId(p.id)
+                toast.success('Project created')
+              }}
+              onRemoveRow={async (row) => {
+                try {
+                  const aid = analysisIdRef.current
+                  if (row.serverFileId && aid) {
+                    await apiFetch(`/api/clash-gap/analyses/${aid}/files/${row.serverFileId}`, { method: 'DELETE' })
+                  }
+                  setRows((prev) => prev.filter((r) => r.id !== row.id))
+                } catch (e) {
+                  const status = typeof (e as { status?: number })?.status === 'number' ? (e as { status?: number }).status : null
+                  if (status === 404) {
+                    setRows((prev) => prev.filter((r) => r.id !== row.id))
+                    toast.message('File removed')
+                    return
+                  }
+                  toast.error(e instanceof Error ? e.message : 'Could not remove file')
+                }
+              }}
+              onRowTypeChange={async (row) => {
+                const aid = analysisIdRef.current
+                if (!aid || !row.serverFileId) return
+                try {
+                  await syncFileRoleToServer(aid, row)
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : 'Could not update document type')
+                }
+              }}
+            />
+            <DetectionSettingsStep settings={settings} onSettingsChange={setSettings} />
+          </div>
+        ) : null}
+
+        {activeStep === 'chunk' ? renderProcessingStage('chunk') : null}
+        {activeStep === 'ocr' ? renderProcessingStage('ocr') : null}
+
+        {activeStep === 'detection' ? (
+          <StagePanel
+            title="Detection — gaps, clashes & mismatches"
+            description="Drawings are reviewed against the specifications. Each finding traces back to a specific requirement."
+            status={runningStage === 'detect' ? 'running' : stageStatus(stages, 'detect')}
+            detail={stages.detect?.detail}
+            error={stages.detect?.error}
+            gateMet={stageGateMet(stages, 'detect', hasUploadsReady)}
+            gateHint="Run the OCR stage first."
+            isRunning={runningStage === 'detect'}
+            onRun={() => void runStage('detect')}
+            runLabel="detection"
+          >
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-3 text-sm text-emerald-900">
+              {visibleIssues.length === 0
+                ? 'No issues were flagged. Continue to Final result to download the report and finish.'
+                : `${visibleIssues.length} issue${visibleIssues.length === 1 ? '' : 's'} found. Continue to Final result to review them, draft RFIs and download the report.`}
+            </div>
+          </StagePanel>
+        ) : null}
+
+        {activeStep === 'result' ? (
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#e2e8f0] bg-white px-5 py-4 shadow-sm">
+              <div className="text-sm text-[#475569]">
+                {visibleIssues.length === 0
+                  ? 'No issues were flagged for this analysis.'
+                  : `${visibleIssues.length} issue${visibleIssues.length === 1 ? '' : 's'} ready to review.`}
+              </div>
+              {analysisId ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-xl"
+                    disabled={downloadingKey === 'report'}
+                    onClick={() =>
+                      downloadArtifact('report', `/api/clash-gap/analyses/${analysisId}/report`, `${base}-report.pdf`, { method: 'POST' })
+                    }
+                  >
+                    Report (.pdf)
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-xl"
+                    disabled={downloadingKey === 'issues-csv'}
+                    onClick={() =>
+                      downloadArtifact('issues-csv', `/api/clash-gap/analyses/${analysisId}/artifacts/issues?format=csv`, `${base}-issues.csv`, { method: 'GET' })
+                    }
+                  >
+                    Issues (.csv)
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+
+            <DetectionResultsWorkspace
+              issues={visibleIssues}
+              onIgnoreIssue={ignoreIssue}
+              onAddToRfi={addIssueToRfiDraft}
+              filter={filter}
+              onFilterChange={setFilter}
+              disciplineFilter={disciplineFilter}
+              onDisciplineFilterChange={setDisciplineFilter}
+              search={search}
+              onSearchChange={setSearch}
+              selectedIssueId={selectedIssueId}
+              onSelectIssue={setSelectedIssueId}
+              bookmarkedIds={bookmarkedIds}
+              onToggleBookmark={toggleBookmark}
+              onOpenSources={openSources}
+              draft={rfiDraft}
+              setDraft={setRfiDraftFromPanel}
+              uploadFilenames={uploadFilenames}
+              linkedIssue={linkedIssue}
+              onClearDraft={clearDraft}
+              onSaveDraftLocal={saveDraftLocal}
+              onCreateRfi={createRfiNavigate}
+              rfiPanelRef={rfiPanelRef}
+              onBackToUpload={() => {
+                setActiveStep('upload')
+                setSheetOpen(false)
+                setSheetIssue(null)
+              }}
+            />
+          </div>
+        ) : null}
+
+        <DetectionStepFooter
+          activeStep={activeStep}
+          onStepChange={setActiveStep}
+          canGoNext={canGoNext}
+          nextHint={
+            activeStep === 'upload'
+              ? uploadDocsHint
+              : canGoNext
+                ? null
+                : 'Finish the current stage to continue.'
+          }
+          showNext={activeStep !== 'chunk' && activeStep !== 'detection'}
+          onDone={() => setConfirmOpen(true)}
+          doneReady={detectComplete && !runningStage}
+          isFinishing={isFinishing}
+        />
       </DetectionToolShell>
 
       <SourceComparisonSheet open={sheetOpen} onOpenChange={setSheetOpen} issue={sheetIssue} />
 
-      <AnalysisLoadingOverlay open={isRunning} step={processingStep} />
+      <DetectionResultViewer
+        open={viewerOpen}
+        onOpenChange={setViewerOpen}
+        analysisId={analysisId}
+      />
+
+      <Dialog open={confirmOpen} onOpenChange={(o) => !isFinishing && setConfirmOpen(o)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Download report & delete everything?</DialogTitle>
+            <DialogDescription>
+              Your PDF report will be downloaded to this device, then all uploaded files, page
+              images, OCR/merged text, and detected issues for this analysis are permanently
+              deleted from the server. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={isFinishing} onClick={() => setConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="bg-emerald-600 text-white hover:bg-emerald-700"
+              disabled={isFinishing}
+              onClick={() => void finishAndCleanup()}
+            >
+              {isFinishing ? 'Saving & clearing…' : 'Download & delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

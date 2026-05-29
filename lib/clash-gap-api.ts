@@ -5,6 +5,7 @@ import type {
   IssueSourceReference,
   IssueType,
 } from '@/lib/clash-gap-types'
+import type { StagesMap } from '@/lib/clash-gap-stages'
 
 export type ApiClashGapIssue = {
   id: string
@@ -32,6 +33,7 @@ export type ApiClashGapAnalysis = {
   settings: DetectionSettings
   error_message: string | null
   summary: ClashGapAnalysisSummary | null
+  stages?: StagesMap
   created_at: string
   completed_at: string | null
 }

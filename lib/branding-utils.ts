@@ -1,4 +1,3 @@
-/** Normalize hex for CSS / React-PDF (#RGB or #RRGGBB). */
 export function parseBrandingPrimaryColor(raw: string | null | undefined): string | null {
   const t = (raw ?? '').trim()
   if (!t) return null
@@ -13,7 +12,6 @@ export function parseBrandingPrimaryColor(raw: string | null | undefined): strin
   return `#${hex}`.toUpperCase()
 }
 
-/** Slightly lighter accent line derived from primary (simple mix toward white). */
 export function brandingAccentFromPrimary(primary: string): string {
   const p = parseBrandingPrimaryColor(primary)
   if (!p) return '#c37a29'

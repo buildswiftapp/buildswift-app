@@ -204,9 +204,7 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
         }}
       >
 
-        {/* ── TOP HEADER ── */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-          {/* Left: logo + brand */}
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             {data.logoDataUri ? (
               <Image src={data.logoDataUri} style={{ width: 48, height: 48 }} />
@@ -223,7 +221,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
               <View style={{ height: 1.2, backgroundColor: data.themePrimary, marginTop: data.brandSub ? 3 : 4, width: '100%' }} />
             </View>
           </View>
-          {/* Right: contact block */}
           <View style={{ alignItems: 'flex-end' }}>
             {contactLines(data.contactAddress).map((line, i) => (
               <Text key={`cl-${i}`} style={{ fontSize: 8.5, color: '#475569', lineHeight: 1.4 }}>{line}</Text>
@@ -237,7 +234,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
           </View>
         </View>
 
-        {/* ── REVIEW BAR ── */}
         <View
           style={{
             backgroundColor: data.themePrimary,
@@ -259,13 +255,10 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
           </View>
         </View>
 
-        {/* ── ACCENT LINE ── */}
         <View style={{ height: 3, backgroundColor: data.themeAccent, marginBottom: 12 }} />
 
-        {/* ── META GRID (RFI / SUBMITTAL) ── */}
         {!isChangeOrder ? (
           <View style={{ borderWidth: 1, borderColor: '#d7dbe4', marginBottom: 12 }}>
-            {/* Row 1: Project | Project No | Date */}
             <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#d7dbe4' }}>
               <View style={{ flex: 5, paddingVertical: 5, paddingHorizontal: 8, borderRightWidth: 1, borderRightColor: '#d7dbe4' }}>
                 <Text style={{ fontSize: 9.5 }}>
@@ -283,7 +276,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
                 <Text style={{ fontSize: 9.5, textAlign: 'right' }}>{data.reportDate}</Text>
               </View>
             </View>
-            {/* Row 2: RFI/Submittal No | Contract Date */}
             <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#d7dbe4' }}>
               <View style={{ flex: 1, paddingVertical: 5, paddingHorizontal: 8, borderRightWidth: 1, borderRightColor: '#d7dbe4' }}>
                 <Text style={{ fontSize: 9.5 }}>
@@ -298,7 +290,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
                 </Text>
               </View>
             </View>
-            {/* Row 3: Submitted By | Priority */}
             <View style={{ flexDirection: 'row' }}>
               <View style={{ flex: 3, paddingVertical: 5, paddingHorizontal: 8, borderRightWidth: 1, borderRightColor: '#d7dbe4' }}>
                 <Text style={{ fontSize: 9.5 }}>
@@ -320,7 +311,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
           </View>
         ) : null}
 
-        {/* ── CHANGE ORDER: Project, Parties, Title Bar ── */}
         {isChangeOrder ? (
           <>
             <View style={{ marginBottom: 4, borderBottomWidth: 1, borderBottomColor: '#e5ecf8', paddingBottom: 7 }}>
@@ -346,7 +336,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
                 {architectDisplayEmail ? <Text style={{ fontSize: 11, color: '#334155' }}>{architectDisplayEmail}</Text> : null}
               </View>
             </View>
-            {/* Title Bar */}
             <View style={{ flexDirection: 'row', borderWidth: 1, borderColor: '#c9d5e8', borderRadius: 2, overflow: 'hidden', marginTop: BASE * 2, marginBottom: BASE * 1.5 }}>
               <View style={{ width: 58, backgroundColor: '#2d5fa8', paddingVertical: 7, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ color: '#fff', fontSize: 11, fontWeight: 700 }}>Title</Text>
@@ -358,7 +347,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
           </>
         ) : null}
 
-        {/* ── CHANGE ORDER: narrative sections ── */}
         {isChangeOrder ? (
           <>
             <View style={{ marginBottom: BASE * 1.3 }}>
@@ -370,7 +358,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
               </Text>
             </View>
 
-            {/* Scope + Cost columns */}
             <View style={{ marginBottom: BASE * 1.6 }}>
               <View style={{ flexDirection: 'row' }}>
                 <View style={{ width: '48%', marginRight: 12 }}>
@@ -418,7 +405,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
               </View>
             </View>
 
-            {/* Schedule Impact */}
             <View style={{ marginBottom: BASE * 1.2 }}>
               <SectionHeading title="SCHEDULE IMPACT" />
               <View style={{ borderWidth: 1, borderColor: '#d5deec', marginBottom: 12 }}>
@@ -435,7 +421,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
           </>
         ) : null}
 
-        {/* ── RFI / SUBMITTAL: icon+card sections ── */}
         {!isChangeOrder ? (
           <>
             {narrativeSections.length > 0 ? (
@@ -462,7 +447,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
               </View>
             )}
 
-            {/* IMPACT card */}
             {data.impactRows.length > 0 ? (
               <View style={{ marginTop: 8, borderWidth: 1, borderColor: '#e8c48a', borderRadius: 4, overflow: 'hidden' }}>
                 <View style={{ backgroundColor: '#fdf3e0', borderBottomWidth: 1, borderBottomColor: '#e8d4b8', paddingHorizontal: 9, paddingVertical: 6, flexDirection: 'row', alignItems: 'center' }}>
@@ -490,7 +474,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
           </>
         ) : null}
 
-        {/* ── ATTACHMENTS card ── */}
         {data.attachments.some((a) => a && a.trim() && a.trim() !== '—') ? (
           <View style={{ marginTop: 8, borderWidth: 1, borderColor: '#c8e6d8', borderRadius: 4, overflow: 'hidden' }}>
             <View style={{ backgroundColor: '#f0f7f4', borderBottomWidth: 1, borderBottomColor: '#c8e6d8', paddingHorizontal: 9, paddingVertical: 6, flexDirection: 'row', alignItems: 'center' }}>
@@ -507,7 +490,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
           </View>
         ) : null}
 
-        {/* ── APPROVAL LOG ── */}
         <View style={{ marginTop: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
             <Text style={{ fontSize: 10, color: '#1f3768', marginRight: 5, fontWeight: 700 }}>■</Text>
@@ -517,7 +499,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
             <View style={{ height: 1, flex: 1, backgroundColor: '#d7dbe4', marginLeft: 6 }} />
           </View>
           <View style={{ borderWidth: 1, borderColor: '#d7dbe4', borderRadius: 4, overflow: 'hidden' }}>
-            {/* Header row */}
             <View style={{ flexDirection: 'row', backgroundColor: '#eef3fb', borderBottomWidth: 1, borderBottomColor: '#c8d5ec' }}>
               {(['Role', 'Signature', 'Date', 'Notes'] as const).map((h, i) => (
                 <Text
@@ -535,7 +516,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
                 </Text>
               ))}
             </View>
-            {/* Data rows */}
             {approvalDisplayRows.map((row, idx) => (
               <View
                 key={`arow-${idx}`}
@@ -562,7 +542,6 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
             ))}
           </View>
 
-          {/* Roles bar */}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 7, marginBottom: 4 }}>
             {approvalDisplayRows.map((row, idx) => (
               <View key={`role-${idx}`} style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 8, marginVertical: 2 }}>
@@ -575,15 +554,12 @@ export function ReviewPdfDocument({ data }: { data: ReviewPdfViewModel }) {
           </View>
         </View>
 
-        {/* Debug info */}
         {data.debugInfo ? (
           <Text style={{ marginTop: 3, textAlign: 'center', fontSize: 6, color: '#94a3b8' }}>{data.debugInfo}</Text>
         ) : null}
 
-        {/* Spacer above footer */}
         <View style={{ height: BASE * 2 }} />
 
-        {/* ── FIXED FOOTER ── */}
         <View
           fixed
           style={{

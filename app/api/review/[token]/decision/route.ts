@@ -66,7 +66,6 @@ export async function POST(req: Request, { params }: Params) {
     return badRequest('Signature is required for change orders')
   }
 
-  // Normalize the incoming decision into the canonical outcome for this doc type.
   const canonicalOutcome = normalizeReviewerOutcome(docType, payload.data.decision)
   if (!canonicalOutcome) {
     return badRequest(
@@ -79,9 +78,7 @@ export async function POST(req: Request, { params }: Params) {
   const { error: updateError } = await privilegedDb
     .from('review_requests')
     .update({
-      // Legacy binary column (kept for back-compat / cycle rollup).
       decision: legacyDecision,
-      // Canonical reviewer outcome (used by lib/status to compute doc status).
       outcome: canonicalOutcome,
       decision_notes: payload.data.decision_notes ?? null,
       full_name: payload.data.full_name,
@@ -92,7 +89,6 @@ export async function POST(req: Request, { params }: Params) {
     .eq('id', requestRow.id)
   if (updateError) return serverError(updateError.message)
 
-  // Cycle rollup uses the legacy binary `decision` column (unchanged behaviour).
   const { data: allRequests, error: allReqError } = await privilegedDb
     .from('review_requests')
     .select('decision,is_overridden')
@@ -114,23 +110,18 @@ export async function POST(req: Request, { params }: Params) {
     .eq('id', requestRow.review_cycle_id)
   if (cycleUpdateError) return serverError(cycleUpdateError.message)
 
-  // Legacy dual-write for back-compat.
   const internalStatus =
     cycleStatus === 'approved' ? 'approved' : cycleStatus === 'rejected' ? 'rejected' : 'pending_reviewer'
   const externalStatus =
     cycleStatus === 'approved' ? 'approved' : cycleStatus === 'rejected' ? 'rejected' : 'pending_reviewer'
 
-  // Canonical document status: derived from the most recent reviewer outcome
-  // (this reviewer's), not from the rollup. Reviewers NEVER write `closed`.
   const previousDocStatus = (docInfo as { status?: string | null }).status ?? null
   const canonicalDocStatus = statusOnReviewerOutcome(docType, canonicalOutcome)
 
   const { error: docError } = await privilegedDb
     .from(DOCUMENT_TABLE_BY_TYPE[docInfo.doc_type as DocumentType])
     .update({
-      // Canonical (single source of truth).
       status: canonicalDocStatus,
-      // Legacy dual-write for Phase 1.
       internal_status: internalStatus,
       external_status: externalStatus,
     })

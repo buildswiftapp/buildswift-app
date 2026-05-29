@@ -57,8 +57,6 @@ export async function resolveBrandingLogoDataUri(logoUrl: string | null | undefi
   const u = (logoUrl ?? '').trim()
   if (!u) return ''
   if (u.startsWith('data:')) return u
-  // When a storage path is stored (recommended), this helper can't resolve it without a client.
-  // Call resolveBrandingLogoDataUriWithSupabase() instead.
   const { dataUri } = await fetchUrlAsDataUri(u)
   return dataUri || ''
 }
@@ -71,13 +69,11 @@ export async function resolveBrandingLogoDataUriWithSupabase(
   if (!u) return ''
   if (u.startsWith('data:')) return u
 
-  // If it's an absolute URL, fetch as normal.
   if (/^https?:\/\//i.test(u)) {
     const { dataUri } = await fetchUrlAsDataUri(u)
     return dataUri || ''
   }
 
-  // Otherwise treat as storage path; download and embed.
   const bucket = process.env.BRANDING_LOGO_BUCKET || process.env.REVIEW_SIGNATURES_BUCKET || 'document-attachments'
   try {
     const dl = await supabase.storage.from(bucket).download(u)

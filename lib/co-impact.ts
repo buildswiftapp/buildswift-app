@@ -13,18 +13,14 @@ function parseMoneyInput(raw: string): number {
 
 export type ChangeOrderScheduleState = {
   enabled: boolean
-  /** Keep as string in UI; validated/parses to whole number. */
   duration: string
   unit: ScheduleUnit
-  /** Required only when unit is 'days' (UI stores '' when unset). */
   dayType: DayType | ''
 }
 
 export type ChangeOrderBaselineState = {
-  /** Keep as string in UI; validated/parses to whole number. */
   value: string
   unit: ScheduleUnit
-  /** Required only when unit is 'days' (UI stores '' when unset). */
   dayType: DayType | ''
 }
 
@@ -35,9 +31,7 @@ export type ChangeOrderCostState = {
   equipment: string
   subcontractor: string
   other: string
-  /** Optional percent as string. */
   markupPercent: string
-  /** Required when type is 'none'. */
   justificationNote: string
 }
 
@@ -46,9 +40,7 @@ export type ChangeOrderImpactDerived = {
   baselineDaysTotal: number
   revisedDaysTotal: number | null
   costSubtotal: number
-  /** Unsigned total after markup */
   costTotal: number
-  /** Signed total per impact type */
   signedCostImpact: number
   revisedContractAmount: number | null
 }
@@ -89,7 +81,6 @@ export function computeBaseline(state: ChangeOrderBaselineState): { baselineDays
   return { baselineDaysTotal: normalizeDays(dur, state.unit), valid: true }
 }
 
-/** Collapse legacy weeks/business-day baseline into canonical calendar-days input for the simplified CO form UI. */
 export function coerceBaselineToNormalizedCalendarInput(
   baseline: ChangeOrderBaselineState,
 ): ChangeOrderBaselineState {
@@ -190,7 +181,6 @@ export function validateChangeOrderImpact(args: {
 }): { ok: boolean; errors: ChangeOrderImpactValidationErrors } {
   const errors: ChangeOrderImpactValidationErrors = {}
 
-  // Baseline always required
   {
     const dur = parseDurationDigits(args.baseline.value)
     if (!Number.isFinite(dur) || dur <= 0) errors.baselineDuration = 'Enter a duration greater than 0.'
@@ -198,7 +188,6 @@ export function validateChangeOrderImpact(args: {
       errors.baselineDayType = 'Select calendar or business days.'
   }
 
-  // Schedule only when enabled
   if (args.schedule.enabled) {
     const dur = parseDurationDigits(args.schedule.duration)
     if (!Number.isFinite(dur) || dur <= 0) errors.scheduleDuration = 'Enter a duration greater than 0.'
@@ -206,7 +195,6 @@ export function validateChangeOrderImpact(args: {
       errors.scheduleDayType = 'Select calendar or business days.'
   }
 
-  // Cost only per type
   if (args.cost.type === 'none') {
     if (!args.cost.justificationNote.trim())
       errors.costJustification = 'Provide a justification note for no cost impact.'
@@ -270,7 +258,6 @@ function inferScheduleFromLegacyText(scheduleImpactRaw: string): {
     return { enabled: false, duration: '', unit: 'days', dayType: '' }
   }
 
-  // Prefer explicit weeks first.
   const w = t.match(/(\d+)\s*week/i)
   if (w?.[1]) return { enabled: true, duration: w[1], unit: 'weeks', dayType: '' }
 
@@ -347,7 +334,6 @@ export function deserializeChangeOrderImpactFromMetadata(meta: Record<string, un
 
   const markupPercent = pickNumber(meta, 'markup_percent', 'markupPercent')
 
-  // If new typed impact is missing, infer from legacy numeric presence.
   const inferredType: CostImpactType = (() => {
     if (typeRaw === 'increase' || typeRaw === 'decrease' || typeRaw === 'none') return costImpactType
     const subtotal =
@@ -428,7 +414,6 @@ export function serializeChangeOrderImpactToMetadata(args: {
   const scheduleImpactLabel = formatScheduleLabel(args.schedule)
 
   return {
-    // Canonical keys (snake_case)
     schedule_impact_enabled: args.schedule.enabled,
     schedule_duration: args.schedule.enabled ? scheduleDuration : 0,
     schedule_unit: args.schedule.unit,
@@ -451,7 +436,6 @@ export function serializeChangeOrderImpactToMetadata(args: {
     total_cost_impact: unsignedTotalCostImpact,
     justification_note: costType === 'none' ? args.cost.justificationNote.trim() : null,
 
-    // Legacy dual-write keys used by current PDF + route mapping
     scheduleImpact: scheduleImpactLabel,
     scheduleDays: args.derived.scheduleDaysTotal,
     originalProjectDurationDays: args.derived.baselineDaysTotal,
@@ -462,7 +446,6 @@ export function serializeChangeOrderImpactToMetadata(args: {
 
     proposedAmount: costType === 'decrease' ? -unsignedTotalCostImpact : unsignedTotalCostImpact,
 
-    // Existing PDF route already forwards these names.
     laborCost: labor,
     materialCost: materials,
     equipmentCost: equipment,

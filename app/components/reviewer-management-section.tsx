@@ -12,9 +12,7 @@ const SUGGEST_DEBOUNCE_MS = 250
 
 export type ReviewInviteSendPayload = {
   reviewers: string[]
-  /** Review link lifetime (days). Default 7 in API if omitted. */
   expires_in_days: 3 | 7 | 14
-  /** When true, only refresh expired tokens on the latest open review cycle. */
   resend: boolean
 }
 
@@ -22,9 +20,7 @@ interface ReviewerManagementSectionProps {
   initialCcReviewers?: string[]
   onSend?: (payload: ReviewInviteSendPayload) => Promise<void> | void
   onReviewConfigChange?: (config: { reviewers: string[]; expires_in_days: 3 | 7 | 14 }) => void
-  /** Parent supplies Card; omit outer border/padding shell */
   embedded?: boolean
-  /** Create flow: ADD CC label styling, optional no send */
   layout?: 'default' | 'create'
   hideSendButton?: boolean
 }

@@ -100,14 +100,14 @@ export function RfiDraftPanel(props: {
   }
 
   const shell = (inner: React.ReactNode) => (
-    <div ref={panelRef} className="min-h-0 min-w-0 lg:max-h-[calc(100vh-12rem)]">
+    <div ref={panelRef} className="flex h-full min-h-0 min-w-0 flex-col">
       {inner}
     </div>
   )
 
   if (!draft || !issue) {
     return shell(
-      <Card className="flex min-h-[480px] flex-col rounded-2xl border-[#e2e8f0] bg-white shadow-[0_2px_12px_rgba(15,23,42,0.06)]">
+      <Card className="flex h-full min-h-[480px] flex-col rounded-2xl border-[#e2e8f0] bg-white shadow-[0_2px_12px_rgba(15,23,42,0.06)]">
         <CardContent className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center text-sm text-muted-foreground">
           <p className="font-medium text-foreground">RFI Draft (Auto-filled)</p>
           <p>Select an issue to auto-fill the RFI panel.</p>
@@ -128,7 +128,7 @@ export function RfiDraftPanel(props: {
     : draft.assignee || ASSIGNEE_ROLES[0]
 
   return shell(
-    <Card className="flex max-h-[inherit] min-h-0 flex-col rounded-2xl border-[#e2e8f0] bg-white shadow-[0_2px_12px_rgba(15,23,42,0.06)]">
+    <Card className="flex h-full min-h-0 flex-col rounded-2xl border-[#e2e8f0] bg-white shadow-[0_2px_12px_rgba(15,23,42,0.06)]">
       <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 border-b border-[#f1f5f9] px-6 pb-4 pt-6">
         <div className="flex min-w-0 items-start gap-2">
           <Sparkles

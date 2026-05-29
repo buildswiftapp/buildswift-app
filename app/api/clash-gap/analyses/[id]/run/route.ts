@@ -1,9 +1,9 @@
 import { after } from 'next/server'
-import { badRequest, ok, serverError, unauthorized } from '@/lib/server/api-response'
+import { badRequest, forbidden, notFound, ok, serverError, unauthorized } from '@/lib/server/api-response'
 import { getAuthContext } from '@/lib/server/auth'
-import { assertCanUseAiAssist } from '@/lib/server/billing'
+import { assertCanRunClashGapReport, assertCanUseAiAssist } from '@/lib/server/billing'
 import { getAnalysisForAccount, updateAnalysisStep } from '@/lib/server/clash-gap/access'
-import { formatClashGapError } from '@/lib/server/clash-gap/errors'
+import { formatClashGapError, isStaleClashGapProcessing } from '@/lib/server/clash-gap/errors'
 import { runClashGapPipeline } from '@/lib/server/clash-gap/pipeline'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
@@ -22,12 +22,18 @@ export async function POST(req: Request, { params }: Params) {
   if (!supabase) return serverError('Supabase is not configured')
 
   const aiGate = await assertCanUseAiAssist(supabase as any, auth.accountId)
-  if (!aiGate.ok) return badRequest(aiGate.reason)
+  if (!aiGate.ok) return forbidden(aiGate.reason)
+
+  const reportGate = await assertCanRunClashGapReport(supabase as any, auth.accountId)
+  if (!reportGate.ok) return forbidden(reportGate.reason)
 
   const analysis = await getAnalysisForAccount(supabase, id, auth.accountId)
-  if (!analysis) return badRequest('Analysis not found')
+  if (!analysis) return notFound('Analysis not found')
 
-  if (analysis.status === 'processing') {
+  if (
+    (analysis.status === 'processing' || analysis.status === 'queued') &&
+    !isStaleClashGapProcessing(analysis.status, analysis.updated_at)
+  ) {
     return ok({ analysisId: id, status: 'processing' })
   }
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ElementType } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { BrickWall, Check, FileText, Shield, Sparkles, Sprout, Star } from 'lucide-react'
+import { BrickWall, Check, FileDown, FolderKanban, HardDrive, Shield, Sparkles, Sprout, Star } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { BILLING_PLANS, type AppBillingTier, type AppBillingPlan } from '@/lib/billing-plans'
 import { Button } from '@/components/ui/button'
@@ -18,17 +18,27 @@ type BillingSummary = {
   billing_status: string
   current_period_end: string | null
   cancel_at: string | null
-  documents_used: number
-  documents_limit: number
   ai_generations_used: number
-  ai_generations_limit: number
+  ai_generations_limit: number | null
+  clash_gap_reports_used: number
+  clash_gap_reports_limit: number | null
+  active_projects_used: number
+  active_projects_limit: number | null
+  storage_used_gb: number
+  storage_limit_gb: number
+  trial_start_date: string | null
+  trial_end_date: string | null
+  trial_expired: boolean
 }
 
-const toTierForCheckout = (tier: AppBillingTier): 'pro' | 'enterprise' => (tier === 'enterprise' ? 'enterprise' : 'pro')
+const toTierForCheckout = (tier: AppBillingTier): 'starter' | 'professional' | 'business' =>
+  tier === 'business' ? 'business' : tier === 'professional' ? 'professional' : 'starter'
 
-const TIER_ICONS: Record<'free' | 'professional', ElementType> = {
-  free: Sprout,
+const TIER_ICONS: Record<'trial' | 'starter' | 'professional' | 'business', ElementType> = {
+  trial: Sprout,
+  starter: Sprout,
   professional: BrickWall,
+  business: Shield,
 }
 
 export default function BillingPage() {
@@ -44,7 +54,7 @@ export default function BillingPage() {
     message: string
   } | null>(null)
 
-  const currentPlan = BILLING_PLANS.find((p) => p.tier === summary?.tier)
+  const currentPlan = BILLING_PLANS.find((p) => p.planName === summary?.plan_name)
   const cancelAtLabel = useMemo(() => {
     if (!summary?.cancel_at) return null
     const d = new Date(summary.cancel_at)
@@ -58,6 +68,27 @@ export default function BillingPage() {
     if (Number.isNaN(d.getTime())) return null
     return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
   }, [summary?.current_period_end])
+
+  const trialEndsLabel = useMemo(() => {
+    if (!summary?.trial_end_date) return null
+    const d = new Date(summary.trial_end_date)
+    if (Number.isNaN(d.getTime())) return null
+    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+  }, [summary?.trial_end_date])
+
+  const trialDaysLeft = useMemo(() => {
+    if (!summary?.trial_end_date) return null
+    const endMs = Date.parse(summary.trial_end_date)
+    if (Number.isNaN(endMs)) return null
+    const diff = Math.ceil((endMs - Date.now()) / (1000 * 60 * 60 * 24))
+    return diff
+  }, [summary?.trial_end_date])
+
+  const warn = (used: number, limit: number | null) => {
+    if (limit === null) return false
+    if (!Number.isFinite(limit) || limit <= 0) return false
+    return used / limit >= 0.8
+  }
 
   const withSummarySpinner = async <T,>(fn: () => Promise<T>): Promise<T> => {
     setFetchingSummaryCount((c) => c + 1)
@@ -84,7 +115,6 @@ export default function BillingPage() {
           setSummary(data)
           if (data.tier !== 'free' || data.billing_status === 'active') return data
         } catch {
-          // Keep retrying to absorb short webhook/db propagation delays.
         }
         if (i < attempts - 1) {
           await new Promise((resolve) => window.setTimeout(resolve, delayMs))
@@ -194,134 +224,47 @@ export default function BillingPage() {
     }
   }
 
-  const handleScheduleDowngrade = async (toTier: 'free' | 'professional' = 'free') => {
-    try {
-      setSchedulingDowngrade(true)
-      const result = await apiFetch<{ scheduled: boolean; message?: string }>('/api/billing/downgrade', {
-        method: 'POST',
-        json: { toTier },
-      })
-      await loadBillingSummary()
-      toast.success(result.message || 'Downgrade scheduled successfully.')
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Unable to schedule downgrade')
-    } finally {
-      setSchedulingDowngrade(false)
-    }
-  }
-
-  const handleCancelScheduledDowngrade = async () => {
-    try {
-      setCancelingDowngrade(true)
-      const result = await apiFetch<{ canceled: boolean; message?: string }>(
-        '/api/billing/cancel-downgrade',
-        {
-          method: 'POST',
-          json: {},
-        }
-      )
-      await loadBillingSummary()
-      toast.success(result.message || 'Scheduled downgrade canceled.')
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Unable to cancel scheduled downgrade')
-    } finally {
-      setCancelingDowngrade(false)
-    }
+  const tierForPlan = (plan: AppBillingPlan): AppBillingTier => {
+    if (plan.planId === 'plan-business') return 'business'
+    if (plan.planId === 'plan-professional') return 'professional'
+    if (plan.planId === 'plan-starter') return 'starter'
+    return 'trial'
   }
 
   const renderPlanFooter = (plan: AppBillingPlan, isCurrentPlan: boolean) => {
-    if (plan.tier === 'free') {
-      if (isCurrentPlan) {
-        return (
-          <Button
-            variant="outline"
-            disabled
-            className="w-full rounded-lg border-[#22C55E] bg-transparent text-[#22C55E] opacity-100 hover:bg-transparent"
-          >
-            Current Plan
-          </Button>
-        )
-      }
+    if (isCurrentPlan) {
       return (
-        <Button
-          variant="outline"
-          className={cn(
-            'w-full rounded-lg border-[#22C55E] bg-white text-[#22C55E]',
-            'hover:bg-emerald-50 hover:text-emerald-700'
-          )}
-          onClick={() => void handleScheduleDowngrade('free')}
-          disabled={schedulingDowngrade}
-        >
-          {schedulingDowngrade ? 'Scheduling...' : 'Start Free'}
+        <Button disabled className="w-full rounded-lg bg-[#111827] text-white opacity-100 hover:bg-[#111827]">
+          Current Plan
         </Button>
       )
     }
 
-    if (plan.tier === 'professional') {
-      if (isCurrentPlan) {
-        return (
-          <Button
-            disabled
-            className="w-full rounded-lg bg-[#4F46E5] text-white opacity-100 hover:bg-[#4F46E5]"
-          >
-            Current Plan
-          </Button>
-        )
-      }
-      if (summary?.tier === 'enterprise') {
-        return (
-          <Button
-            variant="outline"
-            className="w-full rounded-lg border-[#4F46E5] bg-white text-[#4F46E5] hover:bg-violet-50"
-            onClick={() => void handleScheduleDowngrade('professional')}
-            disabled={schedulingDowngrade}
-          >
-            {schedulingDowngrade ? 'Scheduling...' : 'Downgrade'}
-          </Button>
-        )
-      }
+    const tier = tierForPlan(plan)
+    if (tier === 'trial') {
       return (
-        <Button
-          className="w-full rounded-lg bg-[#4F46E5] text-white hover:bg-[#4338CA]"
-          onClick={() => void handleUpgrade(plan.tier, plan.id)}
-          disabled={loadingPlanId === plan.id}
-        >
-          {loadingPlanId === plan.id ? 'Redirecting...' : 'Upgrade to Builder'}
+        <Button variant="outline" className="w-full rounded-lg" disabled>
+          Included at signup
         </Button>
       )
     }
 
-    if (plan.tier === 'enterprise') {
-      if (isCurrentPlan) {
-        return (
-          <Button
-            variant="outline"
-            disabled
-            className="w-full rounded-lg border-[#F97316] bg-transparent text-[#F97316] opacity-100 hover:bg-transparent"
-          >
-            Current Plan
-          </Button>
-        )
-      }
-      return (
-        <Button
-          variant="outline"
-          className="w-full rounded-lg border-[#F97316] bg-white text-[#F97316] hover:bg-orange-50"
-          onClick={() => void handleUpgrade(plan.tier, plan.id)}
-          disabled={loadingPlanId === plan.id}
-        >
-          {loadingPlanId === plan.id ? 'Redirecting...' : 'Go Pro'}
-        </Button>
-      )
-    }
-
-    return null
+    return (
+      <Button
+        className={cn(
+          'w-full rounded-lg',
+          plan.highlight === 'most_popular' ? 'bg-[#4F46E5] text-white hover:bg-[#4338CA]' : 'bg-black text-white hover:bg-black/90',
+        )}
+        onClick={() => void handleUpgrade(tier, plan.planId)}
+        disabled={loadingPlanId === plan.planId}
+      >
+        {loadingPlanId === plan.planId ? 'Redirecting...' : `Choose ${plan.planName}`}
+      </Button>
+    )
   }
 
   const showSpinner = loadingSummary || fetchingSummaryCount > 0
-  const scheduledDowngradeTargetLabel = summary?.tier === 'enterprise' ? 'Builder' : 'Starter'
-  const bannerPlanName =
-    currentPlan?.name ?? (summary?.tier === 'enterprise' ? 'Pro' : summary?.tier === 'professional' ? 'Builder' : 'Starter')
+  const bannerPlanName = currentPlan?.planName ?? summary?.plan_name ?? 'Free Trial'
 
   return (
     <div className="min-h-full bg-white">
@@ -378,87 +321,148 @@ export default function BillingPage() {
             </p>
           </div>
         ) : null}
+        {summary?.tier === 'trial' && trialEndsLabel ? (
+          <div
+            className={cn(
+              'rounded-lg border px-4 py-3 text-sm',
+              summary.trial_expired
+                ? 'border-red-200 bg-red-50 text-red-900'
+                : trialDaysLeft !== null && trialDaysLeft <= 3
+                  ? 'border-amber-200 bg-amber-50 text-amber-900'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-900',
+            )}
+          >
+            <p>
+              {summary.trial_expired
+                ? `Your Free Trial ended on ${trialEndsLabel}. Choose a paid plan to continue using AI features.`
+                : `Free Trial ends on ${trialEndsLabel}${trialDaysLeft !== null ? ` (${Math.max(0, trialDaysLeft)} day${trialDaysLeft === 1 ? '' : 's'} left)` : ''}.`}
+            </p>
+          </div>
+        ) : null}
         <Card className="app-surface border border-[#e8eaef] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>Current Plan</CardTitle>
                 <CardDescription>
-                  {loadingSummary
-                    ? 'Loading plan details...'
-                    : `You are currently on the ${currentPlan?.name ?? 'Starter'} plan`}
+                  {loadingSummary ? 'Loading plan details...' : `You are currently on the ${currentPlan?.planName ?? 'Free Trial'} plan`}
                 </CardDescription>
               </div>
               <Badge className="gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-3 py-1.5 text-[#4F46E5] hover:bg-violet-50">
                 <Star className="h-3.5 w-3.5 fill-current" />
-                <span className="text-sm font-semibold">{currentPlan?.name ?? 'Starter'}</span>
+                <span className="text-sm font-semibold">{currentPlan?.planName ?? 'Free Trial'}</span>
               </Badge>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-6 md:grid-cols-2 md:divide-x md:divide-slate-200">
-              <div className="md:pr-6">
-                <div className="flex items-start gap-3">
-                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-violet-50 text-[#4F46E5]">
-                    <FileText className="h-5 w-5" />
-                  </span>
-                  <div className="flex-1 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="font-medium">Documents</span>
-                      <span className="text-muted-foreground">
-                        {summary
-                          ? `${summary.documents_used} / ${summary.documents_limit < 0 ? 'Unlimited' : summary.documents_limit}`
-                          : '—'}
-                      </span>
-                    </div>
-                    <Progress
-                      value={
-                        summary && summary.documents_limit > 0
-                          ? (summary.documents_used / summary.documents_limit) * 100
-                          : 0
-                      }
-                      className="h-2"
-                    />
-                    <p className="text-xs text-muted-foreground">
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+              <div className="flex items-start gap-3">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-violet-50 text-[#4F46E5]">
+                  <FolderKanban className="h-5 w-5" />
+                </span>
+                <div className="flex-1 space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="font-medium">Active Projects</span>
+                    <span className="text-muted-foreground">
                       {summary
-                        ? summary.documents_limit < 0
-                          ? 'Unlimited documents available on this plan'
-                          : `${Math.max(0, summary.documents_limit - summary.documents_used)} documents remaining this month`
+                        ? `${summary.active_projects_used} / ${summary.active_projects_limit === null ? 'Unlimited' : summary.active_projects_limit}`
                         : '—'}
-                    </p>
+                    </span>
                   </div>
+                  <Progress
+                    value={
+                      summary && typeof summary.active_projects_limit === 'number' && summary.active_projects_limit > 0
+                        ? (summary.active_projects_used / summary.active_projects_limit) * 100
+                        : 0
+                    }
+                    className="h-2"
+                  />
+                  {summary && warn(summary.active_projects_used, summary.active_projects_limit) ? (
+                    <p className="text-xs font-medium text-amber-700">
+                      You’re at 80%+ of your active project limit.
+                    </p>
+                  ) : null}
                 </div>
               </div>
-              <div className="md:pl-6">
-                <div className="flex items-start gap-3">
-                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-violet-50 text-[#4F46E5]">
-                    <Sparkles className="h-5 w-5" />
-                  </span>
-                  <div className="flex-1 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="font-medium">AI Generations</span>
-                      <span className="text-muted-foreground">
-                        {summary
-                          ? `${summary.ai_generations_used} / ${summary.ai_generations_limit < 0 ? 'Unlimited' : summary.ai_generations_limit}`
-                          : '—'}
-                      </span>
-                    </div>
-                    <Progress
-                      value={
-                        summary && summary.ai_generations_limit > 0
-                          ? (summary.ai_generations_used / summary.ai_generations_limit) * 100
-                          : 0
-                      }
-                      className="h-2"
-                    />
-                    <p className="text-xs text-muted-foreground">
+
+              <div className="flex items-start gap-3">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-violet-50 text-[#4F46E5]">
+                  <Sparkles className="h-5 w-5" />
+                </span>
+                <div className="flex-1 space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="font-medium">AI Generations</span>
+                    <span className="text-muted-foreground">
                       {summary
-                        ? summary.ai_generations_limit < 0
-                          ? 'Unlimited AI generations available on this plan'
-                          : `${Math.max(0, summary.ai_generations_limit - summary.ai_generations_used)} AI generations remaining`
+                        ? `${summary.ai_generations_used} / ${summary.ai_generations_limit === null ? 'High-volume' : summary.ai_generations_limit}`
                         : '—'}
-                    </p>
+                    </span>
                   </div>
+                  <Progress
+                    value={
+                      summary && typeof summary.ai_generations_limit === 'number' && summary.ai_generations_limit > 0
+                        ? (summary.ai_generations_used / summary.ai_generations_limit) * 100
+                        : 0
+                    }
+                    className="h-2"
+                  />
+                  {summary && warn(summary.ai_generations_used, summary.ai_generations_limit) ? (
+                    <p className="text-xs font-medium text-amber-700">
+                      You’re at 80%+ of your monthly AI generation limit.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-violet-50 text-[#4F46E5]">
+                  <FileDown className="h-5 w-5" />
+                </span>
+                <div className="flex-1 space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="font-medium">Clash/Gap Reports</span>
+                    <span className="text-muted-foreground">
+                      {summary
+                        ? `${summary.clash_gap_reports_used} / ${summary.clash_gap_reports_limit === null ? '—' : summary.clash_gap_reports_limit}`
+                        : '—'}
+                    </span>
+                  </div>
+                  <Progress
+                    value={
+                      summary && typeof summary.clash_gap_reports_limit === 'number' && summary.clash_gap_reports_limit > 0
+                        ? (summary.clash_gap_reports_used / summary.clash_gap_reports_limit) * 100
+                        : 0
+                    }
+                    className="h-2"
+                  />
+                  {summary && warn(summary.clash_gap_reports_used, summary.clash_gap_reports_limit) ? (
+                    <p className="text-xs font-medium text-amber-700">
+                      You’re at 80%+ of your monthly Clash/Gap report limit.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-violet-50 text-[#4F46E5]">
+                  <HardDrive className="h-5 w-5" />
+                </span>
+                <div className="flex-1 space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="font-medium">Storage</span>
+                    <span className="text-muted-foreground">
+                      {summary ? `${summary.storage_used_gb.toFixed(2)} / ${summary.storage_limit_gb} GB` : '—'}
+                    </span>
+                  </div>
+                  <Progress
+                    value={summary ? (summary.storage_used_gb / summary.storage_limit_gb) * 100 : 0}
+                    className="h-2"
+                  />
+                  {summary && summary.storage_used_gb / summary.storage_limit_gb >= 0.8 ? (
+                    <p className="text-xs font-medium text-amber-700">
+                      You’re at 80%+ of your storage limit.
+                    </p>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -468,26 +472,26 @@ export default function BillingPage() {
         <div>
           <h2 className="mb-4 text-lg font-bold tracking-tight text-black">Available Plans</h2>
           <div className="grid gap-6 md:grid-cols-3">
-            {BILLING_PLANS.map((plan) => {
-              const isCurrentPlan = plan.tier === summary?.tier
-              const TierIcon = plan.tier === 'enterprise' ? null : TIER_ICONS[plan.tier]
-              const isBuilder = plan.tier === 'professional'
-              const showBuilderBadge = isBuilder
-              const builderBadgeLabel =
-                summary?.tier === 'professional' ? 'CURRENT PLAN' : 'MOST POPULAR'
+            {BILLING_PLANS.filter((p) => p.planId !== 'plan-free-trial').map((plan) => {
+              const tier = tierForPlan(plan)
+              const isCurrentPlan = tier === summary?.tier
+              const TierIcon = TIER_ICONS[tier]
+              const isMostPopular = plan.highlight === 'most_popular'
+              const showPopularBadge = isMostPopular
+              const popularBadgeLabel = isCurrentPlan ? 'CURRENT PLAN' : 'MOST POPULAR'
 
               return (
                 <Card
-                  key={plan.id}
+                  key={plan.planId}
                   className={cn(
                     'relative flex flex-col overflow-visible rounded-2xl border bg-white pb-6 pt-10 shadow-[0_1px_2px_rgba(15,23,42,0.06)]',
-                    isBuilder ? 'border-2 border-[#4F46E5]' : 'border border-[#e5e7eb]'
+                    isMostPopular ? 'border-2 border-[#4F46E5]' : 'border border-[#e5e7eb]'
                   )}
                 >
-                  {showBuilderBadge ? (
+                  {showPopularBadge ? (
                     <div className="pointer-events-none absolute -top-3 left-1/2 z-10 -translate-x-1/2">
                       <span className="whitespace-nowrap rounded-full bg-[#4F46E5] px-4 py-1 text-[11px] font-semibold uppercase tracking-wider text-white">
-                        {builderBadgeLabel}
+                        {popularBadgeLabel}
                       </span>
                     </div>
                   ) : null}
@@ -495,61 +499,57 @@ export default function BillingPage() {
                   <div
                     className={cn(
                       'border-b border-[#ebeef2] px-6 pb-6 text-left',
-                      showBuilderBadge ? 'pt-1' : 'pt-2'
+                      showPopularBadge ? 'pt-1' : 'pt-2'
                     )}
                   >
-                    {plan.tier === 'enterprise' ? (
-                      <div className="relative grid h-14 w-14 shrink-0 place-items-center rounded-full bg-orange-50 text-[#F97316]">
-                        <Shield className="h-8 w-8" aria-hidden />
-                        <Star
-                          className="absolute bottom-1 right-1 h-4 w-4 fill-orange-400 text-orange-500"
-                          aria-hidden
-                        />
-                      </div>
-                    ) : (
-                      <div
-                        className={cn(
-                          'grid h-14 w-14 shrink-0 place-items-center rounded-full',
-                          plan.tier === 'free' && 'bg-emerald-50 text-[#22C55E]',
-                          plan.tier === 'professional' && 'bg-violet-50 text-[#4F46E5]'
-                        )}
-                      >
-                        {TierIcon ? <TierIcon className="h-8 w-8" aria-hidden /> : null}
-                      </div>
-                    )}
+                    <div
+                      className={cn(
+                        'grid h-14 w-14 shrink-0 place-items-center rounded-full',
+                        isMostPopular ? 'bg-violet-50 text-[#4F46E5]' : 'bg-slate-50 text-slate-700',
+                      )}
+                    >
+                      {TierIcon ? <TierIcon className="h-8 w-8" aria-hidden /> : null}
+                    </div>
 
-                    <h3 className="mt-4 text-lg font-bold text-black">{plan.name}</h3>
+                    <h3 className="mt-4 text-lg font-bold text-black">{plan.planName}</h3>
                     <div className="mt-2 flex flex-wrap items-baseline gap-x-1.5 gap-y-0">
                       <span className="text-3xl font-bold text-black">${plan.price}</span>
-                      {plan.price === 0 ? (
-                        <span className="text-sm font-medium text-blue-600">forever</span>
-                      ) : (
-                        <span className="text-sm font-medium text-blue-600">/month</span>
-                      )}
+                      <span className="text-sm font-medium text-blue-600">/month</span>
                     </div>
-                    <p className="mt-2 max-w-none text-sm leading-snug text-[#6B7280]">{plan.tagline}</p>
+                    <p className="mt-2 max-w-none text-sm leading-snug text-[#6B7280]">
+                      All plans include the same AI intelligence and core platform features. Upgrade only when your workload grows.
+                    </p>
                   </div>
 
                   <CardContent className="flex flex-1 flex-col px-6 pt-6 pb-2">
                     <ul className="flex w-full flex-col gap-3">
-                      {plan.features.map((feature, index) => (
-                        <li key={index} className="flex items-start gap-2.5 text-left">
-                          <Check className="mt-0.5 h-[18px] w-[18px] shrink-0 text-[#22C55E]" strokeWidth={2.5} />
-                          <span className="text-sm leading-snug text-[#374151]">{feature}</span>
-                        </li>
-                      ))}
+                      <li className="flex items-start gap-2.5 text-left">
+                        <Check className="mt-0.5 h-[18px] w-[18px] shrink-0 text-[#22C55E]" strokeWidth={2.5} />
+                        <span className="text-sm leading-snug text-[#374151]">
+                          Active projects: {plan.maxActiveProjects === null ? 'Unlimited' : plan.maxActiveProjects}
+                        </span>
+                      </li>
+                      <li className="flex items-start gap-2.5 text-left">
+                        <Check className="mt-0.5 h-[18px] w-[18px] shrink-0 text-[#22C55E]" strokeWidth={2.5} />
+                        <span className="text-sm leading-snug text-[#374151]">
+                          AI generations/month: {plan.maxAIGenerationsPerMonth === null ? 'High-volume (fair use)' : plan.maxAIGenerationsPerMonth}
+                        </span>
+                      </li>
+                      <li className="flex items-start gap-2.5 text-left">
+                        <Check className="mt-0.5 h-[18px] w-[18px] shrink-0 text-[#22C55E]" strokeWidth={2.5} />
+                        <span className="text-sm leading-snug text-[#374151]">
+                          Clash/Gap reports/month: {plan.maxClashGapReportsPerMonth ?? '—'}
+                        </span>
+                      </li>
+                      <li className="flex items-start gap-2.5 text-left">
+                        <Check className="mt-0.5 h-[18px] w-[18px] shrink-0 text-[#22C55E]" strokeWidth={2.5} />
+                        <span className="text-sm leading-snug text-[#374151]">Storage: {plan.maxStorageGB} GB</span>
+                      </li>
                     </ul>
                   </CardContent>
 
                   <CardFooter className="mt-auto flex w-full flex-col items-stretch gap-2 border-0 px-6 pb-0 pt-4">
                     {renderPlanFooter(plan, isCurrentPlan)}
-                    {isBuilder &&
-                    summary?.tier !== 'professional' &&
-                    plan.promoFootnote ? (
-                      <p className="text-center text-xs font-medium leading-tight text-blue-600">
-                        {plan.promoFootnote}
-                      </p>
-                    ) : null}
                   </CardFooter>
                 </Card>
               )
@@ -557,7 +557,6 @@ export default function BillingPage() {
           </div>
         </div>
 
-        {/* Payment Method + Billing History removed per request */}
       </div>
     </div>
   )

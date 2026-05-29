@@ -84,7 +84,6 @@ export default function ProjectDetailPage({
       projectId: string
       type: 'rfi' | 'submittal' | 'change_order'
       title: string
-      /** Canonical lifecycle status (per `lib/status.ts`). */
       status: string
       updatedAt: string
       dueDate?: string
@@ -155,8 +154,6 @@ export default function ProjectDetailPage({
             projectId: d.project_id,
             type: d.doc_type,
             title: d.title,
-            // Read canonical status; fall back to legacy-derived value while
-            // Phase 1 dual-write is still rolling out.
             status:
               typeof d.status === 'string' && d.status.length
                 ? d.status

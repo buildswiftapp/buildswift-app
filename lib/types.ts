@@ -1,4 +1,4 @@
-export type SubscriptionTier = 'free' | 'professional' | 'enterprise'
+export type SubscriptionTier = 'trial' | 'starter' | 'professional' | 'business'
 export type DocumentType = 'rfi' | 'submittal' | 'change_order'
 export type DocumentStatus = 'draft' | 'pending_review' | 'approved' | 'rejected' | 'revision_requested'
 export type ReviewStatus = 'pending' | 'approved' | 'rejected' | 'revision_requested'
@@ -30,7 +30,6 @@ export interface Project {
   name: string
   description: string
   companyId: string
-  /** True when the project is archived on the server (API status archived). */
   isArchived?: boolean
   status: 'active' | 'completed' | 'on_hold'
   address?: string

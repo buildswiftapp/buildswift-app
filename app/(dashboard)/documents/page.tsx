@@ -85,9 +85,7 @@ function DocumentsContent() {
       doc_type: 'rfi' | 'submittal' | 'change_order'
       title: string
       description: string
-      /** Canonical lifecycle status (per `lib/status.ts`). */
       status: string
-      /** Legacy: kept for back-compat fallback during Phase 1 dual-write. */
       internal_status: string
       external_status: string
       current_version_no: number
@@ -121,7 +119,6 @@ function DocumentsContent() {
         setProjects(projectRes.projects)
         setDocuments(documentRes.documents)
       } catch {
-        // Keep UI fallback behavior.
       } finally {
         setIsLoadingDocuments(false)
       }
@@ -138,10 +135,6 @@ function DocumentsContent() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [documentToDelete, setDocumentToDelete] = useState<{ id: string; title: string } | null>(null)
 
-  /**
-   * Resolve the canonical status of a row, falling back to a legacy-derived
-   * value for documents whose `status` column hasn't been backfilled yet.
-   */
   const resolveCanonicalStatus = (doc: {
     doc_type: 'rfi' | 'submittal' | 'change_order'
     status?: string
@@ -157,7 +150,6 @@ function DocumentsContent() {
     )
   }
 
-  /** Bucket the canonical status into a coarse filter group used by the quick chips. */
   const statusBucket = (canonical: string): 'draft' | 'pending_review' | 'approved' | 'rejected' | 'closed' | 'other' => {
     if (canonical === 'draft') return 'draft'
     if (canonical === 'pending' || canonical === 'pending_review' || canonical === 'under_review') {
@@ -257,7 +249,6 @@ function DocumentsContent() {
       setDocuments((prev) => prev.filter((doc) => doc.id !== documentId))
     } catch (error) {
       const message = error instanceof Error ? error.message : ''
-      // If already deleted in another tab/request, keep UI in sync and avoid unhandled rejections.
       if (message.toLowerCase().includes('document not found')) {
         setDocuments((prev) => prev.filter((doc) => doc.id !== documentId))
       } else {

@@ -18,7 +18,6 @@ function pick<T>(seed: number, items: readonly T[]): T {
   return items[seed % items.length]
 }
 
-/** Stub page counts from filename / fake parse */
 export function stubPagesForFilename(name: string): number {
   const base = hashSeed(name.toLowerCase())
   return 4 + (base % 45)
@@ -433,7 +432,7 @@ function templatesFromContext(
           ? 'This entry records the analysis boundary so reviewers know what was excluded from the scan.'
           : 'Confirms the run included all uploaded bundles for basic cross-reference alignment.',
       sources: rows.slice(0, Math.min(2, rows.length)).map((r, i) => ({
-        documentLabel: `${r.filename} (${r.type.replace(/_/g, ' ')})`,
+        documentLabel: `${r.filename} (${(r.type ?? 'unassigned').replace(/_/g, ' ')})`,
         page: stubPagesForFilename(r.filename),
         excerpt:
           i === 0
@@ -621,7 +620,6 @@ function templatesFromContext(
     },
   ]
 
-  // Clean accidental markdown in excerpts
   const clean = (t: Template[]) =>
     t.map((x) => ({
       ...x,
@@ -638,7 +636,6 @@ function templatesFromContext(
   }
 }
 
-/** Deterministic mock issues from uploads + settings (replace with API later). ~23 issues for UI density. */
 export function generateMockIssues(
   rows: DocumentUploadRow[],
   settings: DetectionSettings

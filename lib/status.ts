@@ -1,11 +1,3 @@
-/**
- * Canonical document status vocabulary.
- *
- * Source of truth for the "one status field" rule. Every UI badge, PDF badge,
- * and API status write should go through this module so the vocabulary stays
- * consistent across the app.
- */
-
 export type DocType = 'rfi' | 'submittal' | 'change_order'
 
 export const RFI_STATUSES = ['pending', 'answered', 'closed'] as const
@@ -43,13 +35,6 @@ export const REVIEWER_OUTCOMES_BY_DOC: Record<DocType, ReadonlyArray<ReviewerOut
   change_order: ['approved', 'rejected'],
 }
 
-/**
- * Normalize an incoming reviewer-decision value (which may use legacy
- * `approve`/`reject` aliases) into a canonical `ReviewerOutcome` for the
- * given document type.
- *
- * Returns `null` if the value cannot be coerced for this doc type.
- */
 export function normalizeReviewerOutcome(
   docType: DocType,
   raw: string | null | undefined
@@ -58,7 +43,6 @@ export function normalizeReviewerOutcome(
   const v = raw.toLowerCase()
 
   if (docType === 'rfi') {
-    // Any binary alias collapses to `answered` for RFIs.
     if (v === 'approve' || v === 'approved' || v === 'reject' || v === 'rejected' || v === 'answered') {
       return 'answered'
     }
@@ -82,7 +66,6 @@ export function normalizeReviewerOutcome(
   return null
 }
 
-/** Map a canonical reviewer outcome to the legacy binary `decision` column. */
 export function legacyDecisionForOutcome(outcome: ReviewerOutcome): 'approve' | 'reject' {
   if (outcome === 'rejected' || outcome === 'revise_and_resubmit') return 'reject'
   return 'approve'
@@ -148,8 +131,6 @@ const ALL_STATUSES_BY_DOC: Record<DocType, ReadonlyArray<string>> = {
   submittal: SUBMITTAL_STATUSES,
   change_order: CHANGE_ORDER_STATUSES,
 }
-
-/** Initial status when a document is first created. */
 export function initialStatus(docType: DocType, saveAsDraft: boolean): DocStatus {
   if (docType === 'change_order') {
     return saveAsDraft ? 'draft' : 'under_review'
@@ -158,14 +139,12 @@ export function initialStatus(docType: DocType, saveAsDraft: boolean): DocStatus
   return 'pending_review'
 }
 
-/** Status when the contractor presses "Send for review". */
 export function statusOnSendForReview(docType: DocType): DocStatus {
   if (docType === 'rfi') return 'pending'
   if (docType === 'submittal') return 'pending_review'
   return 'under_review'
 }
 
-/** Status to write when a reviewer submits a decision. Reviewers NEVER produce `closed`. */
 export function statusOnReviewerOutcome(docType: DocType, outcome: ReviewerOutcome): DocStatus {
   if (docType === 'rfi') {
     return 'answered'
@@ -189,28 +168,20 @@ export function statusOnReviewerOutcome(docType: DocType, outcome: ReviewerOutco
   return 'pending_review'
 }
 
-/**
- * Status to write when the contractor manually closes the document.
- * (Per spec, change orders also use `closed`. If a future spec wants `executed`, change here.)
- */
 export function statusOnClose(_docType: DocType): DocStatus {
   return 'closed'
 }
 
-/** A document is "final" when its lifecycle has produced an outcome (decision or closure). */
 export function isFinal(docType: DocType, status: string | null | undefined): boolean {
   return FINAL_STATUSES_BY_DOC[docType].has(String(status ?? ''))
 }
 
-/** A document is "locked" once closed: no further reviewer or system writes are allowed. */
 export function isLocked(_docType: DocType, status: string | null | undefined): boolean {
   return String(status ?? '') === 'closed'
 }
 
-/** The contractor can press "Close" only if the doc isn't already closed. */
 export function canClose(docType: DocType, status: string | null | undefined): boolean {
   if (!isKnownStatus(docType, status)) {
-    // Unknown legacy status from before the migration: still allow close.
     return true
   }
   return !isLocked(docType, status)
@@ -221,7 +192,6 @@ export function isKnownStatus(docType: DocType, status: string | null | undefine
   return ALL_STATUSES_BY_DOC[docType].includes(status)
 }
 
-/** Resolve a UI badge label + tone for the canonical status. */
 export function statusBadge(docType: DocType, status: string | null | undefined): StatusBadge {
   const safe = typeof status === 'string' ? status : ''
   if (docType === 'rfi') {
@@ -237,11 +207,9 @@ export function statusBadge(docType: DocType, status: string | null | undefined)
       return CHANGE_ORDER_BADGES[safe as ChangeOrderStatus]
     }
   }
-  // Unknown / legacy: render the raw value but keep neutral tone.
   return { label: humanizeFallback(safe || 'Draft'), tone: 'neutral' }
 }
 
-/** Uppercase label used inside PDFs (top summary card only). */
 export function pdfStatusLabel(docType: DocType, status: string | null | undefined): string {
   const safe = typeof status === 'string' ? status : ''
   const override = PDF_LABEL_OVERRIDES[safe as DocStatus]
@@ -249,7 +217,6 @@ export function pdfStatusLabel(docType: DocType, status: string | null | undefin
   return statusBadge(docType, safe).label.toUpperCase()
 }
 
-/** Tailwind class fragments for each tone, used across UI. */
 export function statusBadgeClasses(tone: StatusTone): string {
   switch (tone) {
     case 'success':
@@ -266,12 +233,6 @@ export function statusBadgeClasses(tone: StatusTone): string {
   }
 }
 
-/**
- * Backfill a canonical status value from legacy `internal_status` / `external_status` columns
- * (and the latest review-cycle status if available).
- *
- * Used by the SQL backfill migration AND by runtime fallbacks while Phase 1 dual-write is in flight.
- */
 export function backfillFromLegacy(
   docType: DocType,
   internalStatus: string | null | undefined,
@@ -301,7 +262,6 @@ export function backfillFromLegacy(
     if (rejected) return 'rejected'
     return 'pending_review'
   }
-  // change_order
   if (approved) return 'approved'
   if (rejected) return 'rejected'
   if (isDraft) return 'draft'
@@ -309,10 +269,6 @@ export function backfillFromLegacy(
   return 'draft'
 }
 
-/**
- * Normalize an arbitrary stored status string to a known canonical value.
- * Returns null if the value is unknown.
- */
 export function asDocStatus(docType: DocType, raw: string | null | undefined): DocStatus | null {
   return isKnownStatus(docType, raw) ? (raw as DocStatus) : null
 }

@@ -29,7 +29,10 @@ export async function apiFetch<T>(
 
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error(data?.error || `Request failed: ${res.status}`)
+    const err = new Error(data?.error || `Request failed: ${res.status}`)
+    ;(err as any).status = res.status
+    ;(err as any).code = data?.code
+    throw err
   }
   return data as T
 }

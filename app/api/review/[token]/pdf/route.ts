@@ -14,7 +14,6 @@ import { generateReviewPdfBuffer } from '@/lib/server/review-pdf'
 import { isDocumentReviewFinal, isReviewCycleTerminal } from '@/lib/server/review-token-policy'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
-import { joinReasons } from '@/lib/rfi-reasons'
 
 type Params = { params: Promise<{ token: string }> }
 
@@ -32,7 +31,6 @@ async function resolveSignatureImageDataUrl(params: {
   if (!raw) return null
   if (raw.startsWith('data:image/')) return raw
 
-  // If an absolute URL is stored, fetch and embed.
   if (/^https?:\/\//i.test(raw)) {
     try {
       const res = await fetch(raw, { cache: 'no-store' })
@@ -46,7 +44,6 @@ async function resolveSignatureImageDataUrl(params: {
     }
   }
 
-  // Otherwise treat it as a Supabase Storage path.
   const bucket = process.env.REVIEW_SIGNATURES_BUCKET || 'document-attachments'
   try {
     const dl = await params.supabase.storage.from(bucket).download(raw)
@@ -193,7 +190,6 @@ export async function GET(_req: Request, { params }: Params) {
     descriptionHtml = ensureSubmittalFullDescriptionHtml(docForHeader, metadata, projectName)
   }
 
-  // Fetch account branding (same as the main documents PDF route)
   const accountId = (document as Record<string, unknown>).account_id as string | undefined
   const { data: brandingRow } = accountId
     ? await getAccountBranding(privilegedDb, accountId)
@@ -244,7 +240,6 @@ export async function GET(_req: Request, { params }: Params) {
     typeof metadata.submittedBy === 'string' && metadata.submittedBy.trim() ? metadata.submittedBy.trim() : null
   const submittedBy = submittedByFromMeta || documentAuthorDisplay || null
 
-  // Reviewer-facing PDF should show ONLY this reviewer's activity (not submitter or other reviewers).
   const viewerRequestId = typeof requestRow.id === 'string' ? requestRow.id : String(requestRow.id ?? '')
   const viewerRequests = (cycleRequests ?? []).filter((r) => String((r as any).id ?? '') === viewerRequestId)
   const requestsForLog = viewerRequests.length ? viewerRequests : (cycleRequests ?? [])
@@ -262,9 +257,7 @@ export async function GET(_req: Request, { params }: Params) {
           : 'Reviewer',
       action:
         row.decision === 'approve'
-          ? document.doc_type === 'rfi'
-            ? 'Answered'
-            : 'Approved'
+          ? 'Approved'
           : row.decision === 'reject'
             ? 'Rejected'
             : 'Pending review',
@@ -515,14 +508,6 @@ export async function GET(_req: Request, { params }: Params) {
           (typeof metadata.scopeImpact === 'string' && metadata.scopeImpact) ||
           null,
         reasonForRequest:
-          (Array.isArray(metadata.reasonsForRequest) &&
-            metadata.reasonsForRequest.length > 0 &&
-            joinReasons(
-              metadata.reasonsForRequest.filter((v): v is string => typeof v === 'string'),
-              typeof metadata.reasonForRequestOther === 'string'
-                ? metadata.reasonForRequestOther
-                : ''
-            )) ||
           (typeof metadata.reasonForRequest === 'string' && metadata.reasonForRequest) ||
           (typeof metadata.reason === 'string' && metadata.reason) ||
           null,

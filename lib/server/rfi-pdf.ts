@@ -10,13 +10,11 @@ import {
   type RfiPdfViewModel,
 } from '@/lib/server/rfi-pdf-document'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 
 export type RfiPdfInput = {
   title: string
   projectName: string
   descriptionHtml: string
-  // Metadata fields
   rfiNo?: string | null
   projectNo?: string | null
   date?: string | null
@@ -45,7 +43,6 @@ export type RfiPdfInput = {
     fileType?: string | null
     notes?: string | null
   }> | null
-  // Approval
   approvalRows?: Array<{
     title: string
     reviewerEmail?: string | null
@@ -58,8 +55,6 @@ export type RfiPdfInput = {
     date: string
     notes: string
   }>
-  // Branding
-  /** Account logo data URI; falls back to default BuildSwift asset when absent */
   brandingLogoDataUri?: string | null
   brandingCompanyName?: string | null
   contactAddress?: string | null
@@ -67,8 +62,6 @@ export type RfiPdfInput = {
   contactEmail?: string | null
   reviewStatus?: string
 }
-
-// ── Logo resolution ────────────────────────────────────────────────────────────
 
 const DEFAULT_LOGO_PATHS = [
   process.env.REVIEW_PDF_LOGO_PATH,
@@ -85,14 +78,11 @@ function resolveLogoDataUri(): string {
       cachedLogoDataUri = `data:image/png;base64,${bytes.toString('base64')}`
       return cachedLogoDataUri
     } catch {
-      // try next
     }
   }
   cachedLogoDataUri = ''
   return ''
 }
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmtLongDate(raw: string | null | undefined): string {
   if (!raw) return '—'
@@ -120,7 +110,6 @@ function isBlankRfiResponseField(v: string | null | undefined): boolean {
 
 function pickSourceApprovalRowForResponse(rows: RfiApprovalRow[]): RfiApprovalRow | null {
   if (!rows.length) return null
-  // Response box should reflect an actual reviewer response, not "pending review".
   const decided = rows.filter((r) => r.reviewDecision === 'approved' || r.reviewDecision === 'rejected')
   return decided[decided.length - 1] ?? null
 }
@@ -198,8 +187,6 @@ async function composeRfiWithAi(input: {
   }
 }
 
-// ── Main function ──────────────────────────────────────────────────────────────
-
 export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> {
   const companyName = input.brandingCompanyName?.trim() || 'BuildSwift Construction'
 
@@ -252,8 +239,6 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
     notes: a.notes?.trim() || NA,
   }))
 
-  // ── Approval rows (reviewers only; name prefers signature / non-email title) ─
-
   function looksLikeEmail(value: string): boolean {
     const t = (value || '').trim()
     return Boolean(t) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t)
@@ -295,12 +280,10 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
   function isReviewActivityRole(role: string | null | undefined): boolean {
     const t = (role ?? '').trim().toLowerCase()
     if (!t) return true
-    // Exclude obvious submitter rows; everything else counts as reviewer activity.
     if (t.includes('contractor') || t.includes('submitter')) return false
     return true
   }
 
-  // Include reviewer activity rows even when role is "Engineer", "Owner", etc.
   const approvalRows = approvalRowsMapped.filter((row) => isReviewActivityRole(row.role))
 
   const rawReviewerRows = (input.approvalRows ?? []).filter((r) => isReviewActivityRole(r.role))
@@ -316,7 +299,6 @@ export async function generateRfiPdfBuffer(input: RfiPdfInput): Promise<Buffer> 
     return '—'
   })()
 
-  // ── Footer ──────────────────────────────────────────────────────────────────
 
   const rfiNum =
     input.rfiNo?.trim() ||

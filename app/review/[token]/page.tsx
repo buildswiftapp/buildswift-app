@@ -73,7 +73,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
   const [submitting, setSubmitting] = useState(false)
   const [submitMessage, setSubmitMessage] = useState<string | null>(null)
   const [pdfLoaded, setPdfLoaded] = useState(false)
-  /** Local copy of the outcome the reviewer just submitted (for the post-submit banner). */
   const [submittedOutcome, setSubmittedOutcome] = useState<ReviewerOutcome | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -82,10 +81,8 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
 
   const { token } = use(params)
   const pdfUrl = `/api/review/${encodeURIComponent(token)}/pdf`
-  // Suppress the browser's built-in PDF toolbar and thumbnail panel
   const pdfEmbedUrl = `${pdfUrl}#toolbar=0&navpanes=0&scrollbar=0`
 
-  // ── Load review data ────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
     async function load() {
@@ -109,7 +106,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
     return () => { cancelled = true }
   }, [token])
 
-  // ── Signature pad setup ─────────────────────────────────────────────────────
   useEffect(() => {
     if (loading || error || !payload) return
 
@@ -118,11 +114,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
     let ro: ResizeObserver | null = null
     let retryTimer: ReturnType<typeof setTimeout> | null = null
 
-    // Sync the canvas *drawing buffer* to its CSS pixel dimensions.
-    // We intentionally avoid DPR scaling here because SignaturePad v5
-    // measures pointer positions in CSS pixels (clientX/clientY minus
-    // getBoundingClientRect), so the buffer must be 1:1 with CSS pixels;
-    // any scaling in the 2D context would offset every stroke.
     const syncSize = (canvas: HTMLCanvasElement): boolean => {
       const w = canvas.offsetWidth
       const h = canvas.offsetHeight
@@ -142,7 +133,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
       const canvas = canvasRef.current
       if (!canvas) return
 
-      // Give the flex layout a chance to resolve before measuring.
       if (!canvas.offsetWidth || !canvas.offsetHeight) {
         retryTimer = setTimeout(init, 50)
         return
@@ -172,7 +162,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
       ro = new ResizeObserver(onResize)
       ro.observe(canvas)
 
-      // Override teardown to capture the right closures.
       teardownRef.current = () => {
         pad?.removeEventListener('endStroke', onEndStroke)
         window.removeEventListener('resize', onResize)
@@ -182,7 +171,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
       }
     }
 
-    // Small initial delay so the two-column flex layout has fully painted.
     retryTimer = setTimeout(init, 60)
 
     return () => {
@@ -205,12 +193,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
     setSignatureUrl(null)
   }
 
-  /**
-   * Submit a canonical reviewer outcome. The validator on the server now
-   * accepts the full `ReviewerOutcome` union; for back-compat the page also
-   * stores a coarse approve/reject in the payload's reviewStatus so existing
-   * banner branches keep functioning.
-   */
   async function submitDecision(outcome: ReviewerOutcome) {
     if (!canSubmitActions) return
     try {
@@ -252,7 +234,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
     }
   }
 
-  // ── Loading / error states ──────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50">
@@ -280,11 +261,9 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
   const alreadyDecided = payload.reviewStatus.state === 'submitted'
   const isExpired = payload.reviewStatus.state === 'expired'
 
-  // ── Full layout ─────────────────────────────────────────────────────────────
   return (
     <div className="flex h-screen flex-col overflow-hidden">
 
-      {/* ── FULL-WIDTH HEADER ── */}
       <div className="shrink-0 bg-[#1a1a2e] px-8 py-4 flex items-center justify-between gap-6">
         <div className="min-w-0">
           <span className="inline-block rounded-full border border-slate-600 px-3 py-0.5 text-xs font-semibold uppercase tracking-widest text-slate-300">
@@ -306,12 +285,9 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
         </a>
       </div>
 
-      {/* ── BODY: 50/50 split ── */}
       <div className="flex flex-1 overflow-hidden bg-slate-100">
 
-        {/* ── LEFT: PDF pane (white background) ── */}
         <div className="relative flex w-1/2 shrink-0 flex-col border-r border-slate-200 bg-white">
-          {/* PDF iframe — padded so the document floats on the white surround */}
           <div className="relative flex-1 overflow-hidden px-6 py-5">
             {!pdfLoaded && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white">
@@ -328,12 +304,10 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
           </div>
         </div>
 
-        {/* ── RIGHT: Review pane ── */}
         <div className="flex w-1/2 flex-col overflow-y-auto bg-slate-50">
 
         <div className="flex flex-1 flex-col gap-6 p-6">
 
-          {/* Status banner — uses the canonical reviewer outcome label when available. */}
           {alreadyDecided && (() => {
             const isApprove = payload.reviewStatus.decision === 'approve'
             const isRfi = payload.documentContent.type === 'rfi'
@@ -378,7 +352,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
             </div>
           )}
 
-          {/* Attachments */}
           {payload.attachments && payload.attachments.length > 0 && (
             <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="border-b border-slate-100 px-4 py-3">
@@ -413,7 +386,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
             </div>
           )}
 
-          {/* Review form */}
           <div className="rounded-2xl border border-slate-200 bg-white shadow-md">
             <div className="border-b border-slate-100 px-7 py-6">
               <h2 className="text-xl font-bold text-slate-900">Submit Review</h2>
@@ -426,7 +398,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
 
             <div className="px-7 py-7 space-y-7">
 
-              {/* Notes */}
               <div>
                 <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
                   Reviewer Notes
@@ -441,7 +412,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
                 />
               </div>
 
-              {/* Email (readonly) */}
               <div>
                 <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
                   Reviewer Email
@@ -453,7 +423,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
                 />
               </div>
 
-              {/* Typed name */}
               <div>
                 <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-slate-400">
                   Full Name <span className="text-red-500">*</span>
@@ -467,7 +436,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
                 />
               </div>
 
-              {/* Drawn signature */}
               <div>
                 <div className="mb-2 flex items-center justify-between">
                   <label className="text-xs font-bold uppercase tracking-widest text-slate-400">
@@ -490,13 +458,6 @@ export default function ReviewTokenPage({ params }: { params: Promise<{ token: s
                 <p className="mt-2 text-xs text-slate-400">Draw your signature using your mouse or touchscreen.</p>
               </div>
 
-              {/*
-                Per-doc-type decision buttons:
-                  • RFI         → single "Submit answer" (canonical outcome `answered`)
-                  • Submittal   → 4 buttons (Approved / Approved as Noted /
-                                  Revise & Resubmit / Rejected)
-                  • Change order → binary (Approved / Rejected)
-              */}
               {payload.documentContent.type === 'rfi' ? (
                 <div className="grid grid-cols-1 gap-4">
                   <button

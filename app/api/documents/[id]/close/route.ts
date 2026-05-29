@@ -18,13 +18,6 @@ import { canClose, statusOnClose, type DocType } from '@/lib/status'
 
 type Params = { params: Promise<{ id: string }> }
 
-/**
- * POST /api/documents/:id/close
- *
- * The contractor (logged-in user) explicitly closes a document. This is the
- * ONLY path that writes `closed` to `documents.status`. Reviewers and the
- * system never produce that value.
- */
 export async function POST(req: Request, { params }: Params) {
   const auth = await getAuthContext(req)
   if (!auth) return unauthorized()

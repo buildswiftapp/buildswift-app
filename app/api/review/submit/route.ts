@@ -147,7 +147,6 @@ export async function POST(req: Request) {
     signatureImageUrl = uploaded.url
   }
 
-  // Normalize the canonical outcome from the validator union.
   const docTypeForOutcome = (docForGuard?.doc_type ?? 'submittal') as DocType
   const canonicalOutcome = normalizeReviewerOutcome(docTypeForOutcome, payload.data.decision)
   if (!canonicalOutcome) {
@@ -160,9 +159,7 @@ export async function POST(req: Request) {
   const { data: updatedRequest, error: updateError } = await privilegedDb
     .from('review_requests')
     .update({
-      // Legacy binary column (kept for back-compat / cycle rollup).
       decision: mappedDecision,
-      // Canonical reviewer outcome.
       outcome: canonicalOutcome,
       decision_notes: payload.data.notes ?? null,
       full_name: payload.data.signature_name,
@@ -212,34 +209,24 @@ export async function POST(req: Request) {
     .eq('id', requestRow.review_cycle_id)
   if (cycleUpdateError) return serverError(cycleUpdateError.message)
 
-  // Canonical document status update: based on this reviewer's outcome.
-  // Reviewers NEVER write `closed`. Status updates apply on every reviewer
-  // submission (so the doc reflects the latest reviewer's outcome immediately).
   const previousDocStatus = (docInfo as { status?: string | null }).status ?? null
   const canonicalDocStatus = statusOnReviewerOutcome(
     docInfo.doc_type as DocType,
     canonicalOutcome
   )
-
-  // Legacy dual-write: only flip internal/external once the cycle has settled
-  // (preserves prior behaviour for older readers during Phase 1).
   if (cycleStatus !== 'pending') {
     const internalStatus = cycleStatus === 'approved' ? 'approved' : 'rejected'
     const externalStatus = cycleStatus === 'approved' ? 'approved' : 'rejected'
     const { error: docError } = await privilegedDb
       .from(DOCUMENT_TABLE_BY_TYPE[docInfo.doc_type as DocumentType])
       .update({
-        // Canonical (single source of truth).
         status: canonicalDocStatus,
-        // Legacy dual-write.
         internal_status: internalStatus,
         external_status: externalStatus,
       })
       .eq('id', cycleData.document_id)
     if (docError) return serverError(docError.message)
   } else {
-    // Cycle still pending overall, but persist canonical status anyway so the
-    // UI reflects the latest reviewer's outcome.
     const { error: docError } = await privilegedDb
       .from(DOCUMENT_TABLE_BY_TYPE[docInfo.doc_type as DocumentType])
       .update({ status: canonicalDocStatus })

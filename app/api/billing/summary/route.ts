@@ -2,9 +2,10 @@ import { badRequest, ok, serverError, unauthorized } from '@/lib/server/api-resp
 import { normalizeTier, planForTier } from '@/lib/billing-plans'
 import { getAuthContext } from '@/lib/server/auth'
 import {
+  countActiveProjects,
   getAccountBillingState,
   getMonthlyAiGenerationCount,
-  getMonthlyDocumentUsage,
+  getMonthlyClashGapReportCount,
 } from '@/lib/server/billing'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
@@ -26,27 +27,38 @@ export async function GET(req: Request) {
   const tier = normalizeTier(account.subscriptionTier)
   const plan = planForTier(tier)
 
-  let documentsUsed = 0
-  try {
-    documentsUsed = await getMonthlyDocumentUsage(supabase as any, auth.accountId, undefined, {
-      fallbackToDocumentCount: true,
-    })
-  } catch {
-    documentsUsed = 0
-  }
+  const usageKey =
+    account.currentPeriodStart && !Number.isNaN(Date.parse(account.currentPeriodStart))
+      ? new Date(account.currentPeriodStart).toISOString().slice(0, 10)
+      : undefined
+  const aiGenerationsUsed = await getMonthlyAiGenerationCount(
+    supabase as any,
+    auth.accountId,
+    new Date(),
+    usageKey
+  )
+  const clashGapReportsUsed = await getMonthlyClashGapReportCount(supabase as any, auth.accountId, new Date(), usageKey)
+  const activeProjects = await countActiveProjects(supabase as any, auth.accountId)
 
-  const aiGenerationsUsed = await getMonthlyAiGenerationCount(supabase as any, auth.accountId)
+  const storageUsedGB = account.storageUsedBytes / (1024 * 1024 * 1024)
 
   return ok({
     tier,
-    plan_name: plan.name,
+    plan_name: plan.planName,
     billing_status: account.billingStatus,
     current_period_end: account.currentPeriodEnd,
     cancel_at: account.cancelAt,
-    documents_used: documentsUsed,
-    documents_limit: plan.documentsLimit,
     ai_generations_used: aiGenerationsUsed,
-    ai_generations_limit: plan.aiGenerationsLimit,
+    ai_generations_limit: plan.maxAIGenerationsPerMonth,
+    clash_gap_reports_used: clashGapReportsUsed,
+    clash_gap_reports_limit: plan.maxClashGapReportsPerMonth,
+    active_projects_used: activeProjects,
+    active_projects_limit: plan.maxActiveProjects,
+    storage_used_gb: storageUsedGB,
+    storage_limit_gb: plan.maxStorageGB,
+    trial_start_date: account.trialStartDate,
+    trial_end_date: account.trialEndDate,
+    trial_expired: account.trialExpired,
   })
 }
 
