@@ -1,14 +1,13 @@
 export const DOCUMENT_LABEL_TYPES = [
   'plans',
   'specs',
-  'plans_specs',
   'general_notes',
   'addenda',
   'rfis',
   'submittals',
 ] as const
 
-export const CLASH_GAP_UPLOAD_TYPES = ['plans', 'specs', 'plans_specs', 'addenda'] as const
+export const CLASH_GAP_UPLOAD_TYPES = ['plans', 'specs', 'addenda'] as const
 
 export type DocumentLabelType = (typeof DOCUMENT_LABEL_TYPES)[number]
 

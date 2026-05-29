@@ -297,31 +297,32 @@ export function DetectionResultsWorkspace(props: {
         </Button>
       ) : null}
 
+      <div className="rounded-2xl border border-[#e2e8f0] bg-white p-5 shadow-sm">
+        <h3 className="text-base font-semibold text-[#0f172a]">Issues found</h3>
+        <div className="mt-3 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
+          <SummaryStatCard
+            variant="conflict"
+            count={conflicts}
+            label="Conflicts"
+            barRatio={barRatio(conflicts)}
+          />
+          <SummaryStatCard
+            variant="missing"
+            count={missing}
+            label="Missing info"
+            barRatio={barRatio(missing)}
+          />
+          <SummaryStatCard
+            variant="verified"
+            count={verified}
+            label="Verified"
+            barRatio={barRatio(verified)}
+          />
+        </div>
+      </div>
+
       <div className="flex flex-col gap-5 xl:grid xl:grid-cols-[minmax(0,0.93fr)_minmax(0,1.035fr)_minmax(0,1.035fr)] xl:items-start xl:gap-6">
         <div className="flex min-h-0 min-w-0 flex-col gap-5 xl:h-[78vh] xl:max-h-[820px] xl:min-h-[560px] xl:overflow-hidden xl:rounded-2xl xl:border xl:border-[#e2e8f0] xl:bg-white xl:p-6 xl:shadow-sm">
-          <h3 className="text-base font-semibold text-[#0f172a]">Issues found</h3>
-
-          <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
-            <SummaryStatCard
-              variant="conflict"
-              count={conflicts}
-              label="Conflicts"
-              barRatio={barRatio(conflicts)}
-            />
-            <SummaryStatCard
-              variant="missing"
-              count={missing}
-              label="Missing info"
-              barRatio={barRatio(missing)}
-            />
-            <SummaryStatCard
-              variant="verified"
-              count={verified}
-              label="Verified"
-              barRatio={barRatio(verified)}
-            />
-          </div>
-
           <div className="flex gap-2">
             <div className="relative min-w-0 flex-1">
               <Search

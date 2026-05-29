@@ -24,7 +24,7 @@ export function detectSheetId(text: string): string | null {
 }
 
 function ocrModel(): string {
-  return process.env.OPENAI_OCR_MODEL || process.env.OPENAI_MODEL || 'gpt-4o'
+  return process.env.OPENAI_OCR_MODEL || 'gpt-4o-mini'
 }
 
 function ocrConcurrency(): number {

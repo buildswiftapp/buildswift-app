@@ -165,3 +165,12 @@
     transform: rotate(-360deg);
   }
 }
+
+@keyframes clashIndeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}

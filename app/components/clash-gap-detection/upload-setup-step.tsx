@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils'
 import { CloudUpload, FileText, ImageIcon, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { CLASH_GAP_MAX_BYTES, formatUploadSizeLimit } from '@/lib/upload-limits'
+import { ProgressBar } from './progress-bar'
 import {
   Dialog,
   DialogContent,
@@ -52,7 +53,6 @@ const ACCEPT_EXT = /\.(pdf|docx|doc|txt|jpe?g|png|webp|tiff?)$/i
 const PAGE_BG = '#f9fafb'
 
 function humanLabelType(t: DocumentLabelType): string {
-  if (t === 'plans_specs') return 'Plans & Specs'
   return t.replace(/_/g, ' ')
 }
 
@@ -426,16 +426,21 @@ export function UploadSetupStep(props: {
                           </td>
                           <td className="px-4 py-3 text-[#475569]">{r.pages}</td>
                           <td className="px-4 py-3">
-                            <span
-                              className={cn(
-                                'rounded-full px-2 py-0.5 text-xs font-medium',
-                                r.status === 'ready' && 'bg-emerald-50 text-emerald-800',
-                                r.status === 'pending' && 'bg-amber-50 text-amber-900',
-                                r.status === 'error' && 'bg-red-50 text-red-800',
-                              )}
-                            >
-                              {r.status}
-                            </span>
+                            <div className="flex flex-col gap-1.5">
+                              <span
+                                className={cn(
+                                  'w-fit rounded-full px-2 py-0.5 text-xs font-medium',
+                                  r.status === 'ready' && 'bg-emerald-50 text-emerald-800',
+                                  r.status === 'pending' && 'bg-amber-50 text-amber-900',
+                                  r.status === 'error' && 'bg-red-50 text-red-800',
+                                )}
+                              >
+                                {r.status === 'pending' ? 'uploading…' : r.status}
+                              </span>
+                              {r.status === 'pending' ? (
+                                <ProgressBar tone="sky" className="w-28" />
+                              ) : null}
+                            </div>
                           </td>
                           <td className="px-4 py-3">
                             <Button

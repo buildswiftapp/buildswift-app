@@ -9,7 +9,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ChevronLeft, ChevronRight, FileWarning, Loader2 } from 'lucide-react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  FileWarning,
+  Loader2,
+  RotateCw,
+  RefreshCw,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react'
+import { ProgressBar } from './progress-bar'
 
 type SheetItem = {
   id: string
@@ -22,8 +32,16 @@ type SheetItem = {
   rawText: string
 }
 
+const ZOOM_MIN = 0.5
+const ZOOM_MAX = 4
+const ZOOM_STEP = 0.25
+
 function pageLabel(s: SheetItem) {
   return `${s.sheetId || `Page ${s.pageIndex + 1}`} · ${s.fileName}`
+}
+
+function clampZoom(z: number) {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100))
 }
 
 export function DetectionResultViewer(props: {
@@ -36,6 +54,9 @@ export function DetectionResultViewer(props: {
   const [sheets, setSheets] = useState<SheetItem[]>([])
   const [error, setError] = useState<string | null>(null)
   const [index, setIndex] = useState(0)
+  const [rotation, setRotation] = useState(0)
+  const [zoom, setZoom] = useState(1)
+  const [imgLoading, setImgLoading] = useState(false)
 
   useEffect(() => {
     if (!open || !analysisId) return
@@ -65,6 +86,12 @@ export function DetectionResultViewer(props: {
   const atEnd = safeIndex >= count - 1
 
   useEffect(() => {
+    setRotation(0)
+    setZoom(1)
+    setImgLoading(Boolean(current?.imageUrl))
+  }, [current?.id, current?.imageUrl])
+
+  useEffect(() => {
     if (!open || count <= 1) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft') setIndex((i) => Math.max(0, i - 1))
@@ -73,6 +100,9 @@ export function DetectionResultViewer(props: {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, count])
+
+  const iconBtn =
+    'flex h-8 w-8 items-center justify-center rounded-lg border border-[#e2e8f0] bg-white text-[#475569] transition-colors hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-40'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -87,8 +117,11 @@ export function DetectionResultViewer(props: {
         </DialogHeader>
 
         {loading ? (
-          <div className="text-muted-foreground flex items-center justify-center gap-2 py-20 text-sm">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading result…
+          <div className="flex flex-col gap-3 py-20">
+            <ProgressBar tone="violet" className="mx-auto w-1/2" />
+            <div className="text-muted-foreground flex items-center justify-center gap-2 text-sm">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading result…
+            </div>
           </div>
         ) : error ? (
           <div className="flex items-center justify-center gap-2 py-20 text-sm text-red-600">
@@ -118,14 +151,63 @@ export function DetectionResultViewer(props: {
             </button>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-12 pb-1">
-              <div className="flex items-center justify-center rounded-xl border border-[#e2e8f0] bg-slate-50 p-2">
+              <div className="mb-2 flex items-center justify-end gap-1.5">
+                <button type="button" className={iconBtn} title="Rotate 90°" onClick={() => setRotation((r) => (r + 90) % 360)}>
+                  <RotateCw className="h-4 w-4" aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  className={iconBtn}
+                  title="Zoom out"
+                  disabled={zoom <= ZOOM_MIN}
+                  onClick={() => setZoom((z) => clampZoom(z - ZOOM_STEP))}
+                >
+                  <ZoomOut className="h-4 w-4" aria-hidden />
+                </button>
+                <span className="w-12 text-center text-xs tabular-nums text-[#475569]">
+                  {Math.round(zoom * 100)}%
+                </span>
+                <button
+                  type="button"
+                  className={iconBtn}
+                  title="Zoom in"
+                  disabled={zoom >= ZOOM_MAX}
+                  onClick={() => setZoom((z) => clampZoom(z + ZOOM_STEP))}
+                >
+                  <ZoomIn className="h-4 w-4" aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  className={iconBtn}
+                  title="Reset view"
+                  disabled={zoom === 1 && rotation === 0}
+                  onClick={() => {
+                    setZoom(1)
+                    setRotation(0)
+                  }}
+                >
+                  <RefreshCw className="h-4 w-4" aria-hidden />
+                </button>
+              </div>
+
+              <div className="relative flex h-[60vh] items-center justify-center overflow-auto rounded-xl border border-[#e2e8f0] bg-slate-50 p-2">
                 {current.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={current.imageUrl}
-                    alt={pageLabel(current)}
-                    className="max-h-[64vh] w-auto max-w-full rounded-lg object-contain"
-                  />
+                  <>
+                    <img
+                      key={current.id}
+                      src={current.imageUrl}
+                      alt={pageLabel(current)}
+                      onLoad={() => setImgLoading(false)}
+                      onError={() => setImgLoading(false)}
+                      style={{ transform: `rotate(${rotation}deg) scale(${zoom})`, transformOrigin: 'center' }}
+                      className="max-h-[56vh] max-w-full rounded-lg object-contain transition-transform duration-150"
+                    />
+                    {imgLoading ? (
+                      <div className="bg-slate-50/70 absolute inset-0 flex items-center justify-center">
+                        <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" aria-hidden />
+                      </div>
+                    ) : null}
+                  </>
                 ) : (
                   <div className="text-muted-foreground flex h-48 items-center justify-center text-xs">
                     No image

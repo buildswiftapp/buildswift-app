@@ -990,6 +990,9 @@ export function ClashGapDetectionPage() {
         runLabel={m.runLabel}
         preview={preview}
         downloads={downloads}
+        processed={state?.processed}
+        total={state?.total}
+        hideRun={step === 'chunk'}
       >
         <div className="rounded-xl border border-[#e2e8f0] bg-[#f8fafc] px-4 py-3 text-sm text-[#475569]">
           {step === 'chunk' && (state?.total != null ? `${state.total} page image(s) generated.` : 'Page images generated.')}
@@ -1104,6 +1107,8 @@ export function ClashGapDetectionPage() {
             isRunning={runningStage === 'detect'}
             onRun={() => void runStage('detect')}
             runLabel="detection"
+            processed={stages.detect?.processed}
+            total={stages.detect?.total}
           >
             <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-3 text-sm text-emerald-900">
               {visibleIssues.length === 0

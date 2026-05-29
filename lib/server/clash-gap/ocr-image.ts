@@ -3,8 +3,8 @@ async function loadCanvas() {
 }
 
 function ocrMaxDim(): number {
-  const n = Number(process.env.CLASH_GAP_OCR_MAX_DIM || 1600)
-  return Number.isFinite(n) && n >= 256 ? Math.floor(n) : 1600
+  const n = Number(process.env.CLASH_GAP_OCR_MAX_DIM || 1024)
+  return Number.isFinite(n) && n >= 256 ? Math.floor(n) : 1024
 }
 
 export async function downscaleImageForOcr(
