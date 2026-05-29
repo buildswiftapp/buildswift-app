@@ -14,6 +14,7 @@ import {
 } from '@/lib/server/clash-gap/extract-pdf'
 import { renderPdfPageFromDoc, withPdfDocument } from '@/lib/server/clash-gap/render-pdf-page'
 import { mergePageText } from '@/lib/server/clash-gap/merge-ocr'
+import { downscaleImageForOcr } from '@/lib/server/clash-gap/ocr-image'
 import {
   clashGapImagePath,
   downloadClashGapFile,
@@ -41,8 +42,8 @@ function maxPagesPerRun(): number {
 }
 
 function ocrConcurrency(): number {
-  const n = Number(process.env.CLASH_GAP_OCR_CONCURRENCY || 3)
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 3
+  const n = Number(process.env.CLASH_GAP_OCR_CONCURRENCY || 8)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 8
 }
 
 function pageStageTimeoutMs(): number {
@@ -262,8 +263,9 @@ export async function runOcrStage(params: StageParams) {
           const isOriginalImage =
             !sheet.image_path.includes('/images/') &&
             isImageUpload(sheet.mime_type || '', sheet.file_name)
-          const mime = isOriginalImage ? sheet.mime_type || 'image/png' : 'image/png'
-          text = await ocrImageWithOpenAI(bytes, mime, sheet.file_name, sheet.page_index)
+          const sourceMime = isOriginalImage ? sheet.mime_type || 'image/png' : 'image/png'
+          const ocr = await downscaleImageForOcr(bytes, sourceMime)
+          text = await ocrImageWithOpenAI(ocr.bytes, ocr.mime, sheet.file_name, sheet.page_index)
         } catch (e) {
           console.error('[clash-gap ocr] failed for sheet', sheet.id, e)
         }
@@ -282,6 +284,13 @@ export async function runOcrStage(params: StageParams) {
       }
     })
 
+    await markStageProgress(params.supabase, params.analysisId, 'ocr', {
+      processed: sheets.length,
+      total: sheets.length,
+      detail: 'Merging text per document…',
+    })
+    await mergeSheets(params.supabase, params.analysisId)
+
     await markStageCompleted(params.supabase, params.analysisId, 'ocr', {
       processed: sheets.length,
       total: sheets.length,
@@ -298,68 +307,45 @@ export async function runOcrStage(params: StageParams) {
   }
 }
 
-export async function runMergeStage(params: StageParams) {
-  await markStageRunning(params.supabase, params.analysisId, 'merge')
-  await updateAnalysisStep(params.supabase, params.analysisId, {
-    status: 'processing',
-    processing_step: 'merge',
-    error_message: null,
+async function mergeSheets(supabase: any, analysisId: string): Promise<number> {
+  const files = await loadFiles(supabase, analysisId)
+  const fileIds = files.map((f) => f.id)
+  if (!fileIds.length) throw new Error('No files uploaded')
+
+  const { data: sheetRows, error } = await supabase
+    .from('clash_gap_extracted_sheets')
+    .select('id, analysis_file_id, page_index, ocr_text')
+    .in('analysis_file_id', fileIds)
+    .order('analysis_file_id', { ascending: true })
+    .order('page_index', { ascending: true })
+  if (error) throw new Error(error.message)
+
+  const sheets = (sheetRows || []) as Array<{
+    id: string
+    analysis_file_id: string
+    page_index: number
+    ocr_text: string | null
+  }>
+  if (!sheets.length) return 0
+
+  const fileOrdinal = new Map(fileIds.map((fileId, index) => [fileId, index + 1]))
+  const multipleFiles = fileIds.length > 1
+
+  await mapWithConcurrency(sheets, 8, async (sheet) => {
+    const merged = mergePageText({
+      pageIndex: sheet.page_index,
+      embedded: { blocks: [], fullText: '' },
+      ocr: { text: sheet.ocr_text || '' },
+    })
+    const pageLabel = multipleFiles
+      ? `Doc${fileOrdinal.get(sheet.analysis_file_id) ?? '?'}-Page-${sheet.page_index + 1}`
+      : `Page-${sheet.page_index + 1}`
+    const sheetId = detectSheetId(merged.rawText) || pageLabel
+    await supabase
+      .from('clash_gap_extracted_sheets')
+      .update({ raw_text: merged.rawText, sheet_id: sheetId })
+      .eq('id', sheet.id)
   })
 
-  try {
-    const files = await loadFiles(params.supabase, params.analysisId)
-    const fileIds = files.map((f) => f.id)
-    if (!fileIds.length) throw new Error('No files uploaded')
-
-    const { data: sheetRows, error } = await params.supabase
-      .from('clash_gap_extracted_sheets')
-      .select('id, analysis_file_id, page_index, ocr_text')
-      .in('analysis_file_id', fileIds)
-      .order('analysis_file_id', { ascending: true })
-      .order('page_index', { ascending: true })
-    if (error) throw new Error(error.message)
-
-    const sheets = (sheetRows || []) as Array<{
-      id: string
-      analysis_file_id: string
-      page_index: number
-      ocr_text: string | null
-    }>
-    if (!sheets.length) throw new Error('No OCR results found — run the OCR stage first')
-
-    const fileOrdinal = new Map(fileIds.map((fileId, index) => [fileId, index + 1]))
-    const multipleFiles = fileIds.length > 1
-
-    let processed = 0
-    await mapWithConcurrency(sheets, 8, async (sheet) => {
-      const merged = mergePageText({
-        pageIndex: sheet.page_index,
-        embedded: { blocks: [], fullText: '' },
-        ocr: { text: sheet.ocr_text || '' },
-      })
-      const pageLabel = multipleFiles
-        ? `Doc${fileOrdinal.get(sheet.analysis_file_id) ?? '?'}-Page-${sheet.page_index + 1}`
-        : `Page-${sheet.page_index + 1}`
-      const sheetId = detectSheetId(merged.rawText) || pageLabel
-      await params.supabase
-        .from('clash_gap_extracted_sheets')
-        .update({ raw_text: merged.rawText, sheet_id: sheetId })
-        .eq('id', sheet.id)
-      processed++
-    })
-
-    await markStageCompleted(params.supabase, params.analysisId, 'merge', {
-      processed,
-      total: sheets.length,
-    })
-    return { pages: sheets.length }
-  } catch (error) {
-    const message = formatClashGapError(error)
-    await markStageFailed(params.supabase, params.analysisId, 'merge', message)
-    await updateAnalysisStep(params.supabase, params.analysisId, {
-      status: 'failed',
-      error_message: message,
-    })
-    throw error
-  }
+  return sheets.length
 }

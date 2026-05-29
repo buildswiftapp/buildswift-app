@@ -13,11 +13,7 @@ import {
   markStageFailed,
   markStageRunning,
 } from '@/lib/server/clash-gap/stage-state'
-import {
-  runChunkStage,
-  runMergeStage,
-  runOcrStage,
-} from '@/lib/server/clash-gap/stages'
+import { runChunkStage, runOcrStage } from '@/lib/server/clash-gap/stages'
 import {
   buildSummaryFromRows,
   llmIssuesToDbRows,
@@ -418,6 +414,5 @@ export async function runDetectStage(params: StageParams) {
 export async function runClashGapPipeline(params: StageParams) {
   await runChunkStage(params)
   await runOcrStage(params)
-  await runMergeStage(params)
   return runDetectStage(params)
 }

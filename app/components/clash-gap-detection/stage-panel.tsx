@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
-import { AlertTriangle, Check, Download, Loader2, Lock, Play, RotateCcw } from 'lucide-react'
+import { AlertTriangle, Check, Download, Eye, Loader2, Lock, Play, RotateCcw } from 'lucide-react'
 import type { StageStatus } from '@/lib/clash-gap-stages'
 
 export type StageDownload = {
@@ -12,6 +12,11 @@ export type StageDownload = {
   onClick: () => void
   disabled?: boolean
   busy?: boolean
+}
+
+export type StagePreview = {
+  label: string
+  onClick: () => void
 }
 
 function StatusBanner(props: { status: StageStatus; detail?: string | null; error?: string | null; gateMet: boolean; gateHint?: string }) {
@@ -66,6 +71,7 @@ export function StagePanel(props: {
   onRun: () => void
   runLabel: string
   downloads?: StageDownload[]
+  preview?: StagePreview
   children?: ReactNode
 }) {
   const completed = props.status === 'completed'
@@ -95,6 +101,19 @@ export function StagePanel(props: {
             )}
             {props.isRunning ? 'Running…' : completed ? `Re-run ${props.runLabel}` : `Run ${props.runLabel}`}
           </Button>
+
+          {props.preview ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl border-violet-200 text-violet-700 hover:bg-violet-50"
+              disabled={!completed}
+              onClick={props.preview.onClick}
+            >
+              <Eye className="mr-2 h-4 w-4" aria-hidden />
+              {props.preview.label}
+            </Button>
+          ) : null}
 
           {(props.downloads ?? []).map((d) => (
             <Button

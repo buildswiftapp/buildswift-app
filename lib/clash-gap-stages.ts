@@ -1,6 +1,6 @@
-export type ClashGapStage = 'chunk' | 'ocr' | 'merge' | 'detect'
+export type ClashGapStage = 'chunk' | 'ocr' | 'detect'
 
-export const CLASH_GAP_STAGES: ClashGapStage[] = ['chunk', 'ocr', 'merge', 'detect']
+export const CLASH_GAP_STAGES: ClashGapStage[] = ['chunk', 'ocr', 'detect']
 
 export type StageStatus = 'pending' | 'running' | 'completed' | 'failed'
 

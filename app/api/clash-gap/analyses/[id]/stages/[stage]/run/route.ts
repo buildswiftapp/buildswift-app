@@ -12,7 +12,7 @@ import { assertCanRunClashGapReport, assertCanUseAiAssist } from '@/lib/server/b
 import { getAnalysisForAccount } from '@/lib/server/clash-gap/access'
 import { formatClashGapError, isStaleClashGapProcessing } from '@/lib/server/clash-gap/errors'
 import { runDetectStage } from '@/lib/server/clash-gap/pipeline'
-import { runChunkStage, runMergeStage, runOcrStage } from '@/lib/server/clash-gap/stages'
+import { runChunkStage, runOcrStage } from '@/lib/server/clash-gap/stages'
 import { markStageFailed, markStageRunning } from '@/lib/server/clash-gap/stage-state'
 import {
   CLASH_GAP_STAGES,
@@ -31,7 +31,6 @@ type Params = { params: Promise<{ id: string; stage: string }> }
 const STAGE_RUNNERS = {
   chunk: runChunkStage,
   ocr: runOcrStage,
-  merge: runMergeStage,
   detect: runDetectStage,
 } as const
 

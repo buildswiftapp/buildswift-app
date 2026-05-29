@@ -432,7 +432,7 @@ function templatesFromContext(
           ? 'This entry records the analysis boundary so reviewers know what was excluded from the scan.'
           : 'Confirms the run included all uploaded bundles for basic cross-reference alignment.',
       sources: rows.slice(0, Math.min(2, rows.length)).map((r, i) => ({
-        documentLabel: `${r.filename} (${r.type.replace(/_/g, ' ')})`,
+        documentLabel: `${r.filename} (${(r.type ?? 'unassigned').replace(/_/g, ' ')})`,
         page: stubPagesForFilename(r.filename),
         excerpt:
           i === 0

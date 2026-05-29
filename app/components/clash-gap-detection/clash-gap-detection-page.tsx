@@ -19,7 +19,8 @@ import {
 import {
   canRunClashGapDetection,
   fileRoleFromDocType,
-  hasReadyUploads,
+  hasPlansDocument,
+  hasSpecsDocument,
   missingDocumentRolesMessage,
   reconcileDocumentTypes,
   sanitizeClashGapDocumentType,
@@ -58,6 +59,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { DetectionResultsWorkspace } from './detection-results-workspace'
+import { DetectionResultViewer } from './detection-result-viewer'
 import { DetectionSettingsStep } from './detection-settings-step'
 import { DetectionStepFooter } from './detection-step-footer'
 import { DetectionStepper, type StepDisplayStatus, type StepperItem } from './detection-stepper'
@@ -77,17 +79,15 @@ const defaultSettings: DetectionSettings = {
 const SUBJECT_MAX = 255
 const DESC_MAX = 2000
 
-const STEP_TO_STAGE: Record<Exclude<DetectionWizardStep, 'upload'>, ClashGapStage> = {
+const STEP_TO_STAGE: Record<Exclude<DetectionWizardStep, 'upload' | 'result'>, ClashGapStage> = {
   chunk: 'chunk',
   ocr: 'ocr',
-  merge: 'merge',
   detection: 'detect',
 }
 
 const STAGE_RUN_LABEL: Record<ClashGapStage, string> = {
   chunk: 'chunking',
   ocr: 'OCR',
-  merge: 'merge',
   detect: 'detection',
 }
 
@@ -223,7 +223,7 @@ function firstIncompleteStep(stages: StagesMap, hasFiles: boolean): DetectionWiz
       return stage === 'detect' ? 'detection' : (stage as DetectionWizardStep)
     }
   }
-  return 'detection'
+  return 'result'
 }
 
 export function ClashGapDetectionPage() {
@@ -254,6 +254,7 @@ export function ClashGapDetectionPage() {
   const [sheetIssue, setSheetIssue] = useState<ClashGapIssue | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [rfiDraft, setRfiDraft] = useState<RfiDraftState | null>(null)
+  const [viewerOpen, setViewerOpen] = useState(false)
 
   const setRfiDraftFromPanel = useCallback(
     (updater: RfiDraftState | ((prev: RfiDraftState) => RfiDraftState)) => {
@@ -584,10 +585,20 @@ export function ClashGapDetectionPage() {
     [rows, uploadRowFile, syncFileRoleToServer],
   )
 
-  const hasUploadsReady = hasReadyUploads(rows)
+  const hasUploadsReady = useMemo(
+    () => hasPlansDocument(rows) && hasSpecsDocument(rows),
+    [rows],
+  )
+  const uploadDocsHint = useMemo(() => {
+    if (hasUploadsReady) return null
+    const missing: string[] = []
+    if (!hasPlansDocument(rows)) missing.push('Plans')
+    if (!hasSpecsDocument(rows)) missing.push('Specifications')
+    return `Upload and set the Document type for both Plans and Specifications — ${missing.join(' and ')} still missing.`
+  }, [hasUploadsReady, rows])
 
   const stageOf = useCallback((step: DetectionWizardStep): ClashGapStage | null => {
-    return step === 'upload' ? null : STEP_TO_STAGE[step]
+    return step === 'upload' || step === 'result' ? null : STEP_TO_STAGE[step]
   }, [])
 
   const runStage = useCallback(
@@ -616,6 +627,10 @@ export function ClashGapDetectionPage() {
         await apiFetch(`/api/clash-gap/analyses/${id}/stages/${stage}/run`, { method: 'POST' })
         await pollStage(id, stage)
         toast.success(`${STAGE_RUN_LABEL[stage][0]!.toUpperCase()}${STAGE_RUN_LABEL[stage].slice(1)} complete.`)
+        
+        if (stage === 'chunk') setActiveStep('ocr')
+        else if (stage === 'ocr') setActiveStep('detection')
+        else if (stage === 'detect') setActiveStep('result')
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Stage failed')
       } finally {
@@ -625,6 +640,25 @@ export function ClashGapDetectionPage() {
     },
     [runningStage, ensureAnalysis, ensureUploadsReady, pollStage, settings, selectedTrades, rows],
   )
+
+  const autoRunRef = useRef(false)
+  useEffect(() => {
+    const stage: ClashGapStage | null =
+      activeStep === 'chunk'
+        ? 'chunk'
+        : activeStep === 'ocr'
+          ? 'ocr'
+          : activeStep === 'detection'
+            ? 'detect'
+            : null
+    if (!stage || runningStage || autoRunRef.current) return
+    if (stageStatus(stages, stage) !== 'pending') return
+    if (!stageGateMet(stages, stage, hasUploadsReady)) return
+    autoRunRef.current = true
+    void runStage(stage).finally(() => {
+      autoRunRef.current = false
+    })
+  }, [activeStep, hasUploadsReady, runningStage, stages, runStage])
 
   const downloadArtifact = useCallback(
     async (key: string, path: string, filename: string, init?: RequestInit) => {
@@ -819,6 +853,7 @@ export function ClashGapDetectionPage() {
   const stepDisplayStatus = useCallback(
     (step: DetectionWizardStep): StepDisplayStatus => {
       if (step === 'upload') return hasUploadsReady ? 'completed' : 'ready'
+      if (step === 'result') return isStageComplete(stages, 'detect') ? 'completed' : 'locked'
       const stage = STEP_TO_STAGE[step]
       const st = stageStatus(stages, stage)
       if (runningStage === stage || st === 'running') return 'running'
@@ -832,6 +867,7 @@ export function ClashGapDetectionPage() {
   const canNavigateTo = useCallback(
     (step: DetectionWizardStep): boolean => {
       if (step === 'upload') return true
+      if (step === 'result') return isStageComplete(stages, 'detect')
       const stage = STEP_TO_STAGE[step]
       if (stageStatus(stages, stage) !== 'pending') return true
       return stageGateMet(stages, stage, hasUploadsReady)
@@ -856,14 +892,8 @@ export function ClashGapDetectionPage() {
       {
         id: 'ocr',
         title: 'OCR',
-        description: 'Read text from every page image.',
+        description: 'Read text from each page and merge per document.',
         status: stepDisplayStatus('ocr'),
-      },
-      {
-        id: 'merge',
-        title: 'Merge',
-        description: 'Combine OCR text per document.',
-        status: stepDisplayStatus('merge'),
       },
       {
         id: 'detection',
@@ -871,12 +901,18 @@ export function ClashGapDetectionPage() {
         description: 'Find gaps, clashes & mismatches.',
         status: stepDisplayStatus('detection'),
       },
+      {
+        id: 'result',
+        title: 'Final result',
+        description: 'Review issues, draft RFIs & download report.',
+        status: stepDisplayStatus('result'),
+      },
     ],
     [stepDisplayStatus],
   )
 
   const canGoNext = useMemo(() => {
-    const order: DetectionWizardStep[] = ['upload', 'chunk', 'ocr', 'merge', 'detection']
+    const order: DetectionWizardStep[] = ['upload', 'chunk', 'ocr', 'detection', 'result']
     const idx = order.indexOf(activeStep)
     const next = idx >= 0 && idx < order.length - 1 ? order[idx + 1]! : null
     return next ? canNavigateTo(next) : false
@@ -895,7 +931,7 @@ export function ClashGapDetectionPage() {
 
   const base = analysisId ? `clash-gap-${analysisId.slice(0, 8)}` : 'clash-gap'
 
-  const renderProcessingStage = (step: 'chunk' | 'ocr' | 'merge') => {
+  const renderProcessingStage = (step: 'chunk' | 'ocr') => {
     const stage = STEP_TO_STAGE[step]
     const state = stages[stage]
     const gateMet = stageGateMet(stages, stage, hasUploadsReady)
@@ -909,51 +945,36 @@ export function ClashGapDetectionPage() {
       },
       ocr: {
         title: 'OCR — read text from each image',
-        description: 'Each page image is transcribed with OpenAI vision OCR.',
+        description: 'Each page image is transcribed with OpenAI vision OCR, then merged into one text stream per document.',
         runLabel: 'OCR',
         gateHint: 'Run the Chunk stage first.',
       },
-      merge: {
-        title: 'Merge — combine OCR text per document',
-        description: 'OCR results are normalized and merged into one text stream per document, ready for detection.',
-        runLabel: 'merge',
-        gateHint: 'Run the OCR stage first.',
-      },
     } as const
     const m = meta[step]
-    const downloads =
-      step === 'chunk'
-        ? [
-            {
-              label: 'Page images (.zip)',
-              busy: downloadingKey === 'images',
-              onClick: () =>
-                id && downloadArtifact('images', `/api/clash-gap/analyses/${id}/artifacts/images`, `${base}-page-images.zip`, { method: 'GET' }),
-            },
-          ]
-        : step === 'ocr'
-          ? [
-              {
-                label: 'Per-page PDFs (.zip)',
-                busy: downloadingKey === 'ocr-pdf-zip',
-                onClick: () =>
-                  id && downloadArtifact('ocr-pdf-zip', `/api/clash-gap/analyses/${id}/artifacts/ocr`, `${base}-ocr-pages.zip`, { method: 'GET' }),
-              },
-              {
-                label: '.json',
-                busy: downloadingKey === 'ocr-json',
-                onClick: () =>
-                  id && downloadArtifact('ocr-json', `/api/clash-gap/analyses/${id}/artifacts/ocr?format=json`, `${base}-ocr.json`, { method: 'GET' }),
-              },
-            ]
-          : [
-              {
-                label: 'Merged PDF (.pdf)',
-                busy: downloadingKey === 'merged-pdf',
-                onClick: () =>
-                  id && downloadArtifact('merged-pdf', `/api/clash-gap/analyses/${id}/artifacts/merged`, `${base}-merged.pdf`, { method: 'GET' }),
-              },
-            ]
+    const isOcr = step === 'ocr'
+    const preview = isOcr ? { label: 'View result', onClick: () => setViewerOpen(true) } : undefined
+    const downloads = isOcr
+      ? [
+          {
+            label: 'Per-page PDFs (.zip)',
+            busy: downloadingKey === 'ocr-pdf-zip',
+            onClick: () =>
+              id && downloadArtifact('ocr-pdf-zip', `/api/clash-gap/analyses/${id}/artifacts/ocr`, `${base}-ocr-pages.zip`, { method: 'GET' }),
+          },
+          {
+            label: 'Merged PDF (.pdf)',
+            busy: downloadingKey === 'merged-pdf',
+            onClick: () =>
+              id && downloadArtifact('merged-pdf', `/api/clash-gap/analyses/${id}/artifacts/merged`, `${base}-merged.pdf`, { method: 'GET' }),
+          },
+          {
+            label: '.json',
+            busy: downloadingKey === 'ocr-json',
+            onClick: () =>
+              id && downloadArtifact('ocr-json', `/api/clash-gap/analyses/${id}/artifacts/ocr?format=json`, `${base}-ocr.json`, { method: 'GET' }),
+          },
+        ]
+      : []
 
     return (
       <StagePanel
@@ -967,12 +988,12 @@ export function ClashGapDetectionPage() {
         isRunning={runningStage === stage}
         onRun={() => void runStage(stage)}
         runLabel={m.runLabel}
+        preview={preview}
         downloads={downloads}
       >
         <div className="rounded-xl border border-[#e2e8f0] bg-[#f8fafc] px-4 py-3 text-sm text-[#475569]">
           {step === 'chunk' && (state?.total != null ? `${state.total} page image(s) generated.` : 'Page images generated.')}
           {step === 'ocr' && (state?.total != null ? `OCR completed for ${state.total} page(s).` : 'OCR completed.')}
-          {step === 'merge' && (state?.total != null ? `Merged text ready for ${state.total} page(s).` : 'Merged text ready.')}
         </div>
       </StagePanel>
     )
@@ -1070,78 +1091,93 @@ export function ClashGapDetectionPage() {
 
         {activeStep === 'chunk' ? renderProcessingStage('chunk') : null}
         {activeStep === 'ocr' ? renderProcessingStage('ocr') : null}
-        {activeStep === 'merge' ? renderProcessingStage('merge') : null}
 
         {activeStep === 'detection' ? (
-          <div className="flex flex-col gap-6">
-            <StagePanel
-              title="Detection — gaps, clashes & mismatches"
-              description="Drawings are reviewed against the specifications. Each finding traces back to a specific requirement."
-              status={runningStage === 'detect' ? 'running' : stageStatus(stages, 'detect')}
-              detail={stages.detect?.detail}
-              error={stages.detect?.error}
-              gateMet={stageGateMet(stages, 'detect', hasUploadsReady)}
-              gateHint="Run the Merge stage first."
-              isRunning={runningStage === 'detect'}
-              onRun={() => void runStage('detect')}
-              runLabel="detection"
-              downloads={
-                analysisId
-                  ? [
-                      {
-                        label: 'Report (.pdf)',
-                        busy: downloadingKey === 'report',
-                        onClick: () =>
-                          downloadArtifact('report', `/api/clash-gap/analyses/${analysisId}/report`, `${base}-report.pdf`, { method: 'POST' }),
-                      },
-                      {
-                        label: 'Issues (.csv)',
-                        busy: downloadingKey === 'issues-csv',
-                        onClick: () =>
-                          downloadArtifact('issues-csv', `/api/clash-gap/analyses/${analysisId}/artifacts/issues?format=csv`, `${base}-issues.csv`, { method: 'GET' }),
-                      },
-                    ]
-                  : []
-              }
-            >
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-3 text-sm text-emerald-900">
-                {visibleIssues.length === 0
-                  ? 'No issues were flagged. You can still download the report, then click Done to finish.'
-                  : `${visibleIssues.length} issue${visibleIssues.length === 1 ? '' : 's'} ready to review below. Click Done to download and clear everything.`}
-              </div>
-            </StagePanel>
+          <StagePanel
+            title="Detection — gaps, clashes & mismatches"
+            description="Drawings are reviewed against the specifications. Each finding traces back to a specific requirement."
+            status={runningStage === 'detect' ? 'running' : stageStatus(stages, 'detect')}
+            detail={stages.detect?.detail}
+            error={stages.detect?.error}
+            gateMet={stageGateMet(stages, 'detect', hasUploadsReady)}
+            gateHint="Run the OCR stage first."
+            isRunning={runningStage === 'detect'}
+            onRun={() => void runStage('detect')}
+            runLabel="detection"
+          >
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 px-4 py-3 text-sm text-emerald-900">
+              {visibleIssues.length === 0
+                ? 'No issues were flagged. Continue to Final result to download the report and finish.'
+                : `${visibleIssues.length} issue${visibleIssues.length === 1 ? '' : 's'} found. Continue to Final result to review them, draft RFIs and download the report.`}
+            </div>
+          </StagePanel>
+        ) : null}
 
-            {detectComplete ? (
-              <DetectionResultsWorkspace
-                issues={visibleIssues}
-                onIgnoreIssue={ignoreIssue}
-                onAddToRfi={addIssueToRfiDraft}
-                filter={filter}
-                onFilterChange={setFilter}
-                disciplineFilter={disciplineFilter}
-                onDisciplineFilterChange={setDisciplineFilter}
-                search={search}
-                onSearchChange={setSearch}
-                selectedIssueId={selectedIssueId}
-                onSelectIssue={setSelectedIssueId}
-                bookmarkedIds={bookmarkedIds}
-                onToggleBookmark={toggleBookmark}
-                onOpenSources={openSources}
-                draft={rfiDraft}
-                setDraft={setRfiDraftFromPanel}
-                uploadFilenames={uploadFilenames}
-                linkedIssue={linkedIssue}
-                onClearDraft={clearDraft}
-                onSaveDraftLocal={saveDraftLocal}
-                onCreateRfi={createRfiNavigate}
-                rfiPanelRef={rfiPanelRef}
-                onBackToUpload={() => {
-                  setActiveStep('upload')
-                  setSheetOpen(false)
-                  setSheetIssue(null)
-                }}
-              />
-            ) : null}
+        {activeStep === 'result' ? (
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#e2e8f0] bg-white px-5 py-4 shadow-sm">
+              <div className="text-sm text-[#475569]">
+                {visibleIssues.length === 0
+                  ? 'No issues were flagged for this analysis.'
+                  : `${visibleIssues.length} issue${visibleIssues.length === 1 ? '' : 's'} ready to review.`}
+              </div>
+              {analysisId ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-xl"
+                    disabled={downloadingKey === 'report'}
+                    onClick={() =>
+                      downloadArtifact('report', `/api/clash-gap/analyses/${analysisId}/report`, `${base}-report.pdf`, { method: 'POST' })
+                    }
+                  >
+                    Report (.pdf)
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-xl"
+                    disabled={downloadingKey === 'issues-csv'}
+                    onClick={() =>
+                      downloadArtifact('issues-csv', `/api/clash-gap/analyses/${analysisId}/artifacts/issues?format=csv`, `${base}-issues.csv`, { method: 'GET' })
+                    }
+                  >
+                    Issues (.csv)
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+
+            <DetectionResultsWorkspace
+              issues={visibleIssues}
+              onIgnoreIssue={ignoreIssue}
+              onAddToRfi={addIssueToRfiDraft}
+              filter={filter}
+              onFilterChange={setFilter}
+              disciplineFilter={disciplineFilter}
+              onDisciplineFilterChange={setDisciplineFilter}
+              search={search}
+              onSearchChange={setSearch}
+              selectedIssueId={selectedIssueId}
+              onSelectIssue={setSelectedIssueId}
+              bookmarkedIds={bookmarkedIds}
+              onToggleBookmark={toggleBookmark}
+              onOpenSources={openSources}
+              draft={rfiDraft}
+              setDraft={setRfiDraftFromPanel}
+              uploadFilenames={uploadFilenames}
+              linkedIssue={linkedIssue}
+              onClearDraft={clearDraft}
+              onSaveDraftLocal={saveDraftLocal}
+              onCreateRfi={createRfiNavigate}
+              rfiPanelRef={rfiPanelRef}
+              onBackToUpload={() => {
+                setActiveStep('upload')
+                setSheetOpen(false)
+                setSheetIssue(null)
+              }}
+            />
           </div>
         ) : null}
 
@@ -1149,7 +1185,14 @@ export function ClashGapDetectionPage() {
           activeStep={activeStep}
           onStepChange={setActiveStep}
           canGoNext={canGoNext}
-          nextHint={canGoNext ? null : 'Finish the current stage to continue.'}
+          nextHint={
+            activeStep === 'upload'
+              ? uploadDocsHint
+              : canGoNext
+                ? null
+                : 'Finish the current stage to continue.'
+          }
+          showNext={activeStep !== 'chunk' && activeStep !== 'detection'}
           onDone={() => setConfirmOpen(true)}
           doneReady={detectComplete && !runningStage}
           isFinishing={isFinishing}
@@ -1157,6 +1200,12 @@ export function ClashGapDetectionPage() {
       </DetectionToolShell>
 
       <SourceComparisonSheet open={sheetOpen} onOpenChange={setSheetOpen} issue={sheetIssue} />
+
+      <DetectionResultViewer
+        open={viewerOpen}
+        onOpenChange={setViewerOpen}
+        analysisId={analysisId}
+      />
 
       <Dialog open={confirmOpen} onOpenChange={(o) => !isFinishing && setConfirmOpen(o)}>
         <DialogContent>

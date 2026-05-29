@@ -4,7 +4,7 @@ import {
   type DocumentUploadRow,
 } from '@/lib/clash-gap-types'
 
-export function fileRoleFromDocType(type: DocumentLabelType): 'plans' | 'specs' | 'addenda' {
+export function fileRoleFromDocType(type: DocumentLabelType | null): 'plans' | 'specs' | 'addenda' {
   if (type === 'specs') return 'specs'
   if (type === 'addenda') return 'addenda'
   return 'plans'
@@ -57,14 +57,13 @@ export function isPdfUploadFilename(filename: string): boolean {
 }
 
 export function hasPlansDocument(rows: DocumentUploadRow[]): boolean {
-  return getEligibleUploadRows(rows).some((r) => fileRoleFromDocType(r.type) === 'plans')
+  return getEligibleUploadRows(rows).some((r) => r.type === 'plans' || r.type === 'plans_specs')
 }
 
 export function hasSpecsDocument(rows: DocumentUploadRow[]): boolean {
-  return getEligibleUploadRows(rows).some((r) => {
-    const role = fileRoleFromDocType(r.type)
-    return role === 'specs' || role === 'addenda'
-  })
+  return getEligibleUploadRows(rows).some(
+    (r) => r.type === 'specs' || r.type === 'addenda' || r.type === 'plans_specs',
+  )
 }
 
 function hasPlansRoleAssigned(rows: DocumentUploadRow[]): boolean {
@@ -79,18 +78,13 @@ function hasSpecsRoleAssigned(rows: DocumentUploadRow[]): boolean {
 }
 
 export function canRunClashGapDetection(rows: DocumentUploadRow[]): boolean {
-  const eligible = getEligibleUploadRows(rows)
-  if (
-    eligible.length === 1 &&
-    (isImageUploadFilename(eligible[0]?.filename || '') || isPdfUploadFilename(eligible[0]?.filename || ''))
-  ) {
-    return true
-  }
-  if (eligible.length < 2) return false
-  return hasPlansDocument(eligible) && hasSpecsDocument(eligible)
+  return hasPlansDocument(rows) && hasSpecsDocument(rows)
 }
 
-export function sanitizeClashGapDocumentType(type: DocumentLabelType): DocumentLabelType {
+export function sanitizeClashGapDocumentType(
+  type: DocumentLabelType | null,
+): DocumentLabelType | null {
+  if (type === null) return null
   if ((CLASH_GAP_UPLOAD_TYPES as readonly string[]).includes(type)) return type
   return 'plans'
 }
@@ -120,16 +114,6 @@ export function describeRunDetectionGate(
 }
 
 export function missingDocumentRolesMessage(rows: DocumentUploadRow[]): string | null {
-  const eligible = getEligibleUploadRows(rows)
-  if (
-    eligible.length === 1 &&
-    (isImageUploadFilename(eligible[0]?.filename || '') || isPdfUploadFilename(eligible[0]?.filename || ''))
-  ) {
-    return null
-  }
-  if (eligible.length < 2) {
-    return 'Upload at least two files (PDF or image): one Plans drawing set and one Specifications (or Addenda).'
-  }
   const missing: string[] = []
   if (!hasPlansDocument(rows)) missing.push('Plans')
   if (!hasSpecsDocument(rows)) missing.push('Specifications (or Addenda)')
@@ -206,9 +190,5 @@ export function assignDocumentTypesForIngest(
 }
 
 export function reconcileDocumentTypes(rows: DocumentUploadRow[]): DocumentUploadRow[] {
-  const sanitized = rows.map((row) => ({
-    ...row,
-    type: sanitizeClashGapDocumentType(row.type),
-  }))
-  return applyInferredTypesWhereNeeded(sanitized)
+  return rows.map((row) => ({ ...row, type: sanitizeClashGapDocumentType(row.type) }))
 }

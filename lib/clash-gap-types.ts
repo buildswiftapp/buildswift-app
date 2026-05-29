@@ -1,13 +1,14 @@
 export const DOCUMENT_LABEL_TYPES = [
   'plans',
   'specs',
+  'plans_specs',
   'general_notes',
   'addenda',
   'rfis',
   'submittals',
 ] as const
 
-export const CLASH_GAP_UPLOAD_TYPES = ['plans', 'specs', 'addenda'] as const
+export const CLASH_GAP_UPLOAD_TYPES = ['plans', 'specs', 'plans_specs', 'addenda'] as const
 
 export type DocumentLabelType = (typeof DOCUMENT_LABEL_TYPES)[number]
 
@@ -16,7 +17,7 @@ export type UploadStatus = 'pending' | 'ready' | 'error'
 export interface DocumentUploadRow {
   id: string
   filename: string
-  type: DocumentLabelType
+  type: DocumentLabelType | null
   pages: number | '—'
   status: UploadStatus
   file?: File
@@ -75,14 +76,14 @@ export interface ClashGapAnalysisSummary {
   by_type: { clash: number; gap: number; mismatch: number }
 }
 
-export type DetectionWizardStep = 'upload' | 'chunk' | 'ocr' | 'merge' | 'detection'
+export type DetectionWizardStep = 'upload' | 'chunk' | 'ocr' | 'detection' | 'result'
 
 export const DETECTION_WIZARD_STEPS: DetectionWizardStep[] = [
   'upload',
   'chunk',
   'ocr',
-  'merge',
   'detection',
+  'result',
 ]
 
 export type AnalysisStatus =

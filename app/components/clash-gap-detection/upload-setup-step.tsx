@@ -7,7 +7,6 @@ import {
   type DocumentUploadRow,
 } from '@/lib/clash-gap-types'
 import {
-  assignDocumentTypesForIngest,
   canRunClashGapDetection,
   hasPlansDocument,
   hasSpecsDocument,
@@ -53,6 +52,7 @@ const ACCEPT_EXT = /\.(pdf|docx|doc|txt|jpe?g|png|webp|tiff?)$/i
 const PAGE_BG = '#f9fafb'
 
 function humanLabelType(t: DocumentLabelType): string {
+  if (t === 'plans_specs') return 'Plans & Specs'
   return t.replace(/_/g, ' ')
 }
 
@@ -135,19 +135,17 @@ export function UploadSetupStep(props: {
       nextRows.push({
         id: `doc-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`,
         filename: file.name,
-        type: 'plans',
+        type: null,
         pages: '—',
-        status: onUploadRow ? 'pending' : 'ready',   
+        status: onUploadRow ? 'pending' : 'ready',
         file,
       })
     }
-    const typedRows = assignDocumentTypesForIngest(nextRows, rows)
-    if (typedRows.length) {
-      const merged = [...rows, ...typedRows]
-      onRowsChange(merged)
+    if (nextRows.length) {
+      onRowsChange([...rows, ...nextRows])
       if (onUploadRow) {
         void (async () => {
-          for (const row of typedRows) {
+          for (const row of nextRows) {
             await onUploadRow(row)
           }
         })()
@@ -373,10 +371,10 @@ export function UploadSetupStep(props: {
                 </span>
                 {!canRunClashGapDetection(rows) ? (
                   <span className="mt-1 block">
-                    Upload at least two files (PDF or image scan). For image scans, set one row to{' '}
+                    Document type starts unset — for each uploaded file, pick its type from the
+                    dropdown in the table. Set at least one row to{' '}
                     <span className="font-semibold">Plans</span> and one to{' '}
-                    <span className="font-semibold">Specifications</span> — two images uploaded
-                    together are assigned automatically.
+                    <span className="font-semibold">Specifications</span> to continue.
                   </span>
                 ) : (
                   <span className="mt-1 block">Drawings are reviewed against the specifications.</span>
@@ -403,11 +401,19 @@ export function UploadSetupStep(props: {
                           </td>
                           <td className="px-4 py-3">
                             <Select
-                              value={r.type}
+                              value={r.type ?? undefined}
                               onValueChange={(v) => onRowType(r.id, v as DocumentLabelType)}
+                              disabled={r.status !== 'ready'}
                             >
-                              <SelectTrigger className="h-9 w-[160px] rounded-lg">
-                                <SelectValue />
+                              <SelectTrigger
+                                className={cn(
+                                  'h-9 w-[170px] rounded-lg',
+                                  !r.type && 'text-muted-foreground',
+                                )}
+                              >
+                                <SelectValue
+                                  placeholder={r.status === 'ready' ? 'Select type' : 'Uploading…'}
+                                />
                               </SelectTrigger>
                               <SelectContent>
                                 {CLASH_GAP_UPLOAD_TYPES.map((t) => (

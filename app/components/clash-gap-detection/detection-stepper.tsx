@@ -1,7 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { Check, FolderUp, Layers, ScanText, Merge, ClipboardCheck, Lock, Loader2, AlertTriangle } from 'lucide-react'
+import { Check, FolderUp, Layers, ScanText, FileCheck2, ClipboardCheck, Lock, Loader2, AlertTriangle } from 'lucide-react'
 import type { DetectionWizardStep } from '@/lib/clash-gap-types'
 import { cn } from '@/lib/utils'
 
@@ -18,8 +18,8 @@ const STEP_ICONS: Record<DetectionWizardStep, ReactNode> = {
   upload: <FolderUp className="h-7 w-7" strokeWidth={2} aria-hidden />,
   chunk: <Layers className="h-7 w-7" strokeWidth={2} aria-hidden />,
   ocr: <ScanText className="h-7 w-7" strokeWidth={2} aria-hidden />,
-  merge: <Merge className="h-7 w-7" strokeWidth={2} aria-hidden />,
   detection: <ClipboardCheck className="h-7 w-7" strokeWidth={2} aria-hidden />,
+  result: <FileCheck2 className="h-7 w-7" strokeWidth={2} aria-hidden />,
 }
 
 const STATUS_LABEL: Record<StepDisplayStatus, string> = {
