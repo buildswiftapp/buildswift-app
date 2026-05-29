@@ -32,7 +32,7 @@ const ALLOWED_MIME = new Set([
 ])
 const PAGE_COUNT_TIMEOUT_MS = 45_000
 
-export const maxDuration = 600
+export const maxDuration = 300
 
 async function pdfPageCountWithTimeout(buf: Buffer): Promise<number | null> {
   try {
