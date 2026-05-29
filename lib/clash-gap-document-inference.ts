@@ -57,12 +57,12 @@ export function isPdfUploadFilename(filename: string): boolean {
 }
 
 export function hasPlansDocument(rows: DocumentUploadRow[]): boolean {
-  return getEligibleUploadRows(rows).some((r) => r.type === 'plans' || r.type === 'plans_specs')
+  return getEligibleUploadRows(rows).some((r) => r.type === 'plans')
 }
 
 export function hasSpecsDocument(rows: DocumentUploadRow[]): boolean {
   return getEligibleUploadRows(rows).some(
-    (r) => r.type === 'specs' || r.type === 'addenda' || r.type === 'plans_specs',
+    (r) => r.type === 'specs' || r.type === 'addenda',
   )
 }
 

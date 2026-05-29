@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { AlertTriangle, Check, Download, Eye, Loader2, Lock, Play, RotateCcw } from 'lucide-react'
 import type { StageStatus } from '@/lib/clash-gap-stages'
+import { ProgressBar } from './progress-bar'
 
 export type StageDownload = {
   label: string
@@ -19,7 +20,15 @@ export type StagePreview = {
   onClick: () => void
 }
 
-function StatusBanner(props: { status: StageStatus; detail?: string | null; error?: string | null; gateMet: boolean; gateHint?: string }) {
+function StatusBanner(props: {
+  status: StageStatus
+  detail?: string | null
+  error?: string | null
+  gateMet: boolean
+  gateHint?: string
+  processed?: number
+  total?: number
+}) {
   if (!props.gateMet) {
     return (
       <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
@@ -29,10 +38,15 @@ function StatusBanner(props: { status: StageStatus; detail?: string | null; erro
     )
   }
   if (props.status === 'running') {
+    const hasTotal = typeof props.total === 'number' && props.total > 0
+    const pct = hasTotal ? Math.round(((props.processed || 0) / (props.total as number)) * 100) : null
     return (
-      <div className="flex items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-        <span>{props.detail?.trim() || 'Working…'}</span>
+      <div className="flex flex-col gap-2 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+        <div className="flex items-center gap-2">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+          <span>{props.detail?.trim() || (hasTotal ? `${props.processed || 0}/${props.total}` : 'Working…')}</span>
+        </div>
+        <ProgressBar tone="orange" value={pct} />
       </div>
     )
   }
@@ -72,10 +86,14 @@ export function StagePanel(props: {
   runLabel: string
   downloads?: StageDownload[]
   preview?: StagePreview
+  processed?: number
+  total?: number
+  hideRun?: boolean
   children?: ReactNode
 }) {
   const completed = props.status === 'completed'
   const canRun = props.gateMet && !props.isRunning
+  const showRun = !props.hideRun || props.status === 'failed'
   return (
     <Card className="rounded-2xl border-[#e2e8f0] shadow-[0_2px_12px_rgba(15,23,42,0.06)]">
       <CardHeader className="pb-2">
@@ -83,24 +101,34 @@ export function StagePanel(props: {
         <p className="text-sm text-[#64748b]">{props.description}</p>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <StatusBanner status={props.status} detail={props.detail} error={props.error} gateMet={props.gateMet} gateHint={props.gateHint} />
+        <StatusBanner
+          status={props.status}
+          detail={props.detail}
+          error={props.error}
+          gateMet={props.gateMet}
+          gateHint={props.gateHint}
+          processed={props.processed}
+          total={props.total}
+        />
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            className={cn('rounded-xl text-white', completed ? 'bg-slate-700 hover:bg-slate-800' : 'bg-violet-600 hover:bg-violet-700')}
-            disabled={!canRun}
-            onClick={props.onRun}
-          >
-            {props.isRunning ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-            ) : completed ? (
-              <RotateCcw className="mr-2 h-4 w-4" aria-hidden />
-            ) : (
-              <Play className="mr-2 h-4 w-4 fill-current" aria-hidden />
-            )}
-            {props.isRunning ? 'Running…' : completed ? `Re-run ${props.runLabel}` : `Run ${props.runLabel}`}
-          </Button>
+          {showRun ? (
+            <Button
+              type="button"
+              className={cn('rounded-xl text-white', completed ? 'bg-slate-700 hover:bg-slate-800' : 'bg-violet-600 hover:bg-violet-700')}
+              disabled={!canRun}
+              onClick={props.onRun}
+            >
+              {props.isRunning ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+              ) : completed ? (
+                <RotateCcw className="mr-2 h-4 w-4" aria-hidden />
+              ) : (
+                <Play className="mr-2 h-4 w-4 fill-current" aria-hidden />
+              )}
+              {props.isRunning ? 'Running…' : completed ? `Re-run ${props.runLabel}` : `Run ${props.runLabel}`}
+            </Button>
+          ) : null}
 
           {props.preview ? (
             <Button
