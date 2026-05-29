@@ -1,4 +1,4 @@
-import { badRequest, created, ok, serverError, unauthorized } from '@/lib/server/api-response'
+import { badRequest, created, forbidden, ok, serverError, unauthorized } from '@/lib/server/api-response'
 import { getAuthContext } from '@/lib/server/auth'
 import { assertCanCreateProject } from '@/lib/server/billing'
 import { writeAuditLog } from '@/lib/server/audit'
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
   if (!parsed.success) return badRequest('Invalid payload', parsed.error.flatten())
 
   const projectGate = await assertCanCreateProject(supabase as any, auth.accountId)
-  if (!projectGate.ok) return badRequest(projectGate.reason)
+  if (!projectGate.ok) return forbidden(projectGate.reason)
 
   const payload = parsed.data
   const { data, error } = await supabase

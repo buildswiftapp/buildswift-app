@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { badRequest, created, ok, serverError, unauthorized } from '@/lib/server/api-response'
+import { badRequest, created, forbidden, ok, serverError, unauthorized } from '@/lib/server/api-response'
 import { getAuthContext } from '@/lib/server/auth'
 import { syncDocumentAttachments } from '@/lib/server/attachments'
 import { insertDocument, listDocuments } from '@/lib/server/document-store'
@@ -19,7 +19,6 @@ export async function GET(req: Request) {
   if (!auth) return unauthorized()
   if (!auth.accountId) return ok({ documents: [] })
 
-  // Match POST: prefer service role so RLS cannot hide rows for this account.
   const supabase = createSupabaseAdminClient() ?? (await createSupabaseServerClient())
   if (!supabase) return serverError('Supabase is not configured')
 
@@ -46,8 +45,6 @@ export async function POST(req: Request) {
     )
   }
 
-  // Prefer service role when configured: avoids broken tenant RLS (e.g. policies
-  // referencing subscription_status) while we still enforce account via this handler.
   const supabase = createSupabaseAdminClient() ?? (await createSupabaseServerClient())
   if (!supabase) return serverError('Supabase is not configured')
 
@@ -80,10 +77,10 @@ export async function POST(req: Request) {
     auth.accountId,
     metadataPayload.attachments
   )
-  if (!attachmentGate.ok) return badRequest(attachmentGate.reason)
+  if (!attachmentGate.ok) return forbidden(attachmentGate.reason)
 
   const permission = await assertCanCreateDocument(supabase as any, auth.accountId)
-  if (!permission.ok) return badRequest(permission.reason)
+  if (!permission.ok) return forbidden(permission.reason)
 
   const canonicalInitialStatus = initialStatus(body.doc_type, body.save_as_draft)
   const { data: doc, error } = await insertDocument({
@@ -95,9 +92,7 @@ export async function POST(req: Request) {
       doc_number: docNumber,
       title: body.title,
       description: body.description,
-      // Canonical status (single source of truth read by UI/PDF).
       status: canonicalInitialStatus,
-      // Legacy dual-write so older readers keep functioning during Phase 1.
       internal_status: body.save_as_draft ? 'draft' : 'in_review',
       external_status: body.save_as_draft ? 'draft' : 'sent',
       created_by: auth.user.id,

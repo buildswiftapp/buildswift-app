@@ -56,7 +56,6 @@ export async function PUT(req: Request) {
   const supabase = admin ?? (await createSupabaseServerClient())
   if (!supabase) return serverError('Supabase is not configured')
 
-  // Keep app-level `users` table in sync.
   const { error: upsertError } = await supabase.from('users').upsert(
     {
       id: auth.user.id,
@@ -67,15 +66,12 @@ export async function PUT(req: Request) {
   )
   if (upsertError) return serverError(upsertError.message)
 
-  // Persist company name on the account row.
   const { error: accountUpdateError } = await supabase
     .from('accounts')
     .update({ name: parsed.data.company_name })
     .eq('id', auth.accountId)
   if (accountUpdateError) return serverError(accountUpdateError.message)
 
-  // Best-effort: keep Supabase Auth user metadata aligned.
-  // - email updates may require verification depending on project settings.
   try {
     const server = await createSupabaseServerClient()
     if (server) {
@@ -90,7 +86,6 @@ export async function PUT(req: Request) {
       })
     }
   } catch {
-    // If Auth update fails, we still return success because DB writes succeeded.
   }
 
   return ok({

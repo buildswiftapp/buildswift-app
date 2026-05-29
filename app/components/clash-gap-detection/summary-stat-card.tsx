@@ -69,7 +69,6 @@ export type SummaryStatCardProps = {
   variant: SummaryStatVariant
   count: number
   label: string
-  /** 0–1 width of the colored segment on the bottom bar */
   barRatio?: number
 }
 

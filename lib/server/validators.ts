@@ -114,9 +114,7 @@ export const sendForReviewSchema = z.object({
       }
       return out
     }),
-  /** When true, only refresh tokens for reviewers on the latest open review cycle (expired links only). */
   resend: z.boolean().optional().default(false),
-  /** Link lifetime for new tokens (days). Default 7. */
   expires_in_days: z.coerce
     .number()
     .int()
@@ -125,12 +123,6 @@ export const sendForReviewSchema = z.object({
     .default(7),
 })
 
-/**
- * Canonical reviewer outcomes (matches `ReviewerOutcome` in `lib/status.ts`).
- * The legacy enum values `approve` / `reject` are still accepted as aliases
- * during Phase 1 dual-write so older clients keep working; routes normalize
- * the value into a canonical outcome before persisting.
- */
 export const reviewerOutcomeEnum = z.enum([
   'approved',
   'approved_as_noted',
@@ -154,7 +146,6 @@ export const reviewSubmitSchema = z.object({
   signature_image: z.string().min(1).max(2_000_000).optional(),
 })
 
-/** POST /api/documents/:id/close — manual contractor closure of a document. */
 export const closeDocumentSchema = z.object({
   note: z.string().trim().max(2000).optional(),
 })
@@ -180,7 +171,6 @@ export const analyzeChangeOrderSchema = z.object({
   notes: aiOptionalNotesSchema,
 })
 
-/** POST /api/documents/:id/activity — user-visible comment on document timeline */
 export const documentActivityCommentSchema = z.object({
   body: z.string().trim().min(1).max(5000),
 })

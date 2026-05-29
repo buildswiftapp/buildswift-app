@@ -16,9 +16,7 @@ export type ChangeOrderApprovalPdfRow = {
   name: string
   role: string
   action: string
-  /** Resolved image URL (often a data URI) when the reviewer drew/uploaded a signature */
   signatureUrl?: string | null
-  /** Typed / printed signer name fallback when no image */
   signatureName?: string | null
   date: string
   notes: string
@@ -26,7 +24,6 @@ export type ChangeOrderApprovalPdfRow = {
 
 export type ChangeOrderAttachmentRow = { fileName: string; fileType: string; notes: string }
 
-/** Legacy row shape used only while assembling cost breakdown cards in `change-order-pdf.ts`. */
 export type ChangeOrderCostLinePdfRow = {
   lineDescription: string
   qtyDisplay: string
@@ -46,7 +43,6 @@ export type ChangeOrderCostBreakdownPdf =
   | {
       kind: 'cards'
       cards: ChangeOrderCostBreakdownCardPdf[]
-      /** Shown beside "Total Cost Impact" (formatted dollars; credits may append "credit"). */
       totalImpactDisplay: string
     }
 
@@ -59,14 +55,12 @@ export type ChangeOrderPdfViewModel = {
   contactPhone: string
   contactEmail: string
 
-  /** Full legal name under logo / in contact block */
   companyLegalName: string
 
   projectName: string
   projectAddress: string
   changeOrderNumber: string
   dateIssuedDisplay: string
-  /** Shown only when not N/A */
   requiredReviewDateDisplayOptional: string
 
   toOwner: string
@@ -76,18 +70,15 @@ export type ChangeOrderPdfViewModel = {
   summaryStatus: string
   priorityDisplay: string
 
-  /** Change Order Summary — title + reason only */
   reasonForChangeDisplay: string
 
   detailedDescription: string
 
   costBreakdown: ChangeOrderCostBreakdownPdf
-  /** Cost strip: prime / signed CO delta / revised total */
   originalContractAmountDisplay: string
   changeOrderAmountDisplay: string
   revisedContractAmountDisplay: string
 
-  /** Schedule impact — original / proposed (impact or explicit) / new total */
   originalDurationDisplay: string
   proposedDurationDisplay: string
   newDurationDisplay: string
@@ -95,13 +86,10 @@ export type ChangeOrderPdfViewModel = {
   attachments: ChangeOrderAttachmentRow[]
 
   finalAuthorizationStatus: string
-  /** Latest decided reviewer full name when available (else single assignee, else em dash). */
   reviewedByDisplay: string
   approvalRows: ChangeOrderApprovalPdfRow[]
 }
 
-// ── Color tokens ───────────────────────────────────────────────────────────────
-/** Default brand navy. Single source of truth for all primary brand surfaces. */
 const BRAND_NAVY = '#002162'
 const HEADER_BG = BRAND_NAVY
 const TITLE_BLUE = BRAND_NAVY
@@ -124,11 +112,6 @@ const SCHED_GREEN = '#0e8a4e'
 const SCHED_ORANGE = '#c2410c'
 const SCHED_BLUE = TITLE_BLUE
 
-// ── Page geometry ──────────────────────────────────────────────────────────────
-/**
- * Custom page (portrait): 8" × 13" in points (576 × 936).
- * Single sheet: wrap=false; tight typography + clamps; overflow truncates with …
- */
 const PAGE_WIDTH_PT = 8 * 72
 const PAGE_HEIGHT_PT = 13 * 72
 const PAGE_MARGIN_PT = 11
@@ -141,7 +124,6 @@ const BODY_LINE_HEIGHT = 1.24
 const DESC_LINE_HEIGHT = 1.32
 const SECTION_GAP = 6
 
-/** Clamps tuned so a full CO layout fits one 8×13 page without overflow */
 const MAX_DESCRIPTION_CHARS = 210
 const MAX_FIELD_CELL_CHARS = 56
 const MAX_ATTACHMENTS_ROWS = 3
@@ -149,8 +131,6 @@ const MAX_APPROVAL_ROWS = 3
 const MAX_SUMMARY_TITLE_CHARS = 58
 const MAX_REASON_IN_SUMMARY_CHARS = 56
 const PARTY_LINES_MAX = 2
-
-// ── Style helpers ─────────────────────────────────────────────────────────────
 
 function statusBadgeStyle(status: string): { backgroundColor: string; color: string } {
   const s = (status || '').toUpperCase()
@@ -189,8 +169,6 @@ function formatAddressLines(value: string): string[] {
   if (parts.length >= 2) return [parts[0], parts.slice(1).join(', ')]
   return [raw]
 }
-
-// ── SVG icon helpers (Lucide-style strokes) ────────────────────────────────────
 
 type StrokeIconProps = {
   size?: number
@@ -350,7 +328,6 @@ const IconChat = (p: { size?: number; color?: string }) => (
   />
 )
 
-/** Filled red PDF document icon for attachment rows. */
 const IconPdf = ({ size = 10 }: { size?: number }) => (
   <Svg viewBox="0 0 24 24" width={size} height={size}>
     <Path
@@ -365,7 +342,6 @@ const IconPdf = ({ size = 10 }: { size?: number }) => (
   </Svg>
 )
 
-/** Rounded-square avatar tile (filled tile, white person silhouette). */
 const IconAvatarTile = ({
   size = 22,
   color = HEADER_BG,
@@ -606,7 +582,6 @@ const IconCircleDollar = ({ size = 10, color = ICON_NAVY }: { size?: number; col
   </Svg>
 )
 
-/** Soft rounded-square tile with a centered icon. */
 function IconTile({
   children,
   size = 18,
@@ -634,7 +609,6 @@ function IconTile({
   )
 }
 
-/** Circular tile with a centered icon. */
 function CircleTile({
   children,
   size = 26,
@@ -660,9 +634,6 @@ function CircleTile({
   )
 }
 
-// ── Re-usable building blocks ──────────────────────────────────────────────────
-
-/** Section card with an icon + uppercase title at the top. */
 function Section({
   icon,
   title,
@@ -744,7 +715,6 @@ function Label({
   )
 }
 
-/** Reviewer signature slot inside the APPROVAL / RESPONSE LOG grid (no inner divider). */
 function CoApprovalLogSignatureCell({
   signatureUrl,
   signatureName,
@@ -798,7 +768,6 @@ function CoApprovalLogSignatureCell({
   )
 }
 
-/** Decide which file-type icon to render based on attachment fileType. */
 function attachmentIcon(fileType: string): React.ReactNode {
   const t = (fileType || '').toLowerCase()
   if (t.includes('pdf')) return <IconPdf size={11} />
@@ -814,7 +783,6 @@ function attachmentIcon(fileType: string): React.ReactNode {
   return <IconFileText size={11} color={MUTED} />
 }
 
-/** Map a cost-card title to its category icon. Falls back to file-text for arbitrary line-item titles. */
 function costCardIcon(title: string, color = ICON_NAVY): React.ReactNode {
   const t = (title || '').toLowerCase().trim()
   if (t === 'labor') return <IconUsers size={15} color={color} />
@@ -825,8 +793,6 @@ function costCardIcon(title: string, color = ICON_NAVY): React.ReactNode {
   if (t.includes('overhead') || t.includes('profit') || t.includes('markup')) return <IconPercent size={15} color={color} />
   return <IconFileText size={15} color={color} />
 }
-
-// ── Cost-breakdown subsection ──────────────────────────────────────────────────
 
 function PartyBlock({
   lines,
@@ -982,7 +948,6 @@ function ChangeOrderCostBreakdownSection({
         </View>
       )}
 
-      {/* Total Cost Impact navy bar */}
       <View
         style={{
           flexDirection: 'row',
@@ -1018,7 +983,6 @@ function ChangeOrderCostBreakdownSection({
         </Text>
       </View>
 
-      {/* 3-card totals row */}
       <View style={{ flexDirection: 'row', marginTop: 8 }}>
         <TotalsTile
           tileBg={BLUE_TILE_BG}
@@ -1126,9 +1090,6 @@ function ScheduleCard({
     </View>
   )
 }
-
-// ── Main document ─────────────────────────────────────────────────────────────
-
 export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel }) {
   const statusStyle = statusBadgeStyle(data.summaryStatus)
   const priorityUpper = (data.priorityDisplay || '').toUpperCase()
@@ -1168,7 +1129,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
       ? data.requiredReviewDateDisplayOptional
       : 'N/A'
 
-  // Derive a role line for the AUTHORIZATION card from the latest decided row
   const authRow = data.approvalRows.find(
     (r) => /\b(approved|rejected|signed)\b/i.test((r.action || '').trim()) && (r.name || '').trim().length > 0,
   ) || data.approvalRows[0]
@@ -1200,7 +1160,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
             padding: FRAME_INNER_PADDING,
           }}
         >
-          {/* ── 1. Brand row ───────────────────────────────────────────────── */}
           <View
             style={{
               flexDirection: 'row',
@@ -1280,7 +1239,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
             </View>
           </View>
 
-          {/* ── 2. Header info row: Contact+Project | Status ────────────────── */}
           <View
             style={{
               flexDirection: 'row',
@@ -1288,7 +1246,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
               minHeight: 110,
             }}
           >
-            {/* Left card: Contact + Project */}
             <View
               style={{
                 flex: 62,
@@ -1300,7 +1257,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
                 backgroundColor: CARD_BG,
               }}
             >
-              {/* Cell A: Contact */}
               <View style={{ flex: 32, padding: 9 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
                   <IconMapPin size={10} color={TITLE_BLUE} />
@@ -1356,7 +1312,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
 
               <View style={{ width: 1, backgroundColor: BORDER }} />
 
-              {/* Cell B: Project */}
               <View style={{ flex: 30, padding: 9, alignItems: 'flex-start' }}>
                 <IconTile size={36} radius={6}>
                   <IconBuilding size={22} color={TITLE_BLUE} />
@@ -1387,7 +1342,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
               </View>
             </View>
 
-            {/* Right card: Status / Date Issued / Required Response Date / Priority */}
             <View
               style={{
                 flex: 38,
@@ -1481,7 +1435,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
             </View>
           </View>
 
-          {/* ── 3. Sent From / Sent To row ──────────────────────────────────── */}
           <View
             style={{
               borderWidth: 1,
@@ -1509,7 +1462,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
             </View>
           </View>
 
-          {/* ── 4. CHANGE ORDER SUMMARY (3 cols) ────────────────────────────── */}
           <Section icon={<IconFileText size={11} color={TITLE_BLUE} />} title="Change Order Summary">
             <View style={{ flexDirection: 'row' }}>
               <View style={{ flex: 1, paddingRight: 9, flexDirection: 'row' }}>
@@ -1570,7 +1522,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
             </View>
           </Section>
 
-          {/* ── 5. COST BREAKDOWN ───────────────────────────────────────────── */}
           <Section
             icon={
               <CircleTile size={14} bg={ICON_TILE_BG}>
@@ -1587,7 +1538,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
             />
           </Section>
 
-          {/* ── 6. SCHEDULE IMPACT ──────────────────────────────────────────── */}
           <Section icon={<IconCalendar size={11} color={TITLE_BLUE} />} title="Schedule Impact">
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <ScheduleCard
@@ -1617,7 +1567,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
             </View>
           </Section>
 
-          {/* ── 7. ATTACHMENTS ──────────────────────────────────────────────── */}
           {hasAttachments ? (
             <Section
               icon={<IconPaperclip size={11} color={TITLE_BLUE} />}
@@ -1725,7 +1674,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
             </Section>
           ) : null}
 
-          {/* ── 8. APPROVAL / AUTHORIZATION  +  APPROVAL / RESPONSE LOG ────── */}
           <View style={{ flexDirection: 'row', marginBottom: SECTION_GAP }}>
             <Section
               icon={<IconShieldCheck size={11} color={TITLE_BLUE} />}
@@ -1925,7 +1873,6 @@ export function ChangeOrderPdfDocument({ data }: { data: ChangeOrderPdfViewModel
             </Section>
           </View>
 
-          {/* ── 9. Footer (orange divider + navy band) ──────────────────────── */}
           <View style={{ marginTop: 4 }}>
             <View style={{ height: 2, backgroundColor: ORANGE_ACCENT, borderRadius: 1 }} />
             <View

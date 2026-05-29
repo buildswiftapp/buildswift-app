@@ -40,7 +40,6 @@ export type SubmittalPdfViewModel = {
   projectName: string
   projectAddress: string
   submittalNumber: string
-  /** Shown in header / summary badges (workflow). */
   status: string
   dateIssued: string
   requiredReviewDate: string
@@ -67,15 +66,12 @@ export type SubmittalPdfViewModel = {
   reviewerComments: string
   reviewedBy: string
   reviewDate: string
-  /** From latest reviewer row with a signature attachment or typed name, if any */
   reviewerSignatureUrl: string
   reviewerSignatureName: string | null
 
   footerNote: string
 }
 
-// ── Color tokens ───────────────────────────────────────────────────────────────
-/** Default brand navy. Single source of truth for all primary brand surfaces. */
 const BRAND_NAVY = '#002162'
 const BORDER = '#e8edf2'
 const CARD_BORDER = '#c8d8e8'
@@ -89,21 +85,12 @@ const ORANGE_ACCENT = '#f97316'
 const ICON_TILE_BG = '#eaf2fb'
 const ICON_NAVY = BRAND_NAVY
 const PDF_RED = '#dc2626'
-/** Retained green accent — only used for the SUBMITTAL DETAILS field labels + their icons,
- *  matching the reference design. */
 const GREEN_LABEL = '#2d6a4f'
-/** Soft green tile background — kept for legacy parity (unused after redesign). */
 const GREEN_TILE_BG = '#e6f1ec'
-/** Rounded-square tile bg for the SUBMITTAL DETAILS metadata icons (light lavender). */
 const DETAIL_TILE_BG = '#eef0fb'
 
-// ── Page geometry ──────────────────────────────────────────────────────────────
-/**
- * Custom page (portrait): 8" × 13" in points (576 × 936).
- * Single sheet: wrap=false; tight typography + clamps; overflow truncates with …
- */
-const PAGE_WIDTH_PT = 8 * 72 // 576pt — 8in canvas width
-const PAGE_HEIGHT_PT = 13 * 72 // 936
+const PAGE_WIDTH_PT = 8 * 72 
+const PAGE_HEIGHT_PT = 13 * 72 
 const BASE_FONT = 7.85
 const LABEL_FONT = 6.5
 const VALUE_FONT = 7.85
@@ -111,15 +98,12 @@ const BODY_LINE_HEIGHT = 1.24
 const SECTION_GAP = 6
 const PAGE_MARGIN_PT = 11
 const FRAME_INNER_PADDING = 10
-/** Narrative clamps */
 const MAX_DESCRIPTION_CHARS = 820
 const MAX_REVIEWER_COMMENTS_CHARS = 280
 const MAX_FIELD_CELL_CHARS = 68
 const MAX_SUMMARY_TITLE_CHARS = 72
 const MAX_ATTACHMENTS_ROWS = 5
 const META_PARTY_MAX_LINES = 2
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function statusPillLabel(raw: string) {
   const s = (raw || '').toUpperCase()
@@ -177,8 +161,6 @@ function clampText(value: string, maxChars: number) {
   if (t.length <= maxChars) return t
   return t.slice(0, Math.max(0, maxChars - 1)).trimEnd() + '…'
 }
-
-// ── SVG icon helpers (Lucide-style strokes) ────────────────────────────────────
 
 type StrokeIconProps = {
   size?: number
@@ -420,7 +402,6 @@ const IconChat = (p: { size?: number; color?: string }) => (
   />
 )
 
-/** Filled red PDF document icon. */
 const IconPdf = ({ size = 10 }: { size?: number }) => (
   <Svg viewBox="0 0 24 24" width={size} height={size}>
     <Path
@@ -435,7 +416,6 @@ const IconPdf = ({ size = 10 }: { size?: number }) => (
   </Svg>
 )
 
-/** Rounded-square avatar tile (navy fill, white person silhouette). */
 const IconAvatarTile = ({
   size = 22,
   color = HEADER_BG,
@@ -450,7 +430,6 @@ const IconAvatarTile = ({
   </Svg>
 )
 
-/** Soft rounded-square tile with a centered icon. */
 function IconTile({
   children,
   size = 18,
@@ -476,7 +455,6 @@ function IconTile({
   )
 }
 
-/** Circular tile with a centered icon. */
 function CircleTile({
   children,
   size = 26,
@@ -502,9 +480,6 @@ function CircleTile({
   )
 }
 
-// ── Re-usable building blocks ──────────────────────────────────────────────────
-
-/** Section card with an icon + uppercase title at the top (no border-overlap). */
 function Section({
   icon,
   title,
@@ -556,7 +531,6 @@ function Section({
   )
 }
 
-/** Uppercase muted small label. */
 function Label({
   children,
   style,
@@ -582,7 +556,6 @@ function Label({
   )
 }
 
-/** Decide which file-type icon to render based on attachment fileType. */
 function attachmentIcon(fileType: string): React.ReactNode {
   const t = (fileType || '').toLowerCase()
   if (t.includes('pdf')) return <IconPdf size={11} />
@@ -598,7 +571,6 @@ function attachmentIcon(fileType: string): React.ReactNode {
   return <IconFileText size={11} color={MUTED} />
 }
 
-/** SUBMITTAL DETAILS metadata cell: green-accent label + circular green tile + value. */
 function DetailField({
   icon,
   label,
@@ -690,7 +662,6 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
             padding: FRAME_INNER_PADDING,
           }}
         >
-          {/* ── 1. Brand row ───────────────────────────────────────────────── */}
           <View
             style={{
               flexDirection: 'row',
@@ -770,7 +741,6 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
             </View>
           </View>
 
-          {/* ── 2. Header info row: Contact+Project | Status ────────────────── */}
           <View
             style={{
               flexDirection: 'row',
@@ -778,7 +748,6 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
               minHeight: 110,
             }}
           >
-            {/* Left card: Contact + Project */}
             <View
               style={{
                 flex: 62,
@@ -790,7 +759,6 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
                 backgroundColor: CARD_BG,
               }}
             >
-              {/* Cell A: Contact */}
               <View style={{ flex: 32, padding: 9 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
                   <IconMapPin size={10} color={TITLE_BLUE} />
@@ -846,7 +814,6 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
 
               <View style={{ width: 1, backgroundColor: BORDER }} />
 
-              {/* Cell B: Project */}
               <View style={{ flex: 30, padding: 9, alignItems: 'flex-start' }}>
                 <IconTile size={36}>
                   <IconBuilding size={22} color={TITLE_BLUE} />
@@ -877,7 +844,6 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
               </View>
             </View>
 
-            {/* Right card: Status / Date Sent / Required Review Date / Priority */}
             <View
               style={{
                 flex: 38,
@@ -971,7 +937,6 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
             </View>
           </View>
 
-          {/* ── 3. Sent From / Sent To row ──────────────────────────────────── */}
           <View
             style={{
               borderWidth: 1,
@@ -1025,7 +990,6 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
             </View>
           </View>
 
-          {/* ── 4. SUBMITTAL SUMMARY (2 cols) ───────────────────────────────── */}
           <Section icon={<IconFileText size={11} color={TITLE_BLUE} />} title="Submittal Summary">
             <View style={{ flexDirection: 'row' }}>
               <View style={{ flex: 1, paddingRight: 9, flexDirection: 'row' }}>
@@ -1068,7 +1032,6 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
             </View>
           </Section>
 
-          {/* ── 5. SUBMITTAL DETAILS ────────────────────────────────────────── */}
           <Section icon={<IconClipboardList size={11} color={TITLE_BLUE} />} title="Submittal Details">
             <View
               style={{
@@ -1163,7 +1126,6 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
             </View>
           </Section>
 
-          {/* ── 6. ATTACHMENTS ──────────────────────────────────────────────── */}
           {hasAttachments ? (
             <Section
               icon={<IconPaperclip size={11} color={TITLE_BLUE} />}
@@ -1272,7 +1234,6 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
             </Section>
           ) : null}
 
-          {/* ── 7. REVIEW / RESPONSE ────────────────────────────────────────── */}
           <Section
             icon={<IconChat size={11} color={TITLE_BLUE} />}
             title="Review / Response"
@@ -1385,7 +1346,6 @@ export function SubmittalPdfDocument({ data }: { data: SubmittalPdfViewModel }) 
             </View>
           </Section>
 
-          {/* ── 8. Footer (orange divider + navy band) ──────────────────────── */}
           <View style={{ marginTop: 4 }}>
             <View style={{ height: 2, backgroundColor: ORANGE_ACCENT, borderRadius: 1 }} />
             <View

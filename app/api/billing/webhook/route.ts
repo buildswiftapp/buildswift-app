@@ -1,6 +1,7 @@
 import Stripe from 'stripe'
 import { writeAuditLog } from '@/lib/server/audit'
 import { downgradeAccountToFree } from '@/lib/server/billing'
+import { getOrCreateMonthlyUsageRow } from '@/lib/server/account-usage'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { getStripeClient } from '@/lib/server/stripe'
 
@@ -89,7 +90,6 @@ export async function POST(req: Request) {
           status: subscription.status,
         }
       } catch {
-        // Fall back to invoice line period end if subscription lookup fails.
       }
     }
 
@@ -105,9 +105,10 @@ export async function POST(req: Request) {
   }
 
   const resolveTierFromPrice = (priceId: string | null) => {
-    if (priceId === process.env.STRIPE_PRICE_ENTERPRISE_MONTHLY) return 'enterprise'
+    if (priceId === process.env.STRIPE_PRICE_BUSINESS_MONTHLY) return 'business'
     if (priceId === process.env.STRIPE_PRICE_PROFESSIONAL_MONTHLY) return 'professional'
-    return 'free'
+    if (priceId === process.env.STRIPE_PRICE_STARTER_MONTHLY) return 'starter'
+    return 'trial'
   }
 
   try {
@@ -120,10 +121,12 @@ export async function POST(req: Request) {
           ? session.metadata.account_id
           : null
       let currentPeriodEnd: string | null = null
+      let currentPeriodStart: string | null = null
       let priceId: string | null = null
       if (subscriptionId) {
         const subscription = await stripe.subscriptions.retrieve(subscriptionId)
         currentPeriodEnd = new Date(subscription.current_period_end * 1000).toISOString()
+        currentPeriodStart = new Date(subscription.current_period_start * 1000).toISOString()
         priceId = subscription.items.data[0]?.price?.id ?? null
       }
 
@@ -132,6 +135,7 @@ export async function POST(req: Request) {
           stripe_customer_id: customerId,
           stripe_subscription_id: subscriptionId,
           stripe_price_id: priceId,
+          current_period_start: currentPeriodStart,
           current_period_end: currentPeriodEnd,
           cancel_at: null,
           billing_status: 'active',
@@ -141,6 +145,7 @@ export async function POST(req: Request) {
         await updateByCustomer(customerId, {
           stripe_subscription_id: subscriptionId,
           stripe_price_id: priceId,
+          current_period_start: currentPeriodStart,
           current_period_end: currentPeriodEnd,
           cancel_at: null,
           billing_status: 'active',
@@ -167,11 +172,15 @@ export async function POST(req: Request) {
       const currentPeriodEnd = sub.current_period_end
         ? new Date(sub.current_period_end * 1000).toISOString()
         : null
+      const currentPeriodStart = sub.current_period_start
+        ? new Date(sub.current_period_start * 1000).toISOString()
+        : null
       const cancelAt = sub.cancel_at ? new Date(sub.cancel_at * 1000).toISOString() : null
       if (customerId) {
         await updateByCustomer(customerId, {
           stripe_subscription_id: sub.id,
           stripe_price_id: priceId,
+          current_period_start: currentPeriodStart,
           current_period_end: currentPeriodEnd,
           cancel_at: cancelAt,
           billing_status: sub.status,
@@ -209,11 +218,24 @@ export async function POST(req: Request) {
       const { currentPeriodEnd, cancelAt, subscriptionId, priceId, tier, status } =
         await resolveInvoiceSubscriptionState(invoice)
       if (customerId) {
+        const accountId = await accountIdForCustomer(customerId)
+        const invoicePeriodStartSec = invoice.lines.data[0]?.period?.start
+        const usageKey =
+          typeof invoicePeriodStartSec === 'number' && Number.isFinite(invoicePeriodStartSec)
+            ? new Date(invoicePeriodStartSec * 1000).toISOString().slice(0, 10)
+            : undefined
+        if (accountId) {
+          try {
+            await getOrCreateMonthlyUsageRow(supabase as any, accountId, usageKey)
+          } catch {
+          }
+        }
         await updateByCustomer(customerId, {
           stripe_subscription_id: subscriptionId,
           stripe_price_id: priceId,
           subscription_tier: tier,
           billing_status: status ?? 'active',
+          current_period_start: usageKey ? new Date(usageKey).toISOString() : null,
           current_period_end: currentPeriodEnd,
           cancel_at: cancelAt,
         })

@@ -3,7 +3,7 @@ import { writeAuditLog } from '@/lib/server/audit'
 import { getAuthContext } from '@/lib/server/auth'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
-import { getPriceIdForTier, getStripeClient } from '@/lib/server/stripe'
+import { checkoutLineItemForTier, getPriceIdForTier, getStripeClient } from '@/lib/server/stripe'
 
 export async function POST(req: Request) {
   const auth = await getAuthContext(req)
@@ -11,16 +11,21 @@ export async function POST(req: Request) {
   if (!auth.accountId) return badRequest('Account context is unavailable.')
 
   const body = (await req.json().catch(() => ({}))) as { tier?: string }
-  const requestedTier = body.tier === 'pro' ? 'professional' : body.tier
-  if (requestedTier !== 'professional' && requestedTier !== 'enterprise') {
-    return badRequest('tier must be professional/pro or enterprise')
+  const requestedTier = body.tier
+  if (requestedTier !== 'starter' && requestedTier !== 'professional' && requestedTier !== 'business') {
+    return badRequest('tier must be starter, professional, or business')
   }
 
   const stripe = getStripeClient()
   if (!stripe) return serverError('Stripe is not configured')
 
+  let lineItem
+  try {
+    lineItem = checkoutLineItemForTier(requestedTier)
+  } catch (e) {
+    return badRequest(e instanceof Error ? e.message : 'Invalid checkout tier')
+  }
   const priceId = getPriceIdForTier(requestedTier)
-  if (!priceId) return badRequest(`Missing Stripe price id for ${requestedTier}`)
 
   const supabase = createSupabaseAdminClient() ?? (await createSupabaseServerClient())
   if (!supabase) return serverError('Supabase is not configured')
@@ -55,7 +60,7 @@ export async function POST(req: Request) {
   const session = await stripe.checkout.sessions.create({
     mode: 'subscription',
     customer: customerId,
-    line_items: [{ price: priceId, quantity: 1 }],
+    line_items: [lineItem],
     success_url: `${appUrl}/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${appUrl}/billing?checkout=cancelled`,
     allow_promotion_codes: true,
@@ -72,7 +77,7 @@ export async function POST(req: Request) {
         tier: requestedTier,
         stripe_customer_id: customerId,
         stripe_session_id: session.id,
-        stripe_price_id: priceId,
+        stripe_price_id: priceId ?? 'dynamic_price_data',
       },
       ip,
     },

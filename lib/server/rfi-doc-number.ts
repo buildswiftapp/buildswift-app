@@ -2,10 +2,6 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 const RFI_SEQ = /^RFI-(\d+)$/i
 
-/**
- * Next sequential RFI-{nnn...} doc_number within a project (RFI docs only).
- * Pads to 3 digits minimum; preserves higher widths if existing numbers exceed 999.
- */
 export async function allocateNextRfiDocNumber(supabase: SupabaseClient, projectId: string): Promise<string> {
   const { data, error } = await supabase
     .from('documents')

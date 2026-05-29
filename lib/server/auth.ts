@@ -1,4 +1,5 @@
 import type { User } from '@supabase/supabase-js'
+import { bootstrapAccountForUser } from '@/lib/server/bootstrap-account'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 
@@ -47,8 +48,6 @@ async function ensureUserAndAccount(user: User) {
     .maybeSingle()
 
   if (ownerLookupError) {
-    // If tenant policies are misconfigured, avoid hard failure.
-    // We'll continue with null account context unless admin client is available.
     if (!admin) return null
   }
 
@@ -57,35 +56,13 @@ async function ensureUserAndAccount(user: User) {
     return { accountId: ownerAccount.id, isOwner: true as const }
   }
 
-  // Without admin access we avoid tenant bootstrap writes.
   if (!admin) return null
 
-  await supabase.from('users').upsert(
-    {
-      id: user.id,
-      email: user.email ?? `${user.id}@unknown.local`,
-      full_name:
-        (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) || null,
-    },
-    { onConflict: 'id' }
-  )
+  const bootstrapped = await bootstrapAccountForUser(supabase, user)
+  if (!bootstrapped) return null
 
-  const { data: newAccount, error: accountError } = await supabase
-    .from('accounts')
-    .insert({
-      owner_user_id: user.id,
-      name:
-        (typeof user.user_metadata?.company_name === 'string' && user.user_metadata.company_name) ||
-        (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) ||
-        'My Account',
-    })
-    .select('id')
-    .single()
-
-  if (accountError || !newAccount) return null
-
-  setCachedAccount(user.id, newAccount.id, true)
-  return { accountId: newAccount.id, isOwner: true as const }
+  setCachedAccount(user.id, bootstrapped.accountId, true)
+  return { accountId: bootstrapped.accountId, isOwner: true as const }
 }
 
 function getBearerToken(req: Request) {
@@ -98,7 +75,6 @@ export async function getAuthContext(req: Request): Promise<AuthContext | null> 
   const supabase = await createSupabaseServerClient()
   if (!supabase) return null
 
-  // Read session only to obtain access token, then validate user via Auth server.
   const {
     data: { session },
   } = await supabase.auth.getSession()
@@ -111,7 +87,6 @@ export async function getAuthContext(req: Request): Promise<AuthContext | null> 
     user = sessionUser
   }
 
-  // Fallback for token-based callers if no cookie-backed session is available.
   if (!user) {
     const bearerToken = getBearerToken(req)
     if (bearerToken) {
@@ -129,10 +104,6 @@ export async function getAuthContext(req: Request): Promise<AuthContext | null> 
 
   if (!user) return null
 
-  // Always resolve account when possible. Without service role we still query
-  // `accounts` with the user JWT (works if RLS allows owners to read their row).
-  // Previously we skipped this when admin was unset, which forced accountId=null
-  // and made GET /api/documents always return [].
   const account = await ensureUserAndAccount(user)
   if (!account) {
     return { user, accountId: null, isOwner: true }

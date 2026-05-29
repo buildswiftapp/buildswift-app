@@ -375,7 +375,6 @@ export default function ProjectsPage() {
 
   return (
     <div className="min-h-full bg-white">
-      {/* Page header — full-bleed white band */}
       <div className="flex items-center justify-between gap-4 border-b border-[#e2e8f0] bg-white px-6 py-4">
         <div className="min-w-0">
           <h1 className="text-[22px] font-bold leading-tight text-[#111827]">Projects</h1>

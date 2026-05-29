@@ -40,7 +40,6 @@ import { RfiDraftPanel } from './rfi-draft-panel'
 
 const PAGE_SIZE = 10
 
-/** Matches reference mock title casing (e.g. “Slab Thickness Conflict”). */
 function detectionDisplayTitle(title: string): string {
   return title
     .trim()
@@ -152,7 +151,6 @@ function sheetTags(sources: ClashGapIssue['sources']) {
   return [...new Set(tags)].slice(0, 4)
 }
 
-/** Matches reference mock: first excerpt = Specification, second = Drawing */
 function sourceColumnKind(idx: number): 'specification' | 'drawing' {
   return idx === 0 ? 'specification' : 'drawing'
 }
@@ -175,8 +173,8 @@ function SourceTypeBadge({ kind }: { kind: 'specification' | 'drawing' }) {
 
 export function DetectionResultsWorkspace(props: {
   issues: ClashGapIssue[]
-  onDismiss: (id: string) => void
-  onMarkReviewed: (id: string) => void
+  onIgnoreIssue: (id: string) => void
+  onAddToRfi: (id: string) => void
   filter: IssueType | 'all'
   onFilterChange: (f: IssueType | 'all') => void
   disciplineFilter: string
@@ -188,7 +186,6 @@ export function DetectionResultsWorkspace(props: {
   bookmarkedIds: Set<string>
   onToggleBookmark: (id: string) => void
   onOpenSources: (issue: ClashGapIssue) => void
-  onFocusRfi: () => void
   draft: RfiDraftState | null
   setDraft: (updater: RfiDraftState | ((prev: RfiDraftState) => RfiDraftState)) => void
   uploadFilenames: string[]
@@ -196,9 +193,8 @@ export function DetectionResultsWorkspace(props: {
   onClearDraft: () => void
   onSaveDraftLocal: () => void
   onCreateRfi: () => void
-  onCreateChangeOrder: () => void
   rfiPanelRef: RefObject<HTMLDivElement | null>
-  onBackToPrepare: () => void
+  onBackToUpload?: () => void
 }) {
   const [page, setPage] = useState(1)
 
@@ -289,19 +285,20 @@ export function DetectionResultsWorkspace(props: {
 
   return (
     <div className="flex flex-col gap-5">
-      <Button
-        type="button"
-        variant="ghost"
-        className="-ml-2 h-9 w-fit text-[#475569]"
-        onClick={props.onBackToPrepare}
-      >
-        <ArrowLeft className="mr-2 h-4 w-4" />
-        Back to upload &amp; settings
-      </Button>
+      {props.onBackToUpload ? (
+        <Button
+          type="button"
+          variant="ghost"
+          className="-ml-2 h-9 w-fit text-[#475569]"
+          onClick={props.onBackToUpload}
+        >
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back to upload
+        </Button>
+      ) : null}
 
       <div className="flex flex-col gap-5 xl:grid xl:grid-cols-[minmax(0,0.93fr)_minmax(0,1.035fr)_minmax(0,1.035fr)] xl:items-start xl:gap-6">
-        {/* Left */}
-        <div className="flex min-h-0 min-w-0 flex-col gap-5 xl:rounded-2xl xl:border xl:border-[#e2e8f0] xl:bg-white xl:p-6 xl:shadow-sm">
+        <div className="flex min-h-0 min-w-0 flex-col gap-5 xl:h-[78vh] xl:max-h-[820px] xl:min-h-[560px] xl:overflow-hidden xl:rounded-2xl xl:border xl:border-[#e2e8f0] xl:bg-white xl:p-6 xl:shadow-sm">
           <h3 className="text-base font-semibold text-[#0f172a]">Issues found</h3>
 
           <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
@@ -370,7 +367,7 @@ export function DetectionResultsWorkspace(props: {
             </Select>
           </div>
 
-          <div className="scrollbar-thin flex max-h-[min(52vh,640px)] flex-col gap-3 overflow-y-auto pr-1">
+          <div className="scrollbar-thin flex max-h-[min(52vh,640px)] flex-col gap-3 overflow-y-auto pr-1 xl:max-h-none xl:min-h-0 xl:flex-1">
             {pageRows.length === 0 ? (
               <p className="text-muted-foreground py-8 text-center text-sm">No matching issues.</p>
             ) : (
@@ -485,8 +482,7 @@ export function DetectionResultsWorkspace(props: {
           </div>
         </div>
 
-        {/* Center */}
-        <div className="flex min-h-[480px] min-w-0 flex-col">
+        <div className="flex min-h-[480px] min-w-0 flex-col xl:h-[78vh] xl:max-h-[820px] xl:min-h-[560px]">
           {!selected ? (
             <Card className="flex flex-1 flex-col items-center justify-center rounded-2xl border-[#e2e8f0] bg-white p-12 text-center shadow-sm">
               <p className="font-medium text-[#0f172a]">Select an issue</p>
@@ -525,7 +521,7 @@ export function DetectionResultsWorkspace(props: {
                 </div>
               </div>
 
-              <CardContent className="flex flex-1 flex-col gap-5 overflow-y-auto p-5">
+              <CardContent className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5">
                 <p className="text-sm leading-relaxed text-[#475569]">{selected.summary}</p>
                 {selected.suggestedAction ? (
                   <p className="text-sm leading-relaxed text-[#475569]">
@@ -689,7 +685,7 @@ export function DetectionResultsWorkspace(props: {
                     type="button"
                     variant="outline"
                     className="rounded-xl border-[#e2e8f0] text-[#475569]"
-                    onClick={() => props.onDismiss(selected.id)}
+                    onClick={() => props.onIgnoreIssue(selected.id)}
                   >
                     <Ban className="mr-2 h-4 w-4" strokeWidth={2} aria-hidden />
                     Ignore Issue
@@ -697,7 +693,7 @@ export function DetectionResultsWorkspace(props: {
                   <Button
                     type="button"
                     className="rounded-xl bg-violet-600 text-white hover:bg-violet-700"
-                    onClick={() => props.onFocusRfi()}
+                    onClick={() => props.onAddToRfi(selected.id)}
                   >
                     <SquarePlus className="mr-2 h-4 w-4" strokeWidth={2} aria-hidden />
                     Add to RFI
@@ -708,8 +704,7 @@ export function DetectionResultsWorkspace(props: {
           )}
         </div>
 
-        {/* Right */}
-        <div className="min-h-0 min-w-0">
+        <div className="min-h-0 min-w-0 xl:h-[78vh] xl:max-h-[820px] xl:min-h-[560px]">
           <RfiDraftPanel
             panelRef={props.rfiPanelRef}
             issue={props.linkedIssue}

@@ -40,9 +40,10 @@ import {
   CLASH_GAP_RFI_PREFILL_STORAGE_KEY,
   type ClashGapRfiPrefillPayload,
 } from '@/lib/clash-gap-rfi-prefill'
+import { DOCUMENT_ATTACHMENT_MAX_BYTES, formatUploadSizeLimit } from '@/lib/upload-limits'
 
 const PAGE_BG = '#f1f5f9'
-const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+const MAX_ATTACHMENT_BYTES = DOCUMENT_ATTACHMENT_MAX_BYTES
 
 const capLabel = 'mb-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-[#64748b]'
 const capLabelRow = 'text-[11px] font-semibold uppercase tracking-[0.14em] text-[#64748b]'
@@ -300,7 +301,6 @@ function NewDocumentContent() {
           title: formData.title,
           description: descriptionBody,
           due_date: formData.dueDate || null,
-          // For send-for-review, we create the document then collect reviewer details on the next screen.
           save_as_draft: true,
           metadata: {
             rfiDate: formData.type === 'rfi' ? formData.date : undefined,
@@ -353,7 +353,6 @@ function NewDocumentContent() {
             json: { status: 'resolved', resolved_document_id: document.id },
           })
         } catch {
-          /* non-blocking */
         }
       }
 
@@ -460,7 +459,6 @@ function NewDocumentContent() {
 
         <div className="grid grid-cols-1 gap-6 md:gap-7 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
           <div className="min-w-0 space-y-6">
-            {/* Document setup */}
             <div className={formCardClassName()}>
               <div className="grid gap-5 sm:grid-cols-3">
                 <div className="min-w-0 sm:col-span-1">
@@ -511,7 +509,6 @@ function NewDocumentContent() {
               </div>
             </div>
 
-            {/* Title + description */}
             <div className={formCardClassName()}>
               {formData.type === 'rfi' ? (
                 <div className="mb-6">
@@ -663,12 +660,11 @@ function NewDocumentContent() {
               </div>
             )}
 
-            {/* Supporting documents */}
             <div className={formCardClassName()}>
               <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold text-[#0f172a]">Supporting documents</h2>
                 <span className="rounded-full bg-[#dbeafe] px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-[#1e40af]">
-                  10–25 MB limit per file
+                  Up to {formatUploadSizeLimit(MAX_ATTACHMENT_BYTES)} per file
                 </span>
               </div>
               <div
@@ -726,7 +722,6 @@ function NewDocumentContent() {
               </div>
             </div>
 
-            {/* Notes */}
             <div className={formCardClassName()}>
               <label className={capLabel}>Additional notes (optional)</label>
               <Textarea

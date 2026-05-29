@@ -16,11 +16,8 @@ type BaseDoc = {
   title: string
   description: string
   current_version_no: number
-  /** Canonical lifecycle status (per-doc-type vocabulary in `lib/status.ts`). */
   status: string
-  /** Legacy: kept for back-compat during Phase 1 dual-write. */
   internal_status: string
-  /** Legacy: kept for back-compat during Phase 1 dual-write. */
   external_status: string
   is_final: boolean
   created_by: string
@@ -134,7 +131,6 @@ export async function updateDocumentStatusesById(params: {
   id: string
   internalStatus: string
   externalStatus: string
-  /** Canonical status (per `lib/status.ts`). When provided, dual-writes alongside legacy fields. */
   status?: string
 }) {
   const { supabase, id, internalStatus, externalStatus, status } = params
@@ -155,11 +151,6 @@ export async function updateDocumentStatusesById(params: {
   return { data, error }
 }
 
-/**
- * Update only the canonical `status` column for a document. Used by the
- * `POST /api/documents/[id]/close` endpoint and any future writers that should
- * not touch the legacy status fields.
- */
 export async function updateDocumentStatusOnly(params: {
   supabase: any
   id: string

@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 const baseUrl = process.env.API_BASE_URL || 'http://localhost:3000'
 
 async function call(path, init) {

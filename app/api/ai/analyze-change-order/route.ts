@@ -1,7 +1,8 @@
-import { badRequest, ok, serverError, unauthorized } from '@/lib/server/api-response'
+import { badRequest, forbidden, ok, serverError, unauthorized } from '@/lib/server/api-response'
 import { writeAuditLog } from '@/lib/server/audit'
 import { getAuthContext } from '@/lib/server/auth'
 import { assertCanUseAiAssist } from '@/lib/server/billing'
+import { incrementMonthlyAiGenerations } from '@/lib/server/account-usage'
 import { getOpenAIClient } from '@/lib/server/openai'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
@@ -56,7 +57,7 @@ export async function POST(req: Request) {
   const supabase = createSupabaseAdminClient() ?? (await createSupabaseServerClient())
   if (!supabase) return serverError('Supabase is not configured')
   const aiGate = await assertCanUseAiAssist(supabase as any, auth.accountId)
-  if (!aiGate.ok) return badRequest(aiGate.reason)
+  if (!aiGate.ok) return forbidden(aiGate.reason)
 
   const parsed = analyzeChangeOrderSchema.safeParse(await req.json().catch(() => ({})))
   if (!parsed.success) return badRequest('Invalid payload', parsed.error.flatten())
@@ -102,6 +103,11 @@ export async function POST(req: Request) {
       },
       supabase as any
     )
+
+    try {
+      await incrementMonthlyAiGenerations(supabase as any, auth.accountId, 1)
+    } catch {
+    }
 
     return ok(normalizeResult(parsedJson))
   } catch {

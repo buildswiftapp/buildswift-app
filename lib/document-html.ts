@@ -1,5 +1,3 @@
-/** Shared HTML builders + parsers for RFI / Submittal / Change Order documents. */
-
 import type {
   ChangeOrderBaselineState,
   ChangeOrderCostState,
@@ -40,7 +38,6 @@ export function stripSimpleHtml(s: string) {
   return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-/** Plain text for react-pdf descriptions: strips tags, preserves line breaks, no truncation. */
 export function stripHtmlToPlainParagraphs(raw: string): string {
   const t = (raw ?? '').trim()
   if (!t) return ''
@@ -94,7 +91,6 @@ export function parseMoneyInput(raw: string): number {
   return Number.isFinite(n) ? n : 0
 }
 
-/** Long-form date for RFI / submittal header lines (matches prior HTML exports). */
 export function formatLongDateFromIso(dateIso: string): string {
   if (!dateIso.trim()) return ''
   const t = Date.parse(dateIso.trim() + 'T12:00:00')
@@ -106,7 +102,6 @@ export function formatLongDateFromIso(dateIso: string): string {
   })
 }
 
-/** Header block only (stored in `title` / `doc_number` / metadata separately; composed for PDFs / legacy). */
 export function buildRfiHeaderHtml(values: {
   number: string
   title: string
@@ -121,13 +116,6 @@ export function buildRfiHeaderHtml(values: {
 <p><strong>Title:</strong> ${values.title}</p>`
 }
 
-/**
- * Body HTML only — stored in `document.description` while `title`, `doc_number`,
- * and `metadata.rfiDate` / `metadata.question` / `metadata.notes` hold the rest.
- *
- * `reasonsForRequest` (multi-select array) takes precedence when provided;
- * otherwise the legacy `reasonForRequest` joined string is used as a fallback.
- */
 export function buildRfiDescriptionBody(values: {
   reasonForRequest?: string
   reasonsForRequest?: string[]
@@ -161,7 +149,6 @@ export function buildRfiDescriptionBody(values: {
   return reasonBlock + main + notesBlock
 }
 
-/** Full printable HTML (header + body) — previews, exports, and legacy rows. */
 export function buildRfiHtml(values: {
   number: string
   title: string
@@ -184,10 +171,6 @@ export function buildRfiHtml(values: {
   )
 }
 
-/**
- * If `description` already contains the legacy header (`RFI Number:`), return as-is.
- * Otherwise prepend a header from document row + metadata (body-only storage).
- */
 export function ensureRfiFullDescriptionHtml(
   doc: { title: string; description: string; doc_number: string | null },
   metadata: Record<string, unknown>,
@@ -234,7 +217,6 @@ export function buildSubmittalHeaderHtml(values: {
 <p><strong>Quantity:</strong> ${values.quantity || 'TBD'}</p>`
 }
 
-/** Body HTML for submittal — stored in `document.description` when using structured storage. */
 export function buildSubmittalDescriptionBody(values: { description: string; notes: string }): string {
   const d = values.description.trim()
   const notes = values.notes.trim()
@@ -370,9 +352,6 @@ export function scheduleLabelToValue(label: string): string {
   if (byValue) return byValue.value
   return `${CUSTOM_SCHEDULE_PREFIX}${t}`
 }
-
-/** Text for the schedule impact free-text field from a stored `scheduleImpact` value. */
-/** @deprecated use `lib/co-impact.ts` structured schedule state. */
 export function scheduleImpactValueToInputText(value: string): string {
   if (value === 'none') return ''
   const opt = CO_SCHEDULE_OPTIONS.find((o) => o.value === value)
@@ -381,8 +360,6 @@ export function scheduleImpactValueToInputText(value: string): string {
   return value
 }
 
-/** First whole-number day count from duration text — aligned with change-order PDF `parseWholeDays`. */
-/** @deprecated use `lib/co-impact.ts` baseline duration parsing. */
 export function parseCoWholeDaysInput(raw: string | number | null | undefined): number | null {
   if (raw === null || raw === undefined) return null
   if (typeof raw === 'number')
@@ -417,8 +394,6 @@ function coScheduleSignedDeltaDays(choice: 'none' | 'adds' | 'reduces', daysRaw:
   return choice === 'adds' ? mag : -mag
 }
 
-/** Revised duration phrase for metadata — baseline days + signed schedule delta; empty string when incomplete (matches PDF inference). */
-/** @deprecated use `lib/co-impact.ts` derived schedule totals. */
 export function computeCoRevisedDurationPhrase(
   originalDurationRaw: string,
   scheduleNoImpact: boolean,
@@ -474,7 +449,6 @@ function extractRfiNarrativeFromHtml(html: string): string {
   return extractH3Block(html, 'Description') || ''
 }
 
-/** Build initial RFI form state from API document + latest version metadata */
 export function initialRfiState(args: {
   doc: { title: string; description: string; doc_number: string | null }
   latestMeta: Record<string, unknown>
@@ -500,9 +474,6 @@ export function initialRfiState(args: {
     new Date().toISOString().slice(0, 10)
   const question = (typeof m.question === 'string' && m.question) || extractH3Block(html, 'Question') || ''
 
-  // Prefer the new array shape; fall back to legacy joined string, then to the
-  // HTML body's "Reason for Request" block. `parseLegacyReasons` routes
-  // canonical-label tokens to `selected[]` and keeps the rest in `other`.
   let reasonsForRequest: string[] = []
   let reasonForRequestOther = ''
   if (Array.isArray(m.reasonsForRequest)) {
@@ -629,10 +600,8 @@ export function initialChangeOrderState(args: {
   description: string
   reason: string
   originalContractAmount: string
-  /** Calendar-day total before this CO — free text or numeric; PDF parses first whole number */
   originalDuration: string
   revisedContractAmount: string
-  /** Revised project duration — free text or numeric; PDF uses revisedProjectDurationDays */
   revisedDuration: string
   costImpact: string
   scheduleImpact: string

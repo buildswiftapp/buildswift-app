@@ -1,8 +1,3 @@
-/**
- * pdfjs (via pdf-parse) expects browser geometry APIs. In Next.js the native
- * @napi-rs/canvas binding may not resolve; the pure-JS geometry polyfill is enough
- * for text extraction.
- */
 function installPdfGlobals() {
   if (typeof globalThis.DOMMatrix !== 'undefined') return
 

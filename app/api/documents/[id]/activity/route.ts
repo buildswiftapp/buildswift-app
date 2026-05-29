@@ -128,8 +128,6 @@ async function fetchReviewDecisionsForDocument(
       decided_at: decidedAt,
       reviewer_email: reviewerEmail,
       reviewer_name: fullName.length > 0 ? fullName : null,
-      // RFI reviewer outcomes are surfaced to users as "Answered" rather than
-      // "Approved" — submittals and change orders keep the "Approved" label.
       status:
         decision === 'approve'
           ? docType === 'rfi'

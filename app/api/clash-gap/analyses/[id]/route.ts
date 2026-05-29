@@ -5,8 +5,11 @@ import {
   getAnalysisForAccount,
   parseSettings,
 } from '@/lib/server/clash-gap/access'
+import { deleteClashGapAnalysisStorage } from '@/lib/server/clash-gap/storage'
+import { incrementAccountStorageBytes } from '@/lib/server/storage-usage'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
+import { parseStages } from '@/lib/clash-gap-stages'
 import { updateClashGapAnalysisSchema } from '@/lib/server/validators'
 
 type Params = { params: Promise<{ id: string }> }
@@ -45,12 +48,57 @@ export async function GET(_req: Request, { params }: Params) {
       settings: parseSettings(analysis.settings),
       error_message: analysis.error_message,
       summary: analysis.summary,
+      stages: parseStages((analysis as { stages?: unknown }).stages),
       created_at: analysis.created_at,
       completed_at: analysis.completed_at,
     },
     files: files ?? [],
     issues: issues ?? [],
   })
+}
+
+export async function DELETE(req: Request, { params }: Params) {
+  const auth = await getAuthContext(req)
+  if (!auth) return unauthorized()
+  if (!auth.accountId) return badRequest('Account context is unavailable.')
+
+  const { id } = await params
+  const supabase = createSupabaseAdminClient() ?? (await createSupabaseServerClient())
+  if (!supabase) return serverError('Supabase is not configured')
+
+  const analysis = await getAnalysisForAccount(supabase, id, auth.accountId)
+  if (!analysis) return notFound('Analysis not found')
+
+  const { data: files } = await supabase
+    .from('clash_gap_analysis_files')
+    .select('size_bytes')
+    .eq('analysis_id', id)
+  const freedBytes = (files || []).reduce(
+    (sum: number, f: { size_bytes: number | null }) => sum + (f.size_bytes || 0),
+    0,
+  )
+
+  try {
+    await deleteClashGapAnalysisStorage(auth.accountId, id)
+  } catch (e) {
+    console.error('[clash-gap delete] storage cleanup failed', e)
+  }
+
+  const { error } = await supabase
+    .from('clash_gap_analyses')
+    .delete()
+    .eq('id', id)
+    .eq('account_id', auth.accountId)
+  if (error) return serverError(error.message)
+
+  if (freedBytes > 0) {
+    try {
+      await incrementAccountStorageBytes(supabase as any, auth.accountId, -freedBytes)
+    } catch {
+    }
+  }
+
+  return ok({ deleted: true })
 }
 
 export async function PATCH(req: Request, { params }: Params) {

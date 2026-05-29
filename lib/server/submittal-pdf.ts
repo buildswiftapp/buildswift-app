@@ -11,17 +11,12 @@ import {
   type SubmittalPdfViewModel,
 } from '@/lib/server/submittal-pdf-document'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 export type SubmittalPdfInput = {
   title: string
   projectName: string
   descriptionHtml: string
-  /** Stable id for default submittal # when `submittalNo` is absent */
   documentId?: string | null
-  /** Account logo data URI; falls back to env/default asset */
   brandingLogoDataUri?: string | null
-  // Metadata
   submittalNo?: string | null
   projectAddress?: string | null
   dateIssued?: string | null
@@ -30,35 +25,28 @@ export type SubmittalPdfInput = {
   from?: string | null
   submittalType?: string | null
   priority?: string | null
-  // Details
   detailedDescription?: string | null
   manufacturerVendor?: string | null
   materialProductName?: string | null
   modelNumber?: string | null
   quantity?: string | null
-  // Reference info
   specificationSections?: string | null
   drawingSheetNumbers?: string | null
   detailReferences?: string | null
   relatedRfiNumbers?: string | null
-  // Attachments
   attachments?: Array<{
     fileName?: string | null
     fileType?: string | null
     notes?: string | null
   }> | string[] | null
-  // Review / response
   reviewStatus?: string | null
   reviewerComments?: string | null
   reviewedBy?: string | null
   reviewDate?: string | null
-  // Impact
   costImpact?: string | null
   scheduleImpact?: string | null
   impactDescription?: string | null
-  // Approval
   approvalRows?: Array<{
-    title: string // legacy "name"
     role: string
     action?: string
     signature: 'approved' | 'rejected' | 'pending'
@@ -67,12 +55,10 @@ export type SubmittalPdfInput = {
     notes: string
     signatureUrl?: string | null
   }>
-  // Branding
   brandingCompanyName?: string | null
   contactAddress?: string | null
   contactPhone?: string | null
   contactEmail?: string | null
-  // legacy (used by old routes)
   projectNo?: string | null
   date?: string | null
   actionNeededBy?: string | null
@@ -80,8 +66,6 @@ export type SubmittalPdfInput = {
   manufacturer?: string | null
   productName?: string | null
 }
-
-// ── Logo resolution ────────────────────────────────────────────────────────────
 
 const DEFAULT_LOGO_PATHS = [
   process.env.REVIEW_PDF_LOGO_PATH,
@@ -98,14 +82,11 @@ function resolveLogoDataUri(): string {
       cachedLogoDataUri = `data:image/png;base64,${bytes.toString('base64')}`
       return cachedLogoDataUri
     } catch {
-      // try next
     }
   }
   cachedLogoDataUri = ''
   return ''
 }
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmtLongDate(raw: string | null | undefined): string {
   if (!raw) return '—'
@@ -207,8 +188,6 @@ Return JSON only. Rules:
   }
 }
 
-// ── Main function ──────────────────────────────────────────────────────────────
-
 export async function generateSubmittalPdfBuffer(
   input: SubmittalPdfInput
 ): Promise<Buffer> {
@@ -230,7 +209,6 @@ export async function generateSubmittalPdfBuffer(
 
   const html = input.descriptionHtml || ''
 
-  // Back-compat: map legacy keys to new
   const dateIssuedRaw = input.dateIssued ?? input.date ?? null
   const requiredReviewRaw = input.requiredReviewDate ?? input.actionNeededBy ?? null
   const projectAddressRaw = input.projectAddress ?? input.projectNo ?? null
@@ -318,7 +296,6 @@ export async function generateSubmittalPdfBuffer(
   function isReviewActivityRole(role: string | null | undefined): boolean {
     const t = (role ?? '').trim().toLowerCase()
     if (!t) return true
-    // Exclude obvious non-review activity rows.
     if (t.includes('contractor') || t.includes('submitter')) return false
     return true
   }
@@ -335,10 +312,8 @@ export async function generateSubmittalPdfBuffer(
     return NOT_PROVIDED
   })()
 
-  /** Full workflow log on PDF (submitters + reviewers) per product spec */
   const ensuredApprovalRows = approvalRows
 
-  /** Signature line for Review / Response block — prefer reviewer-role rows */
   const pickReviewerSignature = () => {
     const rows = ensuredApprovalRows
     const reviewerMatch = [...rows]

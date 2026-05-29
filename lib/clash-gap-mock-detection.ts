@@ -18,7 +18,6 @@ function pick<T>(seed: number, items: readonly T[]): T {
   return items[seed % items.length]
 }
 
-/** Stub page counts from filename / fake parse */
 export function stubPagesForFilename(name: string): number {
   const base = hashSeed(name.toLowerCase())
   return 4 + (base % 45)
@@ -621,7 +620,6 @@ function templatesFromContext(
     },
   ]
 
-  // Clean accidental markdown in excerpts
   const clean = (t: Template[]) =>
     t.map((x) => ({
       ...x,
@@ -638,7 +636,6 @@ function templatesFromContext(
   }
 }
 
-/** Deterministic mock issues from uploads + settings (replace with API later). ~23 issues for UI density. */
 export function generateMockIssues(
   rows: DocumentUploadRow[],
   settings: DetectionSettings

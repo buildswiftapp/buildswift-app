@@ -16,7 +16,6 @@ type ReviewPdfInput = {
   contactEmail?: string | null
   projectNo?: string | null
   reportDate?: string | null
-  /** ISO or stored date; shown on RFI PDF as “Contract Date” when set. */
   contractDate?: string | null
   actionNeededBy?: string | null
   submittedBy?: string | null
@@ -34,17 +33,10 @@ type ReviewPdfInput = {
     date: string
     notes: string
   }>
-  /**
-   * Visual status label rendered in the top summary card. Any uppercase
-   * canonical label (e.g. 'PENDING', 'APPROVED', 'UNDER REVIEW',
-   * 'REVISE & RESUBMIT', 'CLOSED') produced by `pdfStatusLabel(...)`.
-   */
   reviewStatus?: string
-  /** When true, use account branding / neutral export styling instead of default BuildSwift theme. */
   applyAccountBranding?: boolean
   brandingCompanyName?: string | null
   brandingPrimaryColor?: string | null
-  /** Resolved data URI for React-PDF Image (empty to skip). */
   brandingLogoDataUri?: string | null
   metadata?: Record<string, unknown>
 }
@@ -142,14 +134,12 @@ function canonicalNarrativeLabel(rawHeading: string, docType: string): string {
   ) {
     return "CONTRACTOR'S PROPOSED INTERPRETATION"
   }
-  // For change orders, treat generic notes as the proposed interpretation block.
   if (docType === 'change_order' && heading === 'notes') {
     return "CONTRACTOR'S PROPOSED INTERPRETATION"
   }
   return rawHeading.replace(/\s+/g, ' ').toUpperCase()
 }
 
-/** One card per <h3> block (and similar), excluding title/list/approval sections. */
 function narrativeSectionsFromParsed(
   sections: Array<{ heading: string; body: string }>,
   docType: string
@@ -230,7 +220,6 @@ function normalizeRfiNarrativeSections(
     ''
 
   const out: PdfNarrativeSection[] = []
-  // Keep non-change-order PDFs free from change-order-only headings.
   if (reasonFromSections) out.push({ label: 'REASON FOR CHANGE', body: reasonFromSections })
   if (question) out.push({ label: 'QUESTION / ISSUE', body: question })
   if (proposed) {
@@ -265,7 +254,6 @@ function resolveLogoDataUri() {
       cachedLogoDataUri = `data:image/png;base64,${bytes.toString('base64')}`
       return cachedLogoDataUri
     } catch {
-      // Try next candidate path.
     }
   }
   return ''
@@ -474,7 +462,6 @@ export async function generateReviewPdfBuffer(input: ReviewPdfInput): Promise<Bu
     const fmtUsd = (n: number) =>
       `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-    // New format: saved by the Cost Breakdown section ({description, quantity, unitPrice, total})
     const newRaw = (input as any).metadata?.costBreakdownItems
     if (Array.isArray(newRaw) && newRaw.length) {
       return newRaw
@@ -491,7 +478,6 @@ export async function generateReviewPdfBuffer(input: ReviewPdfInput): Promise<Bu
         .filter((row) => row.item && row.amount)
     }
 
-    // Legacy format: {item, amount}
     const raw = (input as any).metadata?.costBreakdown
     if (Array.isArray(raw)) {
       return raw
@@ -526,8 +512,6 @@ export async function generateReviewPdfBuffer(input: ReviewPdfInput): Promise<Bu
       if (logo) logoDataUri = logo
       themePrimary = color || defaultThemePrimary
       themeAccent = color ? brandingAccentFromPrimary(color) : defaultThemeAccent
-      // badgeBackground intentionally stays as defaultBadgeBg (amber) regardless of primary colour —
-      // the number badge always uses the warm accent as shown in the standard form.
     }
   }
 

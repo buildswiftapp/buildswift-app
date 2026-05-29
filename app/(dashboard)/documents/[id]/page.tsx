@@ -144,11 +144,8 @@ type ApiDocument = {
   id: string
   project_id: string
   doc_type: 'rfi' | 'submittal' | 'change_order'
-  /** Canonical lifecycle status (per `lib/status.ts`). */
   status: string
-  /** Legacy: kept for back-compat fallback during Phase 1 dual-write. */
   internal_status: string
-  /** Legacy: kept for back-compat fallback during Phase 1 dual-write. */
   external_status: string
   doc_number: string | null
   title: string
@@ -355,8 +352,6 @@ export default function DocumentDetailPage({ params }: { params: Promise<{ id: s
   const scheduleComputed = useMemo(() => computeSchedule(co.schedule), [co.schedule])
   const hintClass = 'mt-1.5 text-xs text-muted-foreground'
 
-  // Canonical status read with legacy-fallback derivation so older rows that
-  // haven't been backfilled yet still produce sensible badges.
   const canonicalStatus: string = doc
     ? typeof doc.status === 'string' && doc.status.length
       ? doc.status

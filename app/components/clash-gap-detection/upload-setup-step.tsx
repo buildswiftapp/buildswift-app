@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode, type RefObject } from 'react'
 import {
-  DOCUMENT_LABEL_TYPES,
+  CLASH_GAP_UPLOAD_TYPES,
   type DocumentLabelType,
   type DocumentUploadRow,
 } from '@/lib/clash-gap-types'
@@ -12,7 +12,6 @@ import {
   hasPlansDocument,
   hasSpecsDocument,
 } from '@/lib/clash-gap-document-inference'
-import { stubPagesForFilename } from '@/lib/clash-gap-mock-detection'
 import type { Project } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -27,6 +26,7 @@ import {
 import { cn } from '@/lib/utils'
 import { CloudUpload, FileText, ImageIcon, Plus } from 'lucide-react'
 import { toast } from 'sonner'
+import { CLASH_GAP_MAX_BYTES, formatUploadSizeLimit } from '@/lib/upload-limits'
 import {
   Dialog,
   DialogContent,
@@ -89,6 +89,7 @@ export function UploadSetupStep(props: {
   fileInputRef: RefObject<HTMLInputElement | null>
   analysisId?: string | null
   onUploadRow?: (row: DocumentUploadRow) => Promise<void>
+  onRemoveRow?: (row: DocumentUploadRow) => Promise<void>
   onRowTypeChange?: (row: DocumentUploadRow, type: DocumentLabelType) => void | Promise<void>
   onCreateProject?: (input: {
     name: string
@@ -105,6 +106,7 @@ export function UploadSetupStep(props: {
     fileInputRef,
     analysisId,
     onUploadRow,
+    onRemoveRow,
     onRowTypeChange,
     onCreateProject,
   } = props
@@ -123,19 +125,19 @@ export function UploadSetupStep(props: {
       const file = files[i]
       const okMime = ACCEPT.has(file.type) || (!file.type && ACCEPT_EXT.test(file.name))
       if (!okMime) {
-        toast.error(`${file.name} is not an accepted type (${formatAllowed()}).`)
+        toast.error(`${file.name} is not an accepted type (${formatAllowed()}).`)                                                                                                                                                                                                                                                                                                                                                                                                           
         continue
       }
-      if (file.size > 25 * 1024 * 1024) {
-        toast.error(`${file.name} exceeds the 25 MB limit.`)
+      if (file.size > CLASH_GAP_MAX_BYTES) {
+        toast.error(`${file.name} exceeds the ${formatUploadSizeLimit(CLASH_GAP_MAX_BYTES)} limit.`)
         continue
       }
       nextRows.push({
         id: `doc-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`,
         filename: file.name,
         type: 'plans',
-        pages: stubPagesForFilename(file.name),
-        status: 'ready',
+        pages: '—',
+        status: onUploadRow ? 'pending' : 'ready',   
         file,
       })
     }
@@ -143,10 +145,12 @@ export function UploadSetupStep(props: {
     if (typedRows.length) {
       const merged = [...rows, ...typedRows]
       onRowsChange(merged)
-      if (analysisId && onUploadRow) {
-        for (const row of typedRows) {
-          void onUploadRow(row)
-        }
+      if (onUploadRow) {
+        void (async () => {
+          for (const row of typedRows) {
+            await onUploadRow(row)
+          }
+        })()
       }
     }
   }
@@ -165,6 +169,12 @@ export function UploadSetupStep(props: {
   }
 
   const removeRow = (id: string) => {
+    const row = rows.find((r) => r.id === id)
+    if (!row) return
+    if (onRemoveRow) {
+      void onRemoveRow(row)
+      return
+    }
     onRowsChange(rows.filter((r) => r.id !== id))
   }
 
@@ -312,7 +322,10 @@ export function UploadSetupStep(props: {
                 <p className="mt-5 text-lg font-bold text-[#0f172a]">
                   Drag and drop documents here
                 </p>
-                <p className="mt-2 max-w-md text-sm text-[#64748b]">{formatAllowed()}.</p>
+                <p className="mt-2 max-w-md text-sm text-[#64748b]">
+                  {formatAllowed()}.{' '}
+                  <span className="font-medium">Up to {formatUploadSizeLimit(CLASH_GAP_MAX_BYTES)} per file.</span>
+                </p>
                 <div className="mt-6 flex flex-wrap items-center justify-center gap-x-10 gap-y-4">
                   <FormatTypeChip
                     label="PDF"
@@ -360,8 +373,10 @@ export function UploadSetupStep(props: {
                 </span>
                 {!canRunClashGapDetection(rows) ? (
                   <span className="mt-1 block">
-                    Set <span className="font-semibold">Document type</span> in the table below
-                    (e.g. Specifications for your spec PDF). Types are suggested from filenames.
+                    Upload at least two files (PDF or image scan). For image scans, set one row to{' '}
+                    <span className="font-semibold">Plans</span> and one to{' '}
+                    <span className="font-semibold">Specifications</span> — two images uploaded
+                    together are assigned automatically.
                   </span>
                 ) : (
                   <span className="mt-1 block">Drawings are reviewed against the specifications.</span>
@@ -395,7 +410,7 @@ export function UploadSetupStep(props: {
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                {DOCUMENT_LABEL_TYPES.map((t) => (
+                                {CLASH_GAP_UPLOAD_TYPES.map((t) => (
                                   <SelectItem key={t} value={t}>
                                     {humanLabelType(t)}
                                   </SelectItem>

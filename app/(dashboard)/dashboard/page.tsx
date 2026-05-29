@@ -20,6 +20,7 @@ import {
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts'
 import { useApp } from '@/lib/app-context'
 import { apiFetch } from '@/lib/api'
+import { UpgradeRequiredDialog } from '@/app/components/billing/upgrade-required-dialog'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import {
@@ -53,10 +54,10 @@ type DashboardDocument = {
 
 type BillingSummary = {
   tier: string
-  documents_used: number
-  documents_limit: number
   ai_generations_used: number
-  ai_generations_limit: number
+  ai_generations_limit: number | null
+  clash_gap_reports_used: number
+  clash_gap_reports_limit: number | null
 }
 
 const TYPE_COLORS = {
@@ -71,6 +72,8 @@ export default function DashboardPage() {
   const [documents, setDocuments] = useState<DashboardDocument[]>([])
   const [loadingData, setLoadingData] = useState(true)
   const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null)
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
+  const [upgradeMessage, setUpgradeMessage] = useState('')
 
   useEffect(() => {
     let active = true
@@ -86,8 +89,16 @@ export default function DashboardPage() {
           setDocuments(documentsRes.documents ?? [])
         }
 
-        const summary = await apiFetch<BillingSummary>('/api/billing/summary')
-        if (active) setBillingSummary(summary)
+        try {
+          const summary = await apiFetch<BillingSummary>('/api/billing/summary')
+          if (active) setBillingSummary(summary)
+        } catch (e) {
+          const status = typeof (e as any)?.status === 'number' ? (e as any).status : null
+          if (status === 403) {
+            setUpgradeMessage(e instanceof Error ? e.message : 'Upgrade required to continue.')
+            setUpgradeOpen(true)
+          }
+        }
       } catch {
         if (active) {
           setProjects([])
@@ -163,6 +174,11 @@ export default function DashboardPage() {
 
   return (
     <div className="relative">
+      <UpgradeRequiredDialog
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        message={upgradeMessage || 'Upgrade your plan to continue.'}
+      />
       <BackgroundDecoration />
 
       <div className="relative app-page space-y-6">
@@ -176,7 +192,6 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Stat cards */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
             label="Active Projects"
@@ -213,7 +228,6 @@ export default function DashboardPage() {
         </div>
 
 
-        {/* Recent docs + Documents by Type */}
         <div className="grid gap-6 lg:grid-cols-3">
           <section className="app-surface lg:col-span-2 p-6">
             <div className="flex items-start justify-between">
@@ -318,7 +332,6 @@ export default function DashboardPage() {
           </section>
         </div>
 
-        {/* Active Projects */}
         <section className="app-surface p-6">
           <div className="flex items-start justify-between">
             <div className="flex items-start gap-3">
@@ -388,7 +401,6 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* Usage Overview */}
         {billingSummary && (
           <section className="app-surface p-6">
             <div className="flex items-start gap-3">
@@ -405,19 +417,19 @@ export default function DashboardPage() {
 
             <div className="mt-5 grid gap-10 md:grid-cols-2">
               <UsageBar
-                label="Documents"
+                label="Clash/Gap Reports"
                 icon={<FileText className="h-6 w-6" strokeWidth={1.8} />}
-                used={uiDocuments.length}
-                limit={billingSummary.documents_limit}
-                unlimitedNote="Unlimited documents available on this plan"
-                limitedNote={(remaining) => `${remaining} documents remaining this month`}
+                used={billingSummary.clash_gap_reports_used}
+                limit={billingSummary.clash_gap_reports_limit}
+                unlimitedNote="Reports are available on this plan"
+                limitedNote={(remaining) => `${remaining} reports remaining this month`}
               />
               <UsageBar
                 label="AI Generations"
                 icon={<Sparkles className="h-6 w-6" strokeWidth={1.8} />}
                 used={billingSummary.ai_generations_used}
                 limit={billingSummary.ai_generations_limit}
-                unlimitedNote="Unlimited AI generations available on this plan"
+                unlimitedNote="High-volume AI generations on this plan"
                 limitedNote={(remaining) => `${remaining} AI generations remaining`}
               />
             </div>
@@ -427,10 +439,6 @@ export default function DashboardPage() {
     </div>
   )
 }
-
-/* ----------------------------------- */
-/* Sub-components                       */
-/* ----------------------------------- */
 
 type Tone = 'violet' | 'sky' | 'orange' | 'emerald'
 
@@ -626,9 +634,6 @@ function UsageBar({
   limitedNote: (remaining: number) => string
 }) {
   const isUnlimited = limit < 0
-  // For limited plans, fill is used/limit. For unlimited plans, scale used against
-  // a soft visual cap of 20 so the bar still gives a sense of recent activity
-  // without ever maxing out (since there's no real ceiling).
   const pct = isUnlimited
     ? Math.min(100, Math.max(0, used * 5))
     : limit > 0
@@ -695,8 +700,6 @@ function BackgroundDecoration() {
           <stop offset="100%" stopColor="#c4b5fd" stopOpacity="0" />
         </linearGradient>
       </defs>
-      {/* Soft lavender mountain silhouette: two gentle peaks (smaller on the
-          left, taller on the right) fading into the page background. */}
       <path
         d="M120 280 C 220 240 290 200 350 160 C 390 135 420 120 450 130 C 480 142 500 170 520 165 C 545 155 575 120 615 80 C 655 55 685 70 715 110 C 750 160 790 220 820 260 L 820 280 Z"
         fill="url(#bgMountainSoft)"

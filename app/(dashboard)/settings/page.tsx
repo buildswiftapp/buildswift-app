@@ -285,7 +285,6 @@ export default function SettingsPage() {
       }
     }
 
-    // Dialog content mounts asynchronously, so defer and retry briefly.
     window.requestAnimationFrame(tryDraw)
 
     return () => {
@@ -850,8 +849,6 @@ export default function SettingsPage() {
                       >
                         <div className="flex items-center gap-3 bg-muted px-4 py-3">
                           {branding.logo_url ? (
-                            // External storage URL; next/image would require host allowlist.
-                            // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={branding.logo_url}
                               alt=""

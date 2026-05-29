@@ -21,16 +21,6 @@ import { useApp } from '@/lib/app-context'
 import { createSupabaseBrowserClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 
-// Custom Lucide-style icon: a file outline with a dollar sign inside.
-// Lucide v0.564 doesn't ship a `file-dollar-sign` icon, so this is hand-crafted
-// to match the surrounding Lucide icons exactly:
-//   - 24x24 viewBox
-//   - currentColor stroke, fill=none
-//   - rounded line caps/joins
-//   - File outline & corner fold paths borrowed verbatim from `file-text`
-//   - Dollar S-curve & vertical bar borrowed from `receipt`, scaled 0.5x and
-//     translated so they sit cleanly below the corner fold and stay centered
-//     in the page body — designed to read crisply at h-5 (20px).
 function FileDollarSign({
   className,
   strokeWidth = 2,

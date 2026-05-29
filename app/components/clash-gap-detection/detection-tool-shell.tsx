@@ -10,6 +10,7 @@ export function DetectionToolShell(props: {
   onSaveSession: () => void
   onRunDetection: () => void
   canRunDetection: boolean
+  runDetectionHint?: string | null
   isRunning: boolean
   showRunDetection: boolean
   showGenerateReport?: boolean
@@ -20,6 +21,7 @@ export function DetectionToolShell(props: {
     onSaveSession,
     onRunDetection,
     canRunDetection,
+    runDetectionHint,
     isRunning,
     showRunDetection,
     showGenerateReport,
@@ -79,6 +81,7 @@ export function DetectionToolShell(props: {
                   type="button"
                   className="rounded-xl bg-violet-600 text-white hover:bg-violet-700"
                   disabled={!canRunDetection || isRunning}
+                  title={!canRunDetection && runDetectionHint ? runDetectionHint : undefined}
                   onClick={onRunDetection}
                 >
                   <Play className="mr-2 h-4 w-4 fill-current" aria-hidden />

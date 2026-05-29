@@ -62,7 +62,6 @@ function formCardClassName(extra?: string) {
   )
 }
 
-/** Impact pillar cards — accent is a top border color (Tailwind). */
 function CoImpactCardShell(args: {
   accentBorder: string
   iconBg: string
@@ -319,8 +318,6 @@ function NewChangeOrderContent() {
     setAttachments((prev) => [...prev, ...next])
   }, [])
 
-  // New Change Orders should never show placeholder "0 B" rows.
-  // Only attachments with an actual File selected in this session are considered valid.
   const pendingUploadAttachments = attachments.filter((a) => Boolean(a.file))
 
   const removeAttachment = (id: string) => {
@@ -328,7 +325,6 @@ function NewChangeOrderContent() {
   }
 
   const handleDownloadAttachment = (attachment: LocalAttachment) => {
-    // For files selected in this browser session, create a direct download.
     if (attachment.file) {
       const blobUrl = URL.createObjectURL(attachment.file)
       const link = document.createElement('a')
@@ -341,7 +337,6 @@ function NewChangeOrderContent() {
       return
     }
 
-    // For server-backed files, use provided URL when available.
     if (attachment.url && attachment.url !== '#') {
       const link = document.createElement('a')
       link.href = attachment.url
@@ -468,7 +463,6 @@ function NewChangeOrderContent() {
           json: { status: 'resolved', resolved_document_id: created.document.id },
         })
       } catch {
-        /* non-blocking */
       }
     }
 
@@ -495,7 +489,6 @@ function NewChangeOrderContent() {
 
     setIsSubmitting(true)
     try {
-      // Create as draft first; reviewer details are collected on the next screen.
       const documentId = await createDocument(true)
       router.push(`/documents/${documentId}/send-for-review`)
     } catch (error) {

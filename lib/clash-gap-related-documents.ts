@@ -92,9 +92,6 @@ function labelFromSource(
   return pageStr ? `${label} — p. ${shortenPageRef(pageStr)}` : label
 }
 
-/**
- * Issue-scoped related document labels for the RFI panel (no duplicate upload filenames).
- */
 export function buildRelatedDocumentLabels(
   issue: ClashGapIssue,
   uploadRows: DocumentUploadRow[],

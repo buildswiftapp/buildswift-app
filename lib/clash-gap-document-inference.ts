@@ -1,4 +1,8 @@
-import type { DocumentLabelType, DocumentUploadRow } from '@/lib/clash-gap-types'
+import {
+  CLASH_GAP_UPLOAD_TYPES,
+  type DocumentLabelType,
+  type DocumentUploadRow,
+} from '@/lib/clash-gap-types'
 
 export function fileRoleFromDocType(type: DocumentLabelType): 'plans' | 'specs' | 'addenda' {
   if (type === 'specs') return 'specs'
@@ -6,7 +10,6 @@ export function fileRoleFromDocType(type: DocumentLabelType): 'plans' | 'specs' 
   return 'plans'
 }
 
-/** Infer document type from filename for construction uploads. */
 export function inferDocumentLabelType(filename: string): DocumentLabelType {
   const name = filename.toLowerCase().replace(/[_-]+/g, ' ')
 
@@ -37,33 +40,114 @@ export function inferDocumentLabelType(filename: string): DocumentLabelType {
   return 'plans'
 }
 
+export function getEligibleUploadRows(rows: DocumentUploadRow[]): DocumentUploadRow[] {
+  return rows.filter((r) => r.status === 'ready' && Boolean(r.serverFileId))
+}
+
+function activeUploadRows(rows: DocumentUploadRow[]): DocumentUploadRow[] {
+  return rows.filter((r) => r.status !== 'error')
+}
+
+export function isImageUploadFilename(filename: string): boolean {
+  return /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(filename.trim())
+}
+
+export function isPdfUploadFilename(filename: string): boolean {
+  return /\.pdf$/i.test(filename.trim())
+}
+
 export function hasPlansDocument(rows: DocumentUploadRow[]): boolean {
-  return rows.some((r) => fileRoleFromDocType(r.type) === 'plans')
+  return getEligibleUploadRows(rows).some((r) => fileRoleFromDocType(r.type) === 'plans')
 }
 
 export function hasSpecsDocument(rows: DocumentUploadRow[]): boolean {
-  return rows.some((r) => {
+  return getEligibleUploadRows(rows).some((r) => {
+    const role = fileRoleFromDocType(r.type)
+    return role === 'specs' || role === 'addenda'
+  })
+}
+
+function hasPlansRoleAssigned(rows: DocumentUploadRow[]): boolean {
+  return activeUploadRows(rows).some((r) => fileRoleFromDocType(r.type) === 'plans')
+}
+
+function hasSpecsRoleAssigned(rows: DocumentUploadRow[]): boolean {
+  return activeUploadRows(rows).some((r) => {
     const role = fileRoleFromDocType(r.type)
     return role === 'specs' || role === 'addenda'
   })
 }
 
 export function canRunClashGapDetection(rows: DocumentUploadRow[]): boolean {
-  return hasPlansDocument(rows) && hasSpecsDocument(rows)
+  const eligible = getEligibleUploadRows(rows)
+  if (
+    eligible.length === 1 &&
+    (isImageUploadFilename(eligible[0]?.filename || '') || isPdfUploadFilename(eligible[0]?.filename || ''))
+  ) {
+    return true
+  }
+  if (eligible.length < 2) return false
+  return hasPlansDocument(eligible) && hasSpecsDocument(eligible)
+}
+
+export function sanitizeClashGapDocumentType(type: DocumentLabelType): DocumentLabelType {
+  if ((CLASH_GAP_UPLOAD_TYPES as readonly string[]).includes(type)) return type
+  return 'plans'
+}
+
+export function hasReadyUploads(rows: DocumentUploadRow[]): boolean {
+  return rows.some((r) => r.status === 'ready' && Boolean(r.serverFileId))
+}
+
+export function uploadsStillPending(rows: DocumentUploadRow[]): boolean {
+  return rows.some((r) => r.status === 'pending' || (r.file && !r.serverFileId))
+}
+
+export function describeRunDetectionGate(
+  rows: DocumentUploadRow[],
+  options?: { projectSelected?: boolean },
+): string | null {
+  if (options?.projectSelected === false) {
+    return 'Select a project before running detection.'
+  }
+  if (uploadsStillPending(rows)) {
+    return 'Wait for uploads to finish (status must show ready).'
+  }
+  if (!hasReadyUploads(rows)) {
+    return 'Upload at least one file and wait until it finishes uploading.'
+  }
+  return missingDocumentRolesMessage(rows)
 }
 
 export function missingDocumentRolesMessage(rows: DocumentUploadRow[]): string | null {
+  const eligible = getEligibleUploadRows(rows)
+  if (
+    eligible.length === 1 &&
+    (isImageUploadFilename(eligible[0]?.filename || '') || isPdfUploadFilename(eligible[0]?.filename || ''))
+  ) {
+    return null
+  }
+  if (eligible.length < 2) {
+    return 'Upload at least two files (PDF or image): one Plans drawing set and one Specifications (or Addenda).'
+  }
   const missing: string[] = []
   if (!hasPlansDocument(rows)) missing.push('Plans')
-  if (!hasSpecsDocument(rows)) missing.push('Specifications')
+  if (!hasSpecsDocument(rows)) missing.push('Specifications (or Addenda)')
   if (!missing.length) return null
-  return `Upload at least one ${missing.join(' and ')} document (set Document type in the table).`
+  return `Set Document type to ${missing.join(' and ')} for at least one uploaded file in the table (Upload step).`
 }
 
-/**
- * Assign document types for newly ingested files using filename inference and
- * ensuring a two-file upload can satisfy plans + specs when names are ambiguous.
- */
+export function applyInferredTypesWhereNeeded(rows: DocumentUploadRow[]): DocumentUploadRow[] {
+  return rows.map((row) => {
+    if (row.status !== 'ready' || !row.serverFileId) return row
+    const inferred = inferDocumentLabelType(row.filename)
+    if (row.type === 'plans' && (inferred === 'specs' || inferred === 'addenda')) {
+      return { ...row, type: inferred }
+    }
+    return row
+  })
+}
+
 export function assignDocumentTypesForIngest(
   newRows: DocumentUploadRow[],
   existingRows: DocumentUploadRow[],
@@ -74,11 +158,18 @@ export function assignDocumentTypesForIngest(
   }))
 
   const combined = [...existingRows, ...assigned]
-  if (hasPlansDocument(combined) && hasSpecsDocument(combined)) {
+  if (hasPlansRoleAssigned(combined) && hasSpecsRoleAssigned(combined)) {
     return assigned
   }
 
-  // Two new files, empty session: common case — one plans, one specs.
+  const imageCount = combined.filter((r) => isImageUploadFilename(r.filename)).length
+
+  if (existingRows.length === 0 && assigned.length >= 2 && imageCount >= 2) {
+    assigned[0]!.type = 'plans'
+    assigned[1]!.type = 'specs'
+    return assigned
+  }
+
   if (existingRows.length === 0 && assigned.length === 2) {
     const [first, second] = assigned
     if (first.type !== 'specs' && second.type !== 'specs') {
@@ -89,52 +180,35 @@ export function assignDocumentTypesForIngest(
     return assigned
   }
 
-  // Already have plans but no specs — bias ambiguous new uploads toward specs.
-  if (hasPlansDocument(existingRows) && !hasSpecsDocument(existingRows)) {
+  if (hasPlansRoleAssigned(existingRows) && !hasSpecsRoleAssigned(existingRows)) {
     for (const row of assigned) {
       if (row.type === 'plans' && inferDocumentLabelType(row.filename) !== 'plans') {
         row.type = 'specs'
       }
     }
-    if (!hasSpecsDocument([...existingRows, ...assigned]) && assigned.length === 1) {
-      assigned[0].type = 'specs'
+    if (!hasSpecsRoleAssigned([...existingRows, ...assigned]) && assigned.length >= 1) {
+      assigned[0]!.type = 'specs'
     }
   }
 
-  // Already have specs but no plans — bias ambiguous new uploads toward plans.
-  if (hasSpecsDocument(existingRows) && !hasPlansDocument(existingRows)) {
+  if (hasSpecsRoleAssigned(existingRows) && !hasPlansRoleAssigned(existingRows)) {
     for (const row of assigned) {
       if (row.type === 'specs' && inferDocumentLabelType(row.filename) === 'plans') {
         row.type = 'plans'
       }
     }
-    if (!hasPlansDocument([...existingRows, ...assigned]) && assigned.length === 1) {
-      assigned[0].type = 'plans'
+    if (!hasPlansRoleAssigned([...existingRows, ...assigned]) && assigned.length >= 1) {
+      assigned[0]!.type = 'plans'
     }
   }
 
   return assigned
 }
 
-/** Re-apply filename inference to existing rows (e.g. before run). */
 export function reconcileDocumentTypes(rows: DocumentUploadRow[]): DocumentUploadRow[] {
-  const inferred = rows.map((row) => ({
+  const sanitized = rows.map((row) => ({
     ...row,
-    type: inferDocumentLabelType(row.filename),
+    type: sanitizeClashGapDocumentType(row.type),
   }))
-  if (canRunClashGapDetection(inferred)) return inferred
-
-  if (rows.length === 2) {
-    const [first, second] = inferred.map((r) => ({ ...r }))
-    if (!hasSpecsDocument([first, second])) {
-      if (second.type !== 'specs') second.type = 'specs'
-      else if (first.type === 'specs') first.type = 'plans'
-    }
-    if (!hasPlansDocument([first, second]) && first.type === 'specs') {
-      first.type = 'plans'
-    }
-    return [first, second]
-  }
-
-  return inferred
+  return applyInferredTypesWhereNeeded(sanitized)
 }

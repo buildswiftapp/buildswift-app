@@ -54,11 +54,13 @@ export async function GET(req: Request) {
     }
 
     const resolvedTier =
-      stripePriceId === process.env.STRIPE_PRICE_ENTERPRISE_MONTHLY
-        ? 'enterprise'
+      stripePriceId === process.env.STRIPE_PRICE_BUSINESS_MONTHLY
+        ? 'business'
         : stripePriceId === process.env.STRIPE_PRICE_PROFESSIONAL_MONTHLY
           ? 'professional'
-          : 'free'
+          : stripePriceId === process.env.STRIPE_PRICE_STARTER_MONTHLY
+            ? 'starter'
+            : 'trial'
 
     await (supabase.from('accounts' as any) as any)
       .update({

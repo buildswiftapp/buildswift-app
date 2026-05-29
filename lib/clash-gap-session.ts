@@ -1,6 +1,7 @@
 import type {
   ClashGapIssue,
   DetectionSettings,
+  DetectionWizardStep,
   DocumentUploadRow,
 } from '@/lib/clash-gap-types'
 
@@ -20,5 +21,6 @@ export type ClashGapSessionV1 = {
   ignoredIds: string[]
   selectedIssueId: string | null
   bookmarkedIds: string[]
-  phase: 'prepare' | 'results'
+  phase?: 'prepare' | 'results'
+  activeStep?: DetectionWizardStep
 }

@@ -27,7 +27,6 @@ async function resolveSignatureImageDataUrl(params: {
   if (!raw) return null
   if (raw.startsWith('data:image/')) return raw
 
-  // If an absolute URL is stored, fetch and embed.
   if (/^https?:\/\//i.test(raw)) {
     try {
       const res = await fetch(raw, { cache: 'no-store' })
@@ -41,7 +40,6 @@ async function resolveSignatureImageDataUrl(params: {
     }
   }
 
-  // Otherwise treat it as a Supabase Storage path.
   const bucket = process.env.REVIEW_SIGNATURES_BUCKET || 'document-attachments'
   try {
     const dl = await params.supabase.storage.from(bucket).download(raw)
@@ -308,15 +306,11 @@ export async function GET(req: Request, { params }: Params) {
         ]
       : []
 
-  /** First row documents who submitted from account data; subsequent rows mirror review_requests in order (no fabricated reviewer). */
   const approvalRows =
     document.doc_type === 'submittal' || document.doc_type === 'rfi' || document.doc_type === 'change_order'
       ? [...submissionRow, ...reviewerRows]
       : reviewerRows
 
-  // Canonical status drives the badge displayed in the top summary card of
-  // every PDF. If the row hasn't been backfilled yet (legacy data), fall back
-  // to deriving a canonical value from the legacy fields + latest cycle.
   const canonicalDocType = document.doc_type as DocType
   const canonicalStatus =
     typeof (document as { status?: string | null }).status === 'string' &&
@@ -349,7 +343,6 @@ export async function GET(req: Request, { params }: Params) {
   const accountContactPhone =
     typeof accountRow?.phone === 'string' && accountRow.phone.trim() ? accountRow.phone.trim() : null
 
-  // Dedicated templates for each document type.
   const isChangeOrder = document.doc_type === 'change_order'
   const isRfi = document.doc_type === 'rfi'
   const isSubmittal = document.doc_type === 'submittal'

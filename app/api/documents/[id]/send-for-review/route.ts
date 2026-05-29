@@ -166,7 +166,6 @@ async function sendReviewEmail(job: {
     senderName: job.senderName,
   })
 
-  // Development mode: skip actual email sending
   if (process.env.NODE_ENV !== 'production' && process.env.SKIP_EMAIL_SENDING === 'true') {
     console.log('[sendReviewEmail] Development mode - skipping email send')
     console.log('[sendReviewEmail] Would send to:', job.to)
@@ -179,7 +178,7 @@ async function sendReviewEmail(job: {
     try {
       console.log('[sendReviewEmail] Using webhook:', webhookUrl.substring(0, 50) + '...')
       const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+      const timeout = setTimeout(() => controller.abort(), 30000)
       
       const webhookRes = await fetch(webhookUrl, {
         method: 'POST',
@@ -226,7 +225,7 @@ async function sendReviewEmail(job: {
     const timeout = setTimeout(() => {
       controller.abort()
       console.error('[sendReviewEmail] Fetch timeout (30s) - aborting request to Resend API')
-    }, 30000) // 30 second timeout
+    }, 30000)
     
     const resendRes = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -253,7 +252,6 @@ async function sendReviewEmail(job: {
     const errorMsg = error instanceof Error ? error.message : String(error)
     console.error('[sendReviewEmail] Resend error:', errorMsg)
     
-    // Check if it's a network error
     if (errorMsg.includes('fetch failed') || errorMsg.includes('ETIMEDOUT') || errorMsg.includes('ECONNREFUSED') || errorMsg.includes('AbortError')) {
       console.error('[sendReviewEmail] ⚠️  Network connectivity issue detected.')
       console.error('[sendReviewEmail] Possible causes:')
@@ -655,9 +653,7 @@ export async function POST(req: Request, { params }: Params) {
     const { error: docUpdateError } = await privilegedDb
       .from(DOCUMENT_TABLE_BY_TYPE[document.doc_type as DocumentType])
       .update({
-        // Canonical (single source of truth read by UI/PDF).
         status: canonicalStatus,
-        // Legacy dual-write for Phase 1.
         internal_status: 'in_review',
         external_status: 'sent',
       })
@@ -710,7 +706,6 @@ export async function POST(req: Request, { params }: Params) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error occurred'
     console.error('[send-for-review] Unexpected error:', error)
     
-    // Provide specific guidance for network errors
     if (errorMsg.includes('fetch failed') || errorMsg.includes('ETIMEDOUT') || errorMsg.includes('ECONNREFUSED')) {
       console.error('\n❌ EMAIL SENDING FAILED - NETWORK ERROR')
       console.error('═══════════════════════════════════════════════════')

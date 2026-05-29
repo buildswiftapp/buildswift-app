@@ -1,19 +1,3 @@
-/**
- * Canonical "Reason for Request" options for RFIs and helpers for serializing
- * them to / from the legacy single-string `metadata.reasonForRequest` shape.
- *
- * Storage strategy
- * ----------------
- * - New: `metadata.reasonsForRequest: string[]` holds the canonical labels and
- *   `metadata.reasonForRequestOther: string` holds any free-text spillover.
- * - Legacy: `metadata.reasonForRequest: string` is still written (joined) so
- *   PDF / HTML / search code that already reads the singular field keeps
- *   working without migration.
- *
- * On read, prefer the array; if only the legacy string exists, parse it back
- * into `{ selected, other }` so existing RFIs are not lost.
- */
-
 export type RfiReasonOption = { value: string; label: string }
 
 export const RFI_REASON_OPTIONS: ReadonlyArray<RfiReasonOption> = [
@@ -28,7 +12,6 @@ export const RFI_REASON_OPTIONS: ReadonlyArray<RfiReasonOption> = [
   { value: 'owner_request', label: 'Owner Request' },
 ]
 
-/** Sentinel value used to represent the "Other (specify)" option. */
 export const RFI_REASON_OTHER_VALUE = 'other'
 export const RFI_REASON_OTHER_LABEL = 'Other (specify)'
 
@@ -40,11 +23,6 @@ function normalize(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
-/**
- * Render the user-facing string for the legacy `metadata.reasonForRequest`
- * field by joining canonical labels and the optional "Other" free-text with
- * commas. Empty inputs collapse to an empty string.
- */
 export function joinReasons(selected: ReadonlyArray<string>, other: string | null | undefined): string {
   const labels: string[] = []
   for (const label of selected) {
@@ -56,12 +34,6 @@ export function joinReasons(selected: ReadonlyArray<string>, other: string | nul
   return labels.join(', ')
 }
 
-/**
- * Parse a legacy reason string (or unknown shape) into the new
- * `{ selected, other }` form. Tokens whose normalized form matches a canonical
- * label go into `selected`; everything else is concatenated into `other` so
- * the user's prior wording is never lost.
- */
 export function parseLegacyReasons(raw: unknown): { selected: string[]; other: string } {
   if (raw == null) return { selected: [], other: '' }
   const text = typeof raw === 'string' ? raw : String(raw)
@@ -86,10 +58,6 @@ export function parseLegacyReasons(raw: unknown): { selected: string[]; other: s
   return { selected, other: otherBits.join(', ') }
 }
 
-/**
- * Read both shapes from a metadata object and return the canonical
- * `{ selected, other }` pair. Prefers the new array when present.
- */
 export function readReasonsFromMetadata(metadata: Record<string, unknown> | null | undefined): {
   selected: string[]
   other: string

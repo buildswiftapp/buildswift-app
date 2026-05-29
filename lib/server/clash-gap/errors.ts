@@ -32,6 +32,19 @@ export function isRetryableNetworkError(error: unknown): boolean {
     text.includes('etimedout') ||
     text.includes('eai_again') ||
     text.includes('socket hang up') ||
-    text.includes('network')
+    text.includes('network') ||
+    text.includes('timed out') ||
+    text.includes('timeout')
   )
+}
+
+export function isStaleClashGapProcessing(
+  status: string,
+  updatedAt: string,
+  staleMs = Number(process.env.CLASH_GAP_STALE_PROCESSING_MS || 15 * 60 * 1000),
+): boolean {
+  if (status !== 'processing' && status !== 'queued') return false
+  const t = Date.parse(updatedAt)
+  if (!Number.isFinite(t)) return true
+  return Date.now() - t > staleMs
 }

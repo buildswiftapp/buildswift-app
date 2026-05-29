@@ -1,82 +1,90 @@
-export type AppBillingTier = 'free' | 'professional' | 'enterprise'
+export type AppBillingTier = 'trial' | 'starter' | 'professional' | 'business'
+
+export type BillingCycle = 'trial' | 'month'
 
 export type AppBillingPlan = {
-  id: string
-  name: string
-  tier: AppBillingTier
+  planId: string
+  planName: string
   price: number
-  documentsLimit: number
-  aiGenerationsLimit: number
-  /** null = unlimited active projects */
+  billingCycle: BillingCycle
   maxActiveProjects: number | null
-  attachmentsAllowed: boolean
-  features: string[]
-  tagline: string
-  promoFootnote?: string
+  maxAIGenerationsPerMonth: number | null
+  maxClashGapReportsPerMonth: number | null
+  maxStorageGB: number
+  isTrial: boolean
+  trialDurationDays: number | null
+  highlight?: 'most_popular'
 }
 
 export const BILLING_PLANS: AppBillingPlan[] = [
   {
-    id: 'plan-free',
-    name: 'Starter',
-    tier: 'free',
+    planId: 'plan-free-trial',
+    planName: 'Free Trial',
     price: 0,
-    documentsLimit: 5,
-    aiGenerationsLimit: 5,
-    maxActiveProjects: 1,
-    attachmentsAllowed: false,
-    tagline: 'Try BuildSwift and experience the speed.',
-    features: [
-      '1 active project',
-      '5 documents per month',
-      '5 AI assists per month',
-    ],
+    billingCycle: 'trial',
+    maxActiveProjects: 2,
+    maxAIGenerationsPerMonth: 10,
+    maxClashGapReportsPerMonth: 3,
+    maxStorageGB: 1,
+    isTrial: true,
+    trialDurationDays: 14,
   },
   {
-    id: 'plan-professional',
-    name: 'Builder',
-    tier: 'professional',
-    price: 39,
-    documentsLimit: -1,
-    aiGenerationsLimit: -1,
+    planId: 'plan-starter',
+    planName: 'Starter',
+    price: 29,
+    billingCycle: 'month',
     maxActiveProjects: 5,
-    attachmentsAllowed: true,
-    tagline: 'For everyday project workflows.',
-    promoFootnote: 'Most users start here',
-    features: [
-      'Up to 5 active projects',
-      'Unlimited documents',
-      'Unlimited AI assists',
-      'Attachments included',
-    ],
+    maxAIGenerationsPerMonth: 50,
+    maxClashGapReportsPerMonth: 5,
+    maxStorageGB: 2,
+    isTrial: false,
+    trialDurationDays: null,
   },
   {
-    id: 'plan-enterprise',
-    name: 'Pro',
-    tier: 'enterprise',
+    planId: 'plan-professional',
+    planName: 'Professional',
     price: 79,
-    documentsLimit: -1,
-    aiGenerationsLimit: -1,
+    billingCycle: 'month',
+    maxActiveProjects: 25,
+    maxAIGenerationsPerMonth: 300,
+    maxClashGapReportsPerMonth: 30,
+    maxStorageGB: 20,
+    isTrial: false,
+    trialDurationDays: null,
+    highlight: 'most_popular',
+  },
+  {
+    planId: 'plan-business',
+    planName: 'Business',
+    price: 149,
+    billingCycle: 'month',
     maxActiveProjects: null,
-    attachmentsAllowed: true,
-    tagline: 'Built for managing multiple projects at scale.',
-    features: [
-      'Unlimited projects',
-      'Unlimited documents',
-      'Unlimited AI assists',
-      'Early access to new features',
-      'Attachments included',
-    ],
+    maxAIGenerationsPerMonth: null,
+    maxClashGapReportsPerMonth: 100,
+    maxStorageGB: 100,
+    isTrial: false,
+    trialDurationDays: null,
   },
 ]
 
 export function normalizeTier(raw: string | null | undefined): AppBillingTier {
-  if (raw === 'enterprise') return 'enterprise'
-  if (raw === 'professional' || raw === 'pro') return 'professional'
-  return 'free'
+  const v = (raw ?? '').trim().toLowerCase()
+  if (v === 'business') return 'business'
+  if (v === 'professional' || v === 'pro') return 'professional'
+  if (v === 'starter') return 'starter'
+  return 'trial'
 }
 
 export function planForTier(raw: string | null | undefined): AppBillingPlan {
   const tier = normalizeTier(raw)
-  return BILLING_PLANS.find((plan) => plan.tier === tier) ?? BILLING_PLANS[0]
+  const planId =
+    tier === 'starter'
+      ? 'plan-starter'
+      : tier === 'professional'
+        ? 'plan-professional'
+        : tier === 'business'
+          ? 'plan-business'
+          : 'plan-free-trial'
+  return BILLING_PLANS.find((p) => p.planId === planId) ?? BILLING_PLANS[0]
 }
