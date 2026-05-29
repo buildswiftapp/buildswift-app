@@ -24,7 +24,14 @@ export function detectSheetId(text: string): string | null {
 }
 
 function ocrModel(): string {
-  return process.env.OPENAI_OCR_MODEL || 'gpt-4o-mini'
+  return process.env.OPENAI_OCR_MODEL || process.env.OPENAI_MODEL || 'gpt-4o'
+}
+
+function looksLikeRefusal(text: string): boolean {
+  if (text.length > 600) return false
+  return /\b(i['’]?m (sorry|unable)|i (cannot|can['’]?t) (help|assist|view|read|process|transcribe)|unable to (view|read|process|transcribe)|i['’]?m not able to|as an ai)\b/i.test(
+    text,
+  )
 }
 
 function ocrConcurrency(): number {
@@ -327,7 +334,13 @@ Remember:
         },
         { timeout: ocrTimeoutMs },
       )
-      return completion.choices[0]?.message?.content?.trim() || ''
+      const text = completion.choices[0]?.message?.content?.trim() || ''
+      if (text && looksLikeRefusal(text)) {
+        lastError = new Error('OCR returned a refusal instead of a transcription')
+        if (attempt < maxAttempts - 1) continue
+        return ''
+      }
+      return text
     } catch (error) {
       lastError = error
       if (attempt < maxAttempts - 1 && isRetryableNetworkError(error)) {
