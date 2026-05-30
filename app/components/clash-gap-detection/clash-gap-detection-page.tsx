@@ -158,8 +158,6 @@ function buildRfiDraftFromIssue(
       (s, i) =>
         `${i + 1}. ${s.documentLabel} (page ${s.page}) — “${s.excerpt.slice(0, 120)}${s.excerpt.length > 120 ? '…' : ''}”`,
     ),
-    '',
-    actionLine,
   ].join('\n')
 
   const rawDescription = settings.rfiFormat === 'short' ? shortBody : detailedBody
@@ -243,8 +241,8 @@ export function ClashGapDetectionPage() {
   const [runningStage, setRunningStage] = useState<ClashGapStage | null>(null)
   const [clientUploadLabel, setClientUploadLabel] = useState<string | null>(null)
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null)
-  const [confirmOpen, setConfirmOpen] = useState(false)
-  const [isFinishing, setIsFinishing] = useState(false)
+  const [newSessionConfirmOpen, setNewSessionConfirmOpen] = useState(false)
+  const [isStartingNewSession, setIsStartingNewSession] = useState(false)
   const [issues, setIssues] = useState<ClashGapIssue[]>([])
   const [bookmarkedIds, setBookmarkedIds] = useState(() => new Set<string>())
   const [disciplineFilter, setDisciplineFilter] = useState('all')
@@ -386,6 +384,11 @@ export function ClashGapDetectionPage() {
                   type: sanitizeClashGapDocumentType(r.type),
                 })) as DocumentUploadRow[],
               )
+              if (s.issues?.length) setIssues(s.issues)
+              if (s.bookmarkedIds?.length) setBookmarkedIds(new Set(s.bookmarkedIds))
+              if (s.selectedIssueId) setSelectedIssueId(s.selectedIssueId)
+              if (s.activeStep) setActiveStep(s.activeStep)
+              if (s.stages) setStages(s.stages)
             }
           }
         } catch {
@@ -674,39 +677,6 @@ export function ClashGapDetectionPage() {
     [],
   )
 
-  const finishAndCleanup = useCallback(async () => {
-    const id = analysisIdRef.current
-    if (!id) return
-    setIsFinishing(true)
-    try {
-      await downloadAndSaveBlob(
-        `/api/clash-gap/analyses/${id}/report`,
-        `clash-gap-report-${id.slice(0, 8)}.pdf`,
-        { method: 'POST' },
-      )
-      await apiFetch(`/api/clash-gap/analyses/${id}`, { method: 'DELETE' })
-      try {
-        localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
-      } catch {
-      }
-      setAnalysisId(null)
-      analysisIdRef.current = null
-      setStages({})
-      setIssues([])
-      setRows([])
-      setSelectedIssueId(null)
-      setBookmarkedIds(new Set())
-      setActiveStep('upload')
-      setConfirmOpen(false)
-      router.replace('/clash-gap-detection')
-      toast.success('Report saved. All uploaded files and analysis data were deleted.')
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not finish and clean up')
-    } finally {
-      setIsFinishing(false)
-    }
-  }, [router])
-
   const openSources = useCallback((issue: ClashGapIssue) => {
     setSheetIssue(issue)
     setSheetOpen(true)
@@ -728,14 +698,15 @@ export function ClashGapDetectionPage() {
       projectId,
       settings,
       rows: rows.map(({ file: _file, ...rest }) => ({ ...rest })),
-      issues: [],
-      ignoredIds: [],
+      issues,
+      ignoredIds: issues.filter((i) => i.status === 'dismissed').map((i) => i.id),
       bookmarkedIds: [...bookmarkedIds],
       selectedIssueId,
       phase: allStagesComplete(stages) ? 'results' : 'prepare',
       activeStep,
+      stages,
     }),
-    [analysisId, projectId, settings, rows, bookmarkedIds, selectedIssueId, stages, activeStep],
+    [analysisId, projectId, settings, rows, issues, bookmarkedIds, selectedIssueId, stages, activeStep],
   )
 
   const persistSession = useCallback(
@@ -751,7 +722,54 @@ export function ClashGapDetectionPage() {
     [buildSessionPayload],
   )
 
-  const saveSession = useCallback(() => persistSession(), [persistSession])
+  const resetToFreshSession = useCallback(() => {
+    setAnalysisId(null)
+    analysisIdRef.current = null
+    creatingAnalysisRef.current = null
+    autoRunRef.current = false
+    setActiveStep('upload')
+    setRows([])
+    setSettings(defaultSettings)
+    setSelectedTrades([])
+    setStages({})
+    setRunningStage(null)
+    setClientUploadLabel(null)
+    setIssues([])
+    setBookmarkedIds(new Set())
+    setDisciplineFilter('all')
+    setFilter('all')
+    setSearch('')
+    setSelectedIssueId(null)
+    setSheetIssue(null)
+    setSheetOpen(false)
+    setRfiDraft(null)
+    setViewerOpen(false)
+  }, [])
+
+  const startNewSession = useCallback(async () => {
+    const id = analysisIdRef.current
+    setIsStartingNewSession(true)
+    try {
+      if (id) {
+        try {
+          await apiFetch(`/api/clash-gap/analyses/${id}`, { method: 'DELETE' })
+        } catch {
+        }
+      }
+      try {
+        localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
+      } catch {
+      }
+      resetToFreshSession()
+      setNewSessionConfirmOpen(false)
+      router.replace('/clash-gap-detection')
+      toast.success('Ready for a new session.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not start a new session')
+    } finally {
+      setIsStartingNewSession(false)
+    }
+  }, [resetToFreshSession, router])
 
   const autosaveMountedRef = useRef(false)
   useEffect(() => {
@@ -824,7 +842,7 @@ export function ClashGapDetectionPage() {
       requestAnimationFrame(() => {
         rfiPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
       })
-      toast.success('Added to RFI draft')
+      toast.success('Ready to RFI draft')
     },
     [issues, settings, selectedTrades, rows],
   )
@@ -967,12 +985,6 @@ export function ClashGapDetectionPage() {
             onClick: () =>
               id && downloadArtifact('merged-pdf', `/api/clash-gap/analyses/${id}/artifacts/merged`, `${base}-merged.pdf`, { method: 'GET' }),
           },
-          {
-            label: '.json',
-            busy: downloadingKey === 'ocr-json',
-            onClick: () =>
-              id && downloadArtifact('ocr-json', `/api/clash-gap/analyses/${id}/artifacts/ocr?format=json`, `${base}-ocr.json`, { method: 'GET' }),
-          },
         ]
       : []
 
@@ -1006,7 +1018,7 @@ export function ClashGapDetectionPage() {
     <>
       <DetectionToolShell
         stepper={stepper}
-        onSaveSession={saveSession}
+        onNewSession={() => setNewSessionConfirmOpen(true)}
         onRunDetection={() => {}}
         canRunDetection={false}
         isRunning={Boolean(runningStage)}
@@ -1198,9 +1210,9 @@ export function ClashGapDetectionPage() {
                 : 'Finish the current stage to continue.'
           }
           showNext={activeStep !== 'chunk' && activeStep !== 'detection'}
-          onDone={() => setConfirmOpen(true)}
-          doneReady={detectComplete && !runningStage}
-          isFinishing={isFinishing}
+          onNewSession={() => setNewSessionConfirmOpen(true)}
+          newSessionReady={detectComplete && !runningStage}
+          isStartingNewSession={isStartingNewSession}
         />
       </DetectionToolShell>
 
@@ -1212,27 +1224,31 @@ export function ClashGapDetectionPage() {
         analysisId={analysisId}
       />
 
-      <Dialog open={confirmOpen} onOpenChange={(o) => !isFinishing && setConfirmOpen(o)}>
+      <Dialog open={newSessionConfirmOpen} onOpenChange={(o) => !isStartingNewSession && setNewSessionConfirmOpen(o)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Download report & delete everything?</DialogTitle>
+            <DialogTitle>Start a new session?</DialogTitle>
             <DialogDescription>
-              Your PDF report will be downloaded to this device, then all uploaded files, page
-              images, OCR/merged text, and detected issues for this analysis are permanently
-              deleted from the server. This cannot be undone.
+              This clears saved progress in this browser and permanently deletes the current
+              analysis, uploaded files, and results from the server. You will return to a fresh
+              upload screen. Download any reports you need before continuing. This cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" variant="outline" disabled={isFinishing} onClick={() => setConfirmOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isStartingNewSession}
+              onClick={() => setNewSessionConfirmOpen(false)}
+            >
               Cancel
             </Button>
             <Button
               type="button"
-              className="bg-emerald-600 text-white hover:bg-emerald-700"
-              disabled={isFinishing}
-              onClick={() => void finishAndCleanup()}
+              disabled={isStartingNewSession}
+              onClick={() => void startNewSession()}
             >
-              {isFinishing ? 'Saving & clearing…' : 'Download & delete'}
+              {isStartingNewSession ? 'Starting…' : 'New Session'}
             </Button>
           </DialogFooter>
         </DialogContent>

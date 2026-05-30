@@ -1,13 +1,13 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { FileDown, Play, Save, Sparkles } from 'lucide-react'
+import { FileDown, Play, Plus, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 export function DetectionToolShell(props: {
   children?: ReactNode
   stepper: ReactNode
-  onSaveSession: () => void
+  onNewSession: () => void
   onRunDetection: () => void
   canRunDetection: boolean
   runDetectionHint?: string | null
@@ -18,7 +18,7 @@ export function DetectionToolShell(props: {
   isGeneratingReport?: boolean
 }) {
   const {
-    onSaveSession,
+    onNewSession,
     onRunDetection,
     canRunDetection,
     runDetectionHint,
@@ -60,10 +60,10 @@ export function DetectionToolShell(props: {
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2 lg:justify-end">
-              <Button type="button" variant="outline" className="rounded-xl" onClick={onSaveSession}>
-                <Save className="mr-2 h-4 w-4" aria-hidden />
-                Save Session
-              </Button>
+              {/* <Button type="button" variant="outline" className="rounded-xl" onClick={onNewSession}>
+                <Plus className="mr-2 h-4 w-4" aria-hidden />
+                New Session
+              </Button> */}
               {showGenerateReport ? (
                 <Button
                   type="button"

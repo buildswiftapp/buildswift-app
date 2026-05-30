@@ -3,7 +3,7 @@
 import type { DetectionWizardStep } from '@/lib/clash-gap-types'
 import { DETECTION_WIZARD_STEPS } from '@/lib/clash-gap-types'
 import { Button } from '@/components/ui/button'
-import { CheckCircle2, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, Plus } from 'lucide-react'
 
 function stepIndex(step: DetectionWizardStep): number {
   return DETECTION_WIZARD_STEPS.indexOf(step)
@@ -15,9 +15,9 @@ export function DetectionStepFooter(props: {
   canGoNext: boolean
   nextHint?: string | null
   showNext?: boolean
-  onDone?: () => void
-  doneReady?: boolean
-  isFinishing?: boolean
+  onNewSession?: () => void
+  newSessionReady?: boolean
+  isStartingNewSession?: boolean
 }) {
   const idx = stepIndex(props.activeStep)
   const prev = idx > 0 ? DETECTION_WIZARD_STEPS[idx - 1] : null
@@ -60,16 +60,17 @@ export function DetectionStepFooter(props: {
         ) : (
           <Button
             type="button"
-            className="rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
-            disabled={!props.doneReady || props.isFinishing}
-            onClick={props.onDone}
+            variant="outline"
+            className="rounded-xl"
+            disabled={!props.newSessionReady || props.isStartingNewSession}
+            onClick={props.onNewSession}
           >
-            {props.isFinishing ? (
+            {props.isStartingNewSession ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
             ) : (
-              <CheckCircle2 className="mr-2 h-4 w-4" aria-hidden />
+              <Plus className="mr-2 h-4 w-4" aria-hidden />
             )}
-            {props.isFinishing ? 'Saving & clearing…' : 'Done — download & finish'}
+            {props.isStartingNewSession ? 'Starting new session…' : 'New Session'}
           </Button>
         )}
       </div>

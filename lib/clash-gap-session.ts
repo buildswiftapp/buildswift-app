@@ -1,3 +1,4 @@
+import type { StagesMap } from '@/lib/clash-gap-stages'
 import type {
   ClashGapIssue,
   DetectionSettings,
@@ -23,4 +24,5 @@ export type ClashGapSessionV1 = {
   bookmarkedIds: string[]
   phase?: 'prepare' | 'results'
   activeStep?: DetectionWizardStep
+  stages?: StagesMap
 }
