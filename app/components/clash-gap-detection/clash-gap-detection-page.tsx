@@ -7,6 +7,7 @@ import { downloadAndSaveBlob, uploadClashGapFile } from '@/lib/api-upload'
 import {
   mapApiIssueToClashGapIssue,
   type ApiClashGapAnalysisDetail,
+  type ClashGapSessionMeta,
 } from '@/lib/clash-gap-api'
 import {
   CLASH_GAP_RFI_PREFILL_STORAGE_KEY,
@@ -67,6 +68,8 @@ import { DetectionToolShell } from './detection-tool-shell'
 import { SourceComparisonSheet } from './source-comparison-sheet'
 import { StagePanel } from './stage-panel'
 import { UploadSetupStep } from './upload-setup-step'
+
+const CLASH_GAP_SESSION_PATH = '/clash-gap-detection/session'
 
 const defaultSettings: DetectionSettings = {
   mode: 'both',
@@ -243,6 +246,8 @@ export function ClashGapDetectionPage() {
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null)
   const [newSessionConfirmOpen, setNewSessionConfirmOpen] = useState(false)
   const [isStartingNewSession, setIsStartingNewSession] = useState(false)
+  const [isSavingAndDone, setIsSavingAndDone] = useState(false)
+  const [isSavedSession, setIsSavedSession] = useState(false)
   const [issues, setIssues] = useState<ClashGapIssue[]>([])
   const [bookmarkedIds, setBookmarkedIds] = useState(() => new Set<string>())
   const [disciplineFilter, setDisciplineFilter] = useState('all')
@@ -268,6 +273,7 @@ export function ClashGapDetectionPage() {
   const analysisIdRef = useRef<string | null>(analysisId)
   const creatingAnalysisRef = useRef<Promise<string> | null>(null)
   const pollingRef = useRef(false)
+  const savedAnalysisRef = useRef(false)
 
   useEffect(() => {
     analysisIdRef.current = analysisId
@@ -286,6 +292,8 @@ export function ClashGapDetectionPage() {
     async (id: string) => {
       const data = await apiFetch<ApiClashGapAnalysisDetail>(`/api/clash-gap/analyses/${id}`)
       setAnalysisId(id)
+      savedAnalysisRef.current = Boolean(data.analysis.saved_at)
+      setIsSavedSession(Boolean(data.analysis.saved_at))
       setProjectId(data.analysis.project_id)
       setSettings({
         ...defaultSettings,
@@ -362,9 +370,17 @@ export function ClashGapDetectionPage() {
 
   useEffect(() => {
     const analysisParam = searchParams.get('analysis')
+    const isNewSession = searchParams.get('new') === '1'
 
     if (!sessionRestored.current) {
       sessionRestored.current = true
+      if (isNewSession) {
+        try {
+          localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
+        } catch {
+        }
+        return
+      }
       if (!analysisParam && typeof window !== 'undefined') {
         try {
           const rawLocal = localStorage.getItem(CLASH_GAP_SESSION_STORAGE_KEY)
@@ -372,7 +388,7 @@ export function ClashGapDetectionPage() {
             const s = JSON.parse(rawLocal) as ClashGapSessionV1
             if (s.version === 1) {
               if (s.analysisId) {
-                router.replace(`/clash-gap-detection?analysis=${s.analysisId}`)
+                router.replace(`${CLASH_GAP_SESSION_PATH}?analysis=${s.analysisId}`)
                 return
               }
               if (s.projectId) setProjectId(s.projectId)
@@ -396,43 +412,50 @@ export function ClashGapDetectionPage() {
       }
     }
 
-    if (analysisParam && analysisParam !== analysisId) {
-      void (async () => {
-        try {
-          const data = await loadAnalysis(analysisParam)
-          const loaded = parseStages(data.analysis.stages)
+    if (isNewSession || !analysisParam || analysisParam === analysisId) return
+
+    void (async () => {
+      try {
+        const data = await loadAnalysis(analysisParam)
+        const loaded = parseStages(data.analysis.stages)
+        const meta = (data.analysis.session_meta ?? {}) as ClashGapSessionMeta
+        if (meta.bookmarkedIds?.length) setBookmarkedIds(new Set(meta.bookmarkedIds))
+        if (meta.selectedIssueId) setSelectedIssueId(meta.selectedIssueId)
+        if (data.analysis.saved_at) {
+          setActiveStep('result')
+        } else {
           setActiveStep(firstIncompleteStep(loaded, Boolean(data.files?.length)))
-          const running = CLASH_GAP_STAGES.find((s) => stageStatus(loaded, s) === 'running')
-          if (running && !pollingRef.current) {
-            setRunningStage(running)
-            try {
-              await pollStage(analysisParam, running)
-            } catch (e) {
-              toast.error(e instanceof Error ? e.message : 'Stage failed')
-            } finally {
-              setRunningStage(null)
-            }
-          }
-        } catch (e) {
-          const status = typeof (e as { status?: number })?.status === 'number' ? (e as { status?: number }).status : null
-          if (status === 404) {
-            toast.error('This analysis link is no longer available. Starting a new draft.')
-            setAnalysisId(null)
-            setStages({})
-            setIssues([])
-            setRows([])
-            setActiveStep('upload')
-            try {
-              localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
-            } catch {
-            }
-            router.replace('/clash-gap-detection')
-            return
-          }
-          toast.error(e instanceof Error ? e.message : 'Failed to load analysis')
         }
-      })()
-    }
+        const running = CLASH_GAP_STAGES.find((s) => stageStatus(loaded, s) === 'running')
+        if (running && !pollingRef.current) {
+          setRunningStage(running)
+          try {
+            await pollStage(analysisParam, running)
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : 'Stage failed')
+          } finally {
+            setRunningStage(null)
+          }
+        }
+      } catch (e) {
+        const status = typeof (e as { status?: number })?.status === 'number' ? (e as { status?: number }).status : null
+        if (status === 404) {
+          toast.error('This analysis link is no longer available. Starting a new draft.')
+          setAnalysisId(null)
+          setStages({})
+          setIssues([])
+          setRows([])
+          setActiveStep('upload')
+          try {
+            localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
+          } catch {
+          }
+          router.replace(`${CLASH_GAP_SESSION_PATH}?new=1`)
+          return
+        }
+        toast.error(e instanceof Error ? e.message : 'Failed to load analysis')
+      }
+    })()
   }, [searchParams])
 
   const linkedIssue = useMemo(
@@ -529,7 +552,7 @@ export function ClashGapDetectionPage() {
         const id = res.analysis.id
         analysisIdRef.current = id
         setAnalysisId(id)
-        router.replace(`/clash-gap-detection?analysis=${id}`)
+        router.replace(`${CLASH_GAP_SESSION_PATH}?analysis=${id}`)
         return id
       })().finally(() => {
         creatingAnalysisRef.current = null
@@ -723,6 +746,8 @@ export function ClashGapDetectionPage() {
   )
 
   const resetToFreshSession = useCallback(() => {
+    savedAnalysisRef.current = false
+    setIsSavedSession(false)
     setAnalysisId(null)
     analysisIdRef.current = null
     creatingAnalysisRef.current = null
@@ -750,7 +775,7 @@ export function ClashGapDetectionPage() {
     const id = analysisIdRef.current
     setIsStartingNewSession(true)
     try {
-      if (id) {
+      if (id && !savedAnalysisRef.current) {
         try {
           await apiFetch(`/api/clash-gap/analyses/${id}`, { method: 'DELETE' })
         } catch {
@@ -762,7 +787,7 @@ export function ClashGapDetectionPage() {
       }
       resetToFreshSession()
       setNewSessionConfirmOpen(false)
-      router.replace('/clash-gap-detection')
+      router.push('/clash-gap-detection/session?new=1')
       toast.success('Ready for a new session.')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not start a new session')
@@ -770,6 +795,38 @@ export function ClashGapDetectionPage() {
       setIsStartingNewSession(false)
     }
   }, [resetToFreshSession, router])
+
+  const goToList = useCallback(() => {
+    router.push('/clash-gap-detection')
+  }, [router])
+
+  const saveAndDone = useCallback(async () => {
+    const id = analysisIdRef.current
+    if (!id) return
+    setIsSavingAndDone(true)
+    try {
+      await apiFetch(`/api/clash-gap/analyses/${id}`, {
+        method: 'PATCH',
+        json: {
+          saved_at: new Date().toISOString(),
+          session_meta: {
+            bookmarkedIds: [...bookmarkedIds],
+            selectedIssueId,
+          },
+        },
+      })
+      try {
+        localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
+      } catch {
+      }
+      router.push('/clash-gap-detection')
+      toast.success('Session saved.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save session')
+    } finally {
+      setIsSavingAndDone(false)
+    }
+  }, [bookmarkedIds, selectedIssueId, router])
 
   const autosaveMountedRef = useRef(false)
   useEffect(() => {
@@ -1210,9 +1267,11 @@ export function ClashGapDetectionPage() {
                 : 'Finish the current stage to continue.'
           }
           showNext={activeStep !== 'chunk' && activeStep !== 'detection'}
-          onNewSession={() => setNewSessionConfirmOpen(true)}
-          newSessionReady={detectComplete && !runningStage}
-          isStartingNewSession={isStartingNewSession}
+          onSaveAndDone={() => void saveAndDone()}
+          onGoToList={goToList}
+          isSavedSession={isSavedSession}
+          saveAndDoneReady={detectComplete && !runningStage && Boolean(analysisId)}
+          isSavingAndDone={isSavingAndDone}
         />
       </DetectionToolShell>
 
@@ -1229,9 +1288,10 @@ export function ClashGapDetectionPage() {
           <DialogHeader>
             <DialogTitle>Start a new session?</DialogTitle>
             <DialogDescription>
-              This clears saved progress in this browser and permanently deletes the current
-              analysis, uploaded files, and results from the server. You will return to a fresh
-              upload screen. Download any reports you need before continuing. This cannot be undone.
+              This clears in-progress work in this browser and permanently deletes the current
+              unsaved analysis, uploaded files, and results from the server. Saved sessions in your
+              list are not affected. Download any reports you need before continuing. This cannot be
+              undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

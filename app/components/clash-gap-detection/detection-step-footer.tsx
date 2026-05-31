@@ -3,7 +3,7 @@
 import type { DetectionWizardStep } from '@/lib/clash-gap-types'
 import { DETECTION_WIZARD_STEPS } from '@/lib/clash-gap-types'
 import { Button } from '@/components/ui/button'
-import { ChevronLeft, ChevronRight, Loader2, Plus } from 'lucide-react'
+import { CheckCircle2, ChevronLeft, ChevronRight, List, Loader2 } from 'lucide-react'
 
 function stepIndex(step: DetectionWizardStep): number {
   return DETECTION_WIZARD_STEPS.indexOf(step)
@@ -15,9 +15,11 @@ export function DetectionStepFooter(props: {
   canGoNext: boolean
   nextHint?: string | null
   showNext?: boolean
-  onNewSession?: () => void
-  newSessionReady?: boolean
-  isStartingNewSession?: boolean
+  onSaveAndDone?: () => void
+  onGoToList?: () => void
+  isSavedSession?: boolean
+  saveAndDoneReady?: boolean
+  isSavingAndDone?: boolean
 }) {
   const idx = stepIndex(props.activeStep)
   const prev = idx > 0 ? DETECTION_WIZARD_STEPS[idx - 1] : null
@@ -60,17 +62,18 @@ export function DetectionStepFooter(props: {
         ) : (
           <Button
             type="button"
-            variant="outline"
-            className="rounded-xl"
-            disabled={!props.newSessionReady || props.isStartingNewSession}
-            onClick={props.onNewSession}
+            className="rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
+            disabled={!props.saveAndDoneReady || props.isSavingAndDone}
+            onClick={props.isSavedSession ? props.onGoToList : props.onSaveAndDone}
           >
-            {props.isStartingNewSession ? (
+            {props.isSavingAndDone ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+            ) : props.isSavedSession ? (
+              <List className="mr-2 h-4 w-4" aria-hidden />
             ) : (
-              <Plus className="mr-2 h-4 w-4" aria-hidden />
+              <CheckCircle2 className="mr-2 h-4 w-4" aria-hidden />
             )}
-            {props.isStartingNewSession ? 'Starting new session…' : 'New Session'}
+            {props.isSavingAndDone ? 'Saving…' : props.isSavedSession ? 'Go to list' : 'Done & Save'}
           </Button>
         )}
       </div>

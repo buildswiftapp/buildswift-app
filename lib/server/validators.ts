@@ -30,10 +30,17 @@ export const createClashGapAnalysisSchema = z.object({
   settings: clashGapDetectionSettingsSchema.optional(),
 })
 
+export const clashGapSessionMetaSchema = z.object({
+  bookmarkedIds: z.array(z.string().uuid()).optional(),
+  selectedIssueId: z.string().uuid().nullable().optional(),
+})
+
 export const updateClashGapAnalysisSchema = z.object({
   project_id: z.string().uuid().optional(),
   settings: clashGapDetectionSettingsSchema.optional(),
   status: z.enum(['draft', 'uploading', 'queued']).optional(),
+  saved_at: z.string().datetime().nullable().optional(),
+  session_meta: clashGapSessionMetaSchema.optional(),
 })
 
 export const patchClashGapIssueSchema = z.object({

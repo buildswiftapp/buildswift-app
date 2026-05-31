@@ -2,6 +2,7 @@ import { badRequest, created, ok, serverError, unauthorized } from '@/lib/server
 import { writeAuditLog } from '@/lib/server/audit'
 import { getAuthContext } from '@/lib/server/auth'
 import { assertProjectOwned, parseSettings } from '@/lib/server/clash-gap/access'
+import { withSavedSessionFields } from '@/lib/server/clash-gap/session-save'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 import { createClashGapAnalysisSchema } from '@/lib/server/validators'
@@ -17,24 +18,60 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url)
   const projectId = url.searchParams.get('project_id')
+  const savedOnly = url.searchParams.get('saved') === '1'
 
   let query = supabase
     .from('clash_gap_analyses')
-    .select('id, project_id, status, processing_step, summary, created_at, completed_at, settings')
+    .select(
+      'id, project_id, status, processing_step, summary, created_at, completed_at, updated_at, settings, projects(name)',
+    )
     .eq('account_id', auth.accountId)
-    .order('created_at', { ascending: false })
+    .order(savedOnly ? 'updated_at' : 'created_at', { ascending: false })
     .limit(50)
 
   if (projectId) query = query.eq('project_id', projectId)
+  if (savedOnly) query = query.not('summary->saved_at', 'is', null)
 
   const { data, error } = await query
   if (error) return serverError(error.message)
 
+  const ids = (data ?? []).map((row: { id: string }) => row.id)
+  let issueCounts: Record<string, number> = {}
+  if (ids.length) {
+    const { data: issueRows } = await supabase
+      .from('clash_gap_issues')
+      .select('analysis_id')
+      .in('analysis_id', ids)
+      .neq('status', 'dismissed')
+    if (issueRows) {
+      issueCounts = issueRows.reduce(
+        (acc: Record<string, number>, row: { analysis_id: string }) => {
+          acc[row.analysis_id] = (acc[row.analysis_id] ?? 0) + 1
+          return acc
+        },
+        {},
+      )
+    }
+  }
+
   return ok({
-    analyses: (data ?? []).map((row: any) => ({
-      ...row,
-      settings: parseSettings(row.settings),
-    })),
+    analyses: (data ?? []).map((row: any) => {
+      const saved = withSavedSessionFields(row)
+      return {
+        id: saved.id,
+        project_id: saved.project_id,
+        project_name: row.projects?.name ?? null,
+        status: saved.status,
+        processing_step: saved.processing_step,
+        summary: saved.summary,
+        created_at: saved.created_at,
+        completed_at: saved.completed_at,
+        saved_at: saved.saved_at,
+        session_meta: saved.session_meta,
+        settings: parseSettings(saved.settings),
+        issue_count: issueCounts[saved.id] ?? 0,
+      }
+    }),
   })
 }
 

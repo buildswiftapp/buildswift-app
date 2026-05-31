@@ -8,6 +8,7 @@ export function DetectionToolShell(props: {
   children?: ReactNode
   stepper: ReactNode
   onNewSession: () => void
+  showNewSession?: boolean
   onRunDetection: () => void
   canRunDetection: boolean
   runDetectionHint?: string | null
@@ -19,6 +20,7 @@ export function DetectionToolShell(props: {
 }) {
   const {
     onNewSession,
+    showNewSession = true,
     onRunDetection,
     canRunDetection,
     runDetectionHint,
@@ -60,10 +62,12 @@ export function DetectionToolShell(props: {
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2 lg:justify-end">
-              {/* <Button type="button" variant="outline" className="rounded-xl" onClick={onNewSession}>
-                <Plus className="mr-2 h-4 w-4" aria-hidden />
-                New Session
-              </Button> */}
+              {showNewSession ? (
+                <Button type="button" variant="outline" className="rounded-xl" onClick={onNewSession}>
+                  <Plus className="mr-2 h-4 w-4" aria-hidden />
+                  Done & Save
+                </Button>
+              ) : null}
               {showGenerateReport ? (
                 <Button
                   type="button"
