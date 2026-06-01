@@ -94,11 +94,6 @@ export async function renderPdfPageToPng(
 }
 
 export async function getPdfPageCount(buffer: Buffer): Promise<number> {
-  // pdf-lib walks the real page tree and counts actual page leaves, so it
-  // returns the true page count even when a PDF declares a wrong `/Pages /Count`.
-  // pdfjs's `numPages` trusts the declared `/Count`, which over-counts such
-  // malformed files (e.g. a 70-page PDF reporting 72). Fall back to pdfjs only
-  // if pdf-lib can't parse the file.
   try {
     const { PDFDocument } = await import('pdf-lib')
     const doc = await PDFDocument.load(new Uint8Array(buffer), {
