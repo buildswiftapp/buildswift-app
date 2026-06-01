@@ -116,6 +116,7 @@ export function UploadSetupStep(props: {
   const [newAddress, setNewAddress] = useState('')
   const [newJobNumber, setNewJobNumber] = useState('')
   const [creating, setCreating] = useState(false)
+  const [removingIds, setRemovingIds] = useState<Set<string>>(new Set())
 
   const ingestFiles = (list: FileList | File[]) => {
     const files = Array.from(list)
@@ -145,9 +146,17 @@ export function UploadSetupStep(props: {
       onRowsChange([...rows, ...nextRows])
       if (onUploadRow) {
         void (async () => {
-          for (const row of nextRows) {
-            await onUploadRow(row)
+          const CONCURRENCY = 3
+          const queue = [...nextRows]
+          const worker = async () => {
+            while (queue.length) {
+              const row = queue.shift()
+              if (row) await onUploadRow(row)
+            }
           }
+          await Promise.all(
+            Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker),
+          )
         })()
       }
     }
@@ -170,7 +179,15 @@ export function UploadSetupStep(props: {
     const row = rows.find((r) => r.id === id)
     if (!row) return
     if (onRemoveRow) {
-      void onRemoveRow(row)
+      if (removingIds.has(id)) return
+      setRemovingIds((prev) => new Set(prev).add(id))
+      void onRemoveRow(row).finally(() => {
+        setRemovingIds((prev) => {
+          const next = new Set(prev)
+          next.delete(id)
+          return next
+        })
+      })
       return
     }
     onRowsChange(rows.filter((r) => r.id !== id))
@@ -394,7 +411,9 @@ export function UploadSetupStep(props: {
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((r) => (
+                      {rows.map((r) => {
+                        const removing = removingIds.has(r.id)
+                        return (
                         <tr key={r.id} className="border-t border-[#e2e8f0] bg-white">
                           <td className="max-w-[200px] truncate px-4 py-3 font-medium text-[#0f172a]">
                             {r.filename}
@@ -443,18 +462,26 @@ export function UploadSetupStep(props: {
                             </div>
                           </td>
                           <td className="px-4 py-3">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="text-destructive hover:text-destructive"
-                              onClick={() => removeRow(r.id)}
-                            >
-                              Remove
-                            </Button>
+                            {removing ? (
+                              <div className="flex flex-col items-start gap-1.5">
+                                <span className="text-xs font-medium text-[#64748b]">Removing…</span>
+                                <ProgressBar tone="orange" className="w-20" />
+                              </div>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="text-destructive hover:text-destructive"
+                                onClick={() => removeRow(r.id)}
+                              >
+                                Remove
+                              </Button>
+                            )}
                           </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
