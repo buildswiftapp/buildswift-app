@@ -132,11 +132,9 @@ export async function runChunkStage(params: StageParams) {
 
       if (isPdf) {
         const stageTimeout = pageStageTimeoutMs()
-        // Accurate page count from the real page tree (see getPdfPageCount).
         const totalPages = await getPdfPageCount(buffer)
         await withPdfDocument(buffer, async (pdf) => {
           const remaining = maxPages - pagesProcessed
-          // Never render past the real leaf count, even if pdfjs reports more.
           const pagesToProcess = Math.min(totalPages, pdf.numPages, remaining)
 
           await params.supabase
