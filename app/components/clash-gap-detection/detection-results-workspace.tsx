@@ -29,6 +29,7 @@ import {
   Filter,
   Hammer,
   Search,
+  SendIcon,
   ShieldCheck,
   SquarePlus,
   Tag,
@@ -675,7 +676,7 @@ export function DetectionResultsWorkspace(props: {
                     className="rounded-xl bg-violet-600 text-white hover:bg-violet-700"
                     onClick={() => props.onAddToRfi(selected.id)}
                   >
-                    <SquarePlus className="mr-2 h-4 w-4" strokeWidth={2} aria-hidden />
+                    <SendIcon className="mr-2 h-4 w-4" strokeWidth={2} aria-hidden />
                     Send to RFI
                   </Button>
                 </div>

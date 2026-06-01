@@ -37,12 +37,23 @@ export async function GET(req: Request) {
 
   const ids = (data ?? []).map((row: { id: string }) => row.id)
   let issueCounts: Record<string, number> = {}
+  const docsByAnalysis: Record<string, { plans: string[]; specs: string[] }> = {}
+
   if (ids.length) {
-    const { data: issueRows } = await supabase
-      .from('clash_gap_issues')
-      .select('analysis_id')
-      .in('analysis_id', ids)
-      .neq('status', 'dismissed')
+    const [{ data: issueRows }, { data: fileRows }] = await Promise.all([
+      supabase
+        .from('clash_gap_issues')
+        .select('analysis_id')
+        .in('analysis_id', ids)
+        .neq('status', 'dismissed'),
+      supabase
+        .from('clash_gap_analysis_files')
+        .select('analysis_id, file_name, file_role')
+        .in('analysis_id', ids)
+        .in('file_role', ['plans', 'specs'])
+        .order('created_at', { ascending: true }),
+    ])
+
     if (issueRows) {
       issueCounts = issueRows.reduce(
         (acc: Record<string, number>, row: { analysis_id: string }) => {
@@ -52,11 +63,24 @@ export async function GET(req: Request) {
         {},
       )
     }
+
+    for (const id of ids) {
+      docsByAnalysis[id] = { plans: [], specs: [] }
+    }
+    for (const file of fileRows ?? []) {
+      const bucket = docsByAnalysis[file.analysis_id]
+      if (!bucket) continue
+      const name = String(file.file_name ?? '').trim()
+      if (!name) continue
+      if (file.file_role === 'plans') bucket.plans.push(name)
+      else if (file.file_role === 'specs') bucket.specs.push(name)
+    }
   }
 
   return ok({
     analyses: (data ?? []).map((row: any) => {
       const saved = withSavedSessionFields(row)
+      const docs = docsByAnalysis[saved.id] ?? { plans: [], specs: [] }
       return {
         id: saved.id,
         project_id: saved.project_id,
@@ -70,6 +94,8 @@ export async function GET(req: Request) {
         session_meta: saved.session_meta,
         settings: parseSettings(saved.settings),
         issue_count: issueCounts[saved.id] ?? 0,
+        plan_documents: docs.plans,
+        spec_documents: docs.specs,
       }
     }),
   })

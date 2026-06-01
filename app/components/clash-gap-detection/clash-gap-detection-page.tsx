@@ -9,6 +9,8 @@ import {
   type ApiClashGapAnalysisDetail,
   type ClashGapSessionMeta,
 } from '@/lib/clash-gap-api'
+
+import { Download } from 'lucide-react'
 import {
   CLASH_GAP_RFI_PREFILL_STORAGE_KEY,
   type ClashGapRfiPrefillPayload,
@@ -65,6 +67,7 @@ import { DetectionSettingsStep } from './detection-settings-step'
 import { DetectionStepFooter } from './detection-step-footer'
 import { DetectionStepper, type StepDisplayStatus, type StepperItem } from './detection-stepper'
 import { DetectionToolShell } from './detection-tool-shell'
+import { SessionLoadingOverlay } from './session-loading-overlay'
 import { SourceComparisonSheet } from './source-comparison-sheet'
 import { StagePanel } from './stage-panel'
 import { UploadSetupStep } from './upload-setup-step'
@@ -248,6 +251,7 @@ export function ClashGapDetectionPage() {
   const [isStartingNewSession, setIsStartingNewSession] = useState(false)
   const [isSavingAndDone, setIsSavingAndDone] = useState(false)
   const [isSavedSession, setIsSavedSession] = useState(false)
+  const [isLoadingSession, setIsLoadingSession] = useState(false)
   const [issues, setIssues] = useState<ClashGapIssue[]>([])
   const [bookmarkedIds, setBookmarkedIds] = useState(() => new Set<string>())
   const [disciplineFilter, setDisciplineFilter] = useState('all')
@@ -414,6 +418,7 @@ export function ClashGapDetectionPage() {
 
     if (isNewSession || !analysisParam || analysisParam === analysisId) return
 
+    setIsLoadingSession(true)
     void (async () => {
       try {
         const data = await loadAnalysis(analysisParam)
@@ -454,6 +459,8 @@ export function ClashGapDetectionPage() {
           return
         }
         toast.error(e instanceof Error ? e.message : 'Failed to load analysis')
+      } finally {
+        setIsLoadingSession(false)
       }
     })()
   }, [searchParams])
@@ -1073,14 +1080,22 @@ export function ClashGapDetectionPage() {
 
   return (
     <>
+      <SessionLoadingOverlay open={isLoadingSession} />
       <DetectionToolShell
         stepper={stepper}
-        onNewSession={() => setNewSessionConfirmOpen(true)}
+        showGoToList={isSavedSession && !isLoadingSession}
+        onGoToList={goToList}
+        showSaveAndDone={!isSavedSession && !isLoadingSession}
+        onSaveAndDone={() => void saveAndDone()}
+        saveAndDoneDisabled={!detectComplete || Boolean(runningStage) || !analysisId}
+        isSavingAndDone={isSavingAndDone}
         onRunDetection={() => {}}
         canRunDetection={false}
         isRunning={Boolean(runningStage)}
         showRunDetection={false}
       >
+        {!isLoadingSession ? (
+          <>
         {activeStep === 'upload' ? (
           <div className="flex flex-col gap-6">
             <UploadSetupStep
@@ -1206,6 +1221,7 @@ export function ClashGapDetectionPage() {
                       downloadArtifact('report', `/api/clash-gap/analyses/${analysisId}/report`, `${base}-report.pdf`, { method: 'POST' })
                     }
                   >
+                    <Download className="mr-2 h-4 w-4" strokeWidth={2} aria-hidden />
                     Report (.pdf)
                   </Button>
                   <Button
@@ -1217,6 +1233,7 @@ export function ClashGapDetectionPage() {
                       downloadArtifact('issues-csv', `/api/clash-gap/analyses/${analysisId}/artifacts/issues?format=csv`, `${base}-issues.csv`, { method: 'GET' })
                     }
                   >
+                    <Download className="mr-2 h-4 w-4" strokeWidth={2} aria-hidden />
                     Issues (.csv)
                   </Button>
                 </div>
@@ -1267,12 +1284,10 @@ export function ClashGapDetectionPage() {
                 : 'Finish the current stage to continue.'
           }
           showNext={activeStep !== 'chunk' && activeStep !== 'detection'}
-          onSaveAndDone={() => void saveAndDone()}
-          onGoToList={goToList}
-          isSavedSession={isSavedSession}
-          saveAndDoneReady={detectComplete && !runningStage && Boolean(analysisId)}
-          isSavingAndDone={isSavingAndDone}
+          hideNavigation={isSavedSession}
         />
+          </>
+        ) : null}
       </DetectionToolShell>
 
       <SourceComparisonSheet open={sheetOpen} onOpenChange={setSheetOpen} issue={sheetIssue} />

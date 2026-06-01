@@ -48,6 +48,8 @@ export type ApiClashGapAnalysis = {
 export type ApiClashGapAnalysisListItem = ApiClashGapAnalysis & {
   project_name?: string | null
   issue_count?: number
+  plan_documents?: string[]
+  spec_documents?: string[]
 }
 
 export type ApiClashGapFile = {
