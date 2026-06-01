@@ -1,7 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { FileDown, List, Loader2, Play, Save, Sparkles } from 'lucide-react'
+import { FileDown, List, Loader2, Play, Save, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 export function DetectionToolShell(props: {
@@ -9,6 +9,9 @@ export function DetectionToolShell(props: {
   stepper: ReactNode
   onGoToList?: () => void
   showGoToList?: boolean
+  onDeleteSession?: () => void
+  showDeleteSession?: boolean
+  isDeletingSession?: boolean
   onSaveAndDone?: () => void
   showSaveAndDone?: boolean
   saveAndDoneDisabled?: boolean
@@ -25,6 +28,9 @@ export function DetectionToolShell(props: {
   const {
     onGoToList,
     showGoToList,
+    onDeleteSession,
+    showDeleteSession,
+    isDeletingSession,
     onSaveAndDone,
     showSaveAndDone,
     saveAndDoneDisabled,
@@ -71,9 +77,25 @@ export function DetectionToolShell(props: {
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2 lg:justify-end">
               {showGoToList ? (
-                <Button type="button" variant="default" className="rounded-xl" onClick={onGoToList}>
+                <Button type="button" variant="outline" className="rounded-xl" onClick={onGoToList}>
                   <List className="mr-2 h-4 w-4" aria-hidden />
                   Go to list
+                </Button>
+              ) : null}
+              {showDeleteSession ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-xl border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                  disabled={isDeletingSession}
+                  onClick={onDeleteSession}
+                >
+                  {isDeletingSession ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Trash2 className="mr-2 h-4 w-4" aria-hidden />
+                  )}
+                  {isDeletingSession ? 'Deleting…' : 'Delete'}
                 </Button>
               ) : null}
               {showSaveAndDone ? (

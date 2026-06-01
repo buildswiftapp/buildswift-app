@@ -8,14 +8,24 @@ import type { ApiClashGapAnalysisListItem } from '@/lib/clash-gap-api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   AlertTriangle,
   CircleAlert,
   CircleCheck,
   Clock,
   FileSearch,
   FileText,
+  Loader2,
   Plus,
   Sparkles,
+  Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -48,6 +58,12 @@ export function ClashGapSessionsPage() {
   const router = useRouter()
   const [sessions, setSessions] = useState<ApiClashGapAnalysisListItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [sessionPendingDelete, setSessionPendingDelete] = useState<{
+    id: string
+    projectName: string
+  } | null>(null)
 
   const loadSessions = useCallback(async () => {
     setLoading(true)
@@ -69,6 +85,28 @@ export function ClashGapSessionsPage() {
 
   const startNewSession = () => {
     router.push('/clash-gap-detection/session?new=1')
+  }
+
+  const openDeleteConfirm = (id: string, projectName: string) => {
+    setSessionPendingDelete({ id, projectName })
+    setDeleteConfirmOpen(true)
+  }
+
+  const confirmDeleteSession = async () => {
+    if (!sessionPendingDelete) return
+    const { id } = sessionPendingDelete
+    setDeletingId(id)
+    try {
+      await apiFetch(`/api/clash-gap/analyses/${id}`, { method: 'DELETE' })
+      setSessions((prev) => prev.filter((s) => s.id !== id))
+      setDeleteConfirmOpen(false)
+      setSessionPendingDelete(null)
+      toast.success('Session deleted.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not delete session')
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   return (
@@ -139,72 +177,147 @@ export function ClashGapSessionsPage() {
           <div className="grid gap-3">
             {sessions.map((session) => {
               const { total, conflicts, missing, verified } = issueSummary(session)
+              const isDeleting = deletingId === session.id
+              const projectName = session.project_name?.trim() || 'Untitled project'
               return (
-                <Link
+                <div
                   key={session.id}
-                  href={`/clash-gap-detection/session?analysis=${session.id}`}
-                  className="group block rounded-2xl border border-[#e2e8f0] bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
+                  className="group relative rounded-2xl border border-[#e2e8f0] bg-white shadow-sm transition-shadow hover:shadow-md"
                 >
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,280px)_1fr_auto] lg:items-center lg:gap-6">
-                    <div className="min-w-0 space-y-1">
-                      <p className="truncate text-base font-semibold text-[#0f172a] group-hover:text-violet-700">
-                        {session.project_name?.trim() || 'Untitled project'}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#64748b]">
-                        <span className="inline-flex items-center gap-1">
-                          <Clock className="h-3.5 w-3.5" aria-hidden />
-                          Saved {formatSavedDate(session.saved_at)}
-                        </span>
-                        <span>{total} issue{total === 1 ? '' : 's'}</span>
-                      </div>
-                    </div>
-
-                    <div className="min-w-0 space-y-2 border-[#e2e8f0] lg:border-x lg:px-6">
-                      <div className="flex min-w-0 items-start gap-2 text-sm">
-                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-violet-50 text-violet-700">
-                          <FileText className="h-3 w-3" aria-hidden />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-bold uppercase tracking-wide text-[#94a3b8]">Plans</p>
-                          <p className="truncate text-[#334155]" title={formatDocList(session.plan_documents)}>
-                            {formatDocList(session.plan_documents)}
-                          </p>
+                  <Link
+                    href={`/clash-gap-detection/session?analysis=${session.id}`}
+                    className="block p-5 pr-14"
+                  >
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,280px)_1fr_auto] lg:items-center lg:gap-6">
+                      <div className="min-w-0 space-y-1">
+                        <p className="truncate text-base font-semibold text-[#0f172a] group-hover:text-violet-700">
+                          {projectName}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#64748b]">
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="h-3.5 w-3.5" aria-hidden />
+                            Saved {formatSavedDate(session.saved_at)}
+                          </span>
+                          <span>{total} issue{total === 1 ? '' : 's'}</span>
                         </div>
                       </div>
-                      <div className="flex min-w-0 items-start gap-2 text-sm">
-                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-sky-50 text-sky-700">
-                          <FileText className="h-3 w-3" aria-hidden />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-bold uppercase tracking-wide text-[#94a3b8]">Specs</p>
-                          <p className="truncate text-[#334155]" title={formatDocList(session.spec_documents)}>
-                            {formatDocList(session.spec_documents)}
-                          </p>
+
+                      <div className="min-w-0 space-y-2 border-[#e2e8f0] lg:border-x lg:px-6">
+                        <div className="flex min-w-0 items-start gap-2 text-sm">
+                          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-violet-50 text-violet-700">
+                            <FileText className="h-3 w-3" aria-hidden />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-[#94a3b8]">Plans</p>
+                            <p className="truncate text-[#334155]" title={formatDocList(session.plan_documents)}>
+                              {formatDocList(session.plan_documents)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex min-w-0 items-start gap-2 text-sm">
+                          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-sky-50 text-sky-700">
+                            <FileText className="h-3 w-3" aria-hidden />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-[#94a3b8]">Specs</p>
+                            <p className="truncate text-[#334155]" title={formatDocList(session.spec_documents)}>
+                              {formatDocList(session.spec_documents)}
+                            </p>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700">
-                        <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
-                        {conflicts} conflicts
-                      </span>
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700">
-                        <CircleAlert className="h-3.5 w-3.5" aria-hidden />
-                        {missing} missing
-                      </span>
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
-                        <CircleCheck className="h-3.5 w-3.5" aria-hidden />
-                        {verified} verified
-                      </span>
+                      <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                        <span className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700">
+                          <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+                          {conflicts} conflicts
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-lg bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700">
+                          <CircleAlert className="h-3.5 w-3.5" aria-hidden />
+                          {missing} missing
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                          <CircleCheck className="h-3.5 w-3.5" aria-hidden />
+                          {verified} verified
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                </Link>
+                  </Link>
+                  <button
+                    type="button"
+                    aria-label={`Delete session ${projectName}`}
+                    disabled={isDeleting}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      openDeleteConfirm(session.id, projectName)
+                    }}
+                    className="absolute right-4 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg border border-[#e2e8f0] bg-white text-[#64748b] transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                  >
+                    {isDeleting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    ) : (
+                      <Trash2 className="h-4 w-4" aria-hidden />
+                    )}
+                  </button>
+                </div>
               )
             })}
           </div>
         )}
       </div>
+
+      <Dialog
+        open={deleteConfirmOpen}
+        onOpenChange={(open) => {
+          if (!deletingId) {
+            setDeleteConfirmOpen(open)
+            if (!open) setSessionPendingDelete(null)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this saved session?</DialogTitle>
+            <DialogDescription>
+              {sessionPendingDelete?.projectName ? (
+                <>
+                  <span className="font-medium text-[#0f172a]">{sessionPendingDelete.projectName}</span>
+                  {' '}
+                  will be permanently removed, including uploaded files, OCR data, and detected issues.
+                  This cannot be undone.
+                </>
+              ) : (
+                <>
+                  This permanently deletes the analysis, uploaded files, OCR data, and detected issues
+                  from the server. This cannot be undone.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={Boolean(deletingId)}
+              onClick={() => {
+                setDeleteConfirmOpen(false)
+                setSessionPendingDelete(null)
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={Boolean(deletingId)}
+              onClick={() => void confirmDeleteSession()}
+            >
+              {deletingId ? 'Deleting…' : 'Delete session'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
