@@ -12,7 +12,11 @@ import {
   ocrImageWithOpenAI,
   sha256Buffer,
 } from '@/lib/server/clash-gap/extract-pdf'
-import { renderPdfPageFromDoc, withPdfDocument } from '@/lib/server/clash-gap/render-pdf-page'
+import {
+  getPdfPageCount,
+  renderPdfPageFromDoc,
+  withPdfDocument,
+} from '@/lib/server/clash-gap/render-pdf-page'
 import { mergePageText } from '@/lib/server/clash-gap/merge-ocr'
 import { downscaleImageForOcr } from '@/lib/server/clash-gap/ocr-image'
 import {
@@ -128,10 +132,12 @@ export async function runChunkStage(params: StageParams) {
 
       if (isPdf) {
         const stageTimeout = pageStageTimeoutMs()
+        // Accurate page count from the real page tree (see getPdfPageCount).
+        const totalPages = await getPdfPageCount(buffer)
         await withPdfDocument(buffer, async (pdf) => {
-          const totalPages = pdf.numPages
           const remaining = maxPages - pagesProcessed
-          const pagesToProcess = Math.min(totalPages, remaining)
+          // Never render past the real leaf count, even if pdfjs reports more.
+          const pagesToProcess = Math.min(totalPages, pdf.numPages, remaining)
 
           await params.supabase
             .from('clash_gap_analysis_files')

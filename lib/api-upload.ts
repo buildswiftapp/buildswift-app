@@ -1,7 +1,7 @@
 import { apiFetch } from '@/lib/api'
 import { createSupabaseBrowserClient } from '@/lib/supabase/client'
 
-const CLASH_GAP_DIRECT_UPLOAD_THRESHOLD = 25 * 1024 * 1024
+const CLASH_GAP_DIRECT_UPLOAD_THRESHOLD = 4 * 1024 * 1024
 
 export type ClashGapUploadedFile = { id: string; page_count: number | null }
 
