@@ -182,120 +182,125 @@ export function DetectionResultViewer(props: {
           <p className="text-muted-foreground py-20 text-center text-sm">No pages to show yet.</p>
         ) : (
           <div className="relative flex min-h-0 flex-1 flex-col">
-            <button
-              type="button"
-              aria-label="Previous page"
-              disabled={atStart}
-              onClick={() => setIndex((i) => Math.max(0, i - 1))}
-              className="absolute left-1 top-[38%] z-10 flex h-11 w-11 items-center justify-center rounded-full border border-[#e2e8f0] bg-white text-[#0f172a] shadow-md transition-colors hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-30"
-            >
-              <ChevronLeft className="h-6 w-6" aria-hidden />
-            </button>
-            <button
-              type="button"
-              aria-label="Next page"
-              disabled={atEnd}
-              onClick={() => setIndex((i) => Math.min(count - 1, i + 1))}
-              className="absolute right-1 top-[38%] z-10 flex h-11 w-11 items-center justify-center rounded-full border border-[#e2e8f0] bg-white text-[#0f172a] shadow-md transition-colors hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-30"
-            >
-              <ChevronRight className="h-6 w-6" aria-hidden />
-            </button>
-
-            <div className="min-h-0 flex-1 overflow-y-auto px-10 pb-1 lg:px-12">
-              <div className="mb-2 flex items-center justify-end gap-1.5">
-                <button type="button" className={iconBtn} title="Rotate 90°" onClick={() => setRotation((r) => (r + 90) % 360)}>
-                  <RotateCw className="h-4 w-4" aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  className={iconBtn}
-                  title="Zoom out"
-                  disabled={zoom <= ZOOM_MIN}
-                  onClick={() => {
-                    const next = clampZoom(zoom - ZOOM_STEP)
-                    setZoom(next)
-                    if (next === 1) setPan({ x: 0, y: 0 })
-                  }}
-                >
-                  <ZoomOut className="h-4 w-4" aria-hidden />
-                </button>
-                <span className="w-12 text-center text-xs tabular-nums text-[#475569]">
-                  {Math.round(zoom * 100)}%
-                </span>
-                <button
-                  type="button"
-                  className={iconBtn}
-                  title="Zoom in"
-                  disabled={zoom >= ZOOM_MAX}
-                  onClick={() => setZoom((z) => clampZoom(z + ZOOM_STEP))}
-                >
-                  <ZoomIn className="h-4 w-4" aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  className={iconBtn}
-                  title="Reset view"
-                  disabled={zoom === 1 && rotation === 0 && pan.x === 0 && pan.y === 0}
-                  onClick={resetView}
-                >
-                  <RefreshCw className="h-4 w-4" aria-hidden />
-                </button>
-              </div>
-
-              <div
-                ref={viewportRef}
-                role="img"
-                aria-label="Page preview — drag to pan when zoomed"
-                className={`relative flex min-h-[68vh] w-full touch-none select-none items-center justify-center overflow-hidden rounded-xl border border-[#e2e8f0] bg-slate-50 p-3 ${
-                  canGrab ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-default'
-                }`}
-                onPointerDown={onViewportPointerDown}
-                onPointerMove={onViewportPointerMove}
-                onPointerUp={endPan}
-                onPointerCancel={endPan}
-                onLostPointerCapture={endPan}
-                onWheel={onViewportWheel}
-              >
-                {current.imageUrl ? (
-                  <>
-                    <div
-                      className="flex items-center justify-center"
-                      style={{
-                        transform: `translate(${pan.x}px, ${pan.y}px) rotate(${rotation}deg) scale(${zoom})`,
-                        transformOrigin: 'center center',
-                        transition: isPanning ? 'none' : 'transform 150ms ease-out',
+            <div className="flex min-h-0 flex-1 flex-col px-6 pb-1 lg:px-10">
+              <div className="grid min-h-[68vh] flex-1 grid-cols-[minmax(0,4fr)_minmax(0,1fr)] gap-3">
+                <div className="relative flex min-h-0 min-w-0 flex-col">
+                  <button
+                    type="button"
+                    aria-label="Previous page"
+                    disabled={atStart}
+                    onClick={() => setIndex((i) => Math.max(0, i - 1))}
+                    className="absolute left-0 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-[#e2e8f0] bg-white text-[#0f172a] shadow-md transition-colors hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-30"
+                  >
+                    <ChevronLeft className="h-5 w-5" aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Next page"
+                    disabled={atEnd}
+                    onClick={() => setIndex((i) => Math.min(count - 1, i + 1))}
+                    className="absolute right-0 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-[#e2e8f0] bg-white text-[#0f172a] shadow-md transition-colors hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-30"
+                  >
+                    <ChevronRight className="h-5 w-5" aria-hidden />
+                  </button>
+                  <div className="mb-2 flex shrink-0 items-center justify-end gap-1.5">
+                    <button type="button" className={iconBtn} title="Rotate 90°" onClick={() => setRotation((r) => (r + 90) % 360)}>
+                      <RotateCw className="h-4 w-4" aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      className={iconBtn}
+                      title="Zoom out"
+                      disabled={zoom <= ZOOM_MIN}
+                      onClick={() => {
+                        const next = clampZoom(zoom - ZOOM_STEP)
+                        setZoom(next)
+                        if (next === 1) setPan({ x: 0, y: 0 })
                       }}
                     >
-                      <img
-                        key={current.id}
-                        src={current.imageUrl}
-                        alt={pageLabel(current)}
-                        draggable={false}
-                        onLoad={() => setImgLoading(false)}
-                        onError={() => setImgLoading(false)}
-                        className="pointer-events-none h-auto w-full max-h-[66vh] min-w-[min(100%,640px)] rounded-lg object-contain"
-                      />
-                    </div>
-                    {imgLoading ? (
-                      <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-50/70">
-                        <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" aria-hidden />
-                      </div>
-                    ) : null}
-                  </>
-                ) : (
-                  <div className="text-muted-foreground flex h-48 items-center justify-center text-xs">
-                    No image
+                      <ZoomOut className="h-4 w-4" aria-hidden />
+                    </button>
+                    <span className="w-12 text-center text-xs tabular-nums text-[#475569]">
+                      {Math.round(zoom * 100)}%
+                    </span>
+                    <button
+                      type="button"
+                      className={iconBtn}
+                      title="Zoom in"
+                      disabled={zoom >= ZOOM_MAX}
+                      onClick={() => setZoom((z) => clampZoom(z + ZOOM_STEP))}
+                    >
+                      <ZoomIn className="h-4 w-4" aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      className={iconBtn}
+                      title="Reset view"
+                      disabled={zoom === 1 && rotation === 0 && pan.x === 0 && pan.y === 0}
+                      onClick={resetView}
+                    >
+                      <RefreshCw className="h-4 w-4" aria-hidden />
+                    </button>
                   </div>
-                )}
-              </div>
 
-              <div className="mt-4">
-                <h4 className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.1em] text-[#64748b]">
-                  Transcribed text
-                </h4>
-                <pre className="max-h-[22vh] overflow-auto whitespace-pre-wrap rounded-xl border border-[#e2e8f0] bg-[#f8fafc] p-3 text-xs leading-relaxed text-[#334155]">
-                  {current.ocrText.trim() || '(no text recognized on this page)'}
-                </pre>
+                  <div
+                    ref={viewportRef}
+                    role="img"
+                    aria-label="Page preview — drag to pan when zoomed"
+                    className={`relative min-h-0 flex-1 touch-none select-none overflow-hidden rounded-xl border border-[#e2e8f0] bg-slate-50 p-2 ${
+                      canGrab ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-default'
+                    }`}
+                    onPointerDown={onViewportPointerDown}
+                    onPointerMove={onViewportPointerMove}
+                    onPointerUp={endPan}
+                    onPointerCancel={endPan}
+                    onLostPointerCapture={endPan}
+                    onWheel={onViewportWheel}
+                  >
+                    {current.imageUrl ? (
+                      <>
+                        <div className="flex h-full min-h-[60vh] w-full items-center justify-center">
+                          <div
+                            className="flex items-center justify-center"
+                            style={{
+                              transform: `translate(${pan.x}px, ${pan.y}px) rotate(${rotation}deg) scale(${zoom})`,
+                              transformOrigin: 'center center',
+                              transition: isPanning ? 'none' : 'transform 150ms ease-out',
+                            }}
+                          >
+                            <img
+                              key={current.id}
+                              src={current.imageUrl}
+                              alt={pageLabel(current)}
+                              draggable={false}
+                              onLoad={() => setImgLoading(false)}
+                              onError={() => setImgLoading(false)}
+                              className="pointer-events-none max-h-full max-w-full rounded-lg object-contain"
+                            />
+                          </div>
+                        </div>
+                        {imgLoading ? (
+                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-50/70">
+                            <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" aria-hidden />
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <div className="text-muted-foreground flex h-full min-h-[60vh] items-center justify-center text-xs">
+                        No image
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex min-h-0 min-w-0 flex-col rounded-xl border border-[#e2e8f0] bg-[#f8fafc]">
+                  <h4 className="shrink-0 border-b border-[#e2e8f0] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-[#64748b]">
+                    Transcribed text
+                  </h4>
+                  <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-3 text-[11px] leading-relaxed text-[#334155]">
+                    {current.ocrText.trim() || '(no text recognized on this page)'}
+                  </pre>
+                </div>
               </div>
             </div>
           </div>

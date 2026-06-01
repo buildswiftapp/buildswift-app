@@ -248,7 +248,9 @@ export function ClashGapDetectionPage() {
   const [clientUploadLabel, setClientUploadLabel] = useState<string | null>(null)
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null)
   const [newSessionConfirmOpen, setNewSessionConfirmOpen] = useState(false)
+  const [deleteSavedConfirmOpen, setDeleteSavedConfirmOpen] = useState(false)
   const [isStartingNewSession, setIsStartingNewSession] = useState(false)
+  const [isDeletingSavedSession, setIsDeletingSavedSession] = useState(false)
   const [isSavingAndDone, setIsSavingAndDone] = useState(false)
   const [isSavedSession, setIsSavedSession] = useState(false)
   const [isLoadingSession, setIsLoadingSession] = useState(false)
@@ -807,6 +809,26 @@ export function ClashGapDetectionPage() {
     router.push('/clash-gap-detection')
   }, [router])
 
+  const deleteSavedSession = useCallback(async () => {
+    const id = analysisIdRef.current
+    if (!id) return
+    setIsDeletingSavedSession(true)
+    try {
+      await apiFetch(`/api/clash-gap/analyses/${id}`, { method: 'DELETE' })
+      try {
+        localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
+      } catch {
+      }
+      setDeleteSavedConfirmOpen(false)
+      router.push('/clash-gap-detection')
+      toast.success('Session deleted.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not delete session')
+    } finally {
+      setIsDeletingSavedSession(false)
+    }
+  }, [router])
+
   const saveAndDone = useCallback(async () => {
     const id = analysisIdRef.current
     if (!id) return
@@ -1085,6 +1107,9 @@ export function ClashGapDetectionPage() {
         stepper={stepper}
         showGoToList={isSavedSession && !isLoadingSession}
         onGoToList={goToList}
+        showDeleteSession={isSavedSession && !isLoadingSession}
+        onDeleteSession={() => setDeleteSavedConfirmOpen(true)}
+        isDeletingSession={isDeletingSavedSession}
         showSaveAndDone={!isSavedSession && !isLoadingSession}
         onSaveAndDone={() => void saveAndDone()}
         saveAndDoneDisabled={!detectComplete || Boolean(runningStage) || !analysisId}
@@ -1297,6 +1322,36 @@ export function ClashGapDetectionPage() {
         onOpenChange={setViewerOpen}
         analysisId={analysisId}
       />
+
+      <Dialog open={deleteSavedConfirmOpen} onOpenChange={(o) => !isDeletingSavedSession && setDeleteSavedConfirmOpen(o)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this saved session?</DialogTitle>
+            <DialogDescription>
+              This permanently deletes the analysis, uploaded files, OCR data, and detected issues
+              from the server. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isDeletingSavedSession}
+              onClick={() => setDeleteSavedConfirmOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={isDeletingSavedSession}
+              onClick={() => void deleteSavedSession()}
+            >
+              {isDeletingSavedSession ? 'Deleting…' : 'Delete session'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={newSessionConfirmOpen} onOpenChange={(o) => !isStartingNewSession && setNewSessionConfirmOpen(o)}>
         <DialogContent>
