@@ -81,6 +81,11 @@ export async function POST(req: Request, { params }: Params) {
 
   const file = form.get('file')
   const fileRole = String(form.get('file_role') || 'plans')
+  const pageCountRaw = form.get('page_count')
+  const providedPageCount =
+    typeof pageCountRaw === 'string' && /^\d+$/.test(pageCountRaw) && Number(pageCountRaw) > 0
+      ? Number(pageCountRaw)
+      : null
   if (!['plans', 'specs', 'addenda'].includes(fileRole)) {
     return badRequest('Invalid file_role')
   }
@@ -125,7 +130,7 @@ export async function POST(req: Request, { params }: Params) {
 
   let pageCount: number | null = null
   if (mime === 'application/pdf' || /\.pdf$/i.test(name)) {
-    pageCount = await pdfPageCountWithTimeout(buf)
+    pageCount = providedPageCount ?? (await pdfPageCountWithTimeout(buf))
   } else if (mime.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(name)) {
     pageCount = 1
   }
@@ -175,6 +180,10 @@ async function registerDirectUpload(
     .trim()
     .toLowerCase()
   const fileRole = typeof body.file_role === 'string' ? body.file_role : 'plans'
+  const providedPageCount =
+    typeof body.page_count === 'number' && Number.isFinite(body.page_count) && body.page_count > 0
+      ? Math.floor(body.page_count)
+      : null
 
   if (!['plans', 'specs', 'addenda'].includes(fileRole)) return badRequest('Invalid file_role')
 
@@ -222,11 +231,15 @@ async function registerDirectUpload(
   if (isImage) {
     pageCount = 1
   } else if (isPdf) {
-    try {
-      const buf = await downloadClashGapFile(storagePath)
-      pageCount = await pdfPageCountWithTimeout(buf)
-    } catch (e) {
-      console.error('[clash-gap upload] presigned page count failed:', e)
+    if (providedPageCount != null) {
+      pageCount = providedPageCount
+    } else {
+      try {
+        const buf = await downloadClashGapFile(storagePath)
+        pageCount = await pdfPageCountWithTimeout(buf)
+      } catch (e) {
+        console.error('[clash-gap upload] presigned page count failed:', e)
+      }
     }
   }
 

@@ -5,6 +5,22 @@ const CLASH_GAP_DIRECT_UPLOAD_THRESHOLD = 4 * 1024 * 1024
 
 export type ClashGapUploadedFile = { id: string; page_count: number | null }
 
+async function countPdfPagesClientSide(file: File): Promise<number | null> {
+  try {
+    const { PDFDocument } = await import('pdf-lib')
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const doc = await PDFDocument.load(bytes, {
+      ignoreEncryption: true,
+      updateMetadata: false,
+      throwOnInvalidObject: false,
+    })
+    const count = doc.getPageCount()
+    return Number.isFinite(count) && count > 0 ? count : null
+  } catch {
+    return null
+  }
+}
+
 export async function uploadClashGapFile(params: {
   analysisId: string
   file: File
@@ -12,11 +28,18 @@ export async function uploadClashGapFile(params: {
 }): Promise<ClashGapUploadedFile> {
   const { analysisId, file, fileRole } = params
   const mime = (file.type || 'application/octet-stream').split(';')[0].trim().toLowerCase()
+  const isPdf = mime === 'application/pdf' || /\.pdf$/i.test(file.name)
+
+  const pageCountPromise: Promise<number | null> = isPdf
+    ? countPdfPagesClientSide(file)
+    : Promise.resolve(null)
 
   if (file.size <= CLASH_GAP_DIRECT_UPLOAD_THRESHOLD) {
     const fd = new FormData()
     fd.append('file', file)
     fd.append('file_role', fileRole)
+    const pageCount = await pageCountPromise
+    if (pageCount != null) fd.append('page_count', String(pageCount))
     const res = await apiUpload<{ file: ClashGapUploadedFile }>(
       `/api/clash-gap/analyses/${analysisId}/files`,
       fd,
@@ -44,6 +67,7 @@ export async function uploadClashGapFile(params: {
     })
   if (error) throw new Error(error.message)
 
+  const pageCount = await pageCountPromise
   const res = await apiFetch<{ file: ClashGapUploadedFile }>(
     `/api/clash-gap/analyses/${analysisId}/files`,
     {
@@ -54,6 +78,7 @@ export async function uploadClashGapFile(params: {
         mime_type: mime,
         size_bytes: file.size,
         file_role: fileRole,
+        ...(pageCount != null ? { page_count: pageCount } : {}),
       },
     },
   )
