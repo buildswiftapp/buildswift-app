@@ -12,7 +12,7 @@ import { getAuthContext } from '@/lib/server/auth'
 import { assertWithinStorageLimit } from '@/lib/server/billing'
 import { getAnalysisForAccount } from '@/lib/server/clash-gap/access'
 import { getPdfPageCount } from '@/lib/server/clash-gap/render-pdf-page'
-import { clashGapBucket, uploadClashGapFile } from '@/lib/server/clash-gap/storage'
+import { clashGapBucket, downloadClashGapFile, uploadClashGapFile } from '@/lib/server/clash-gap/storage'
 import { incrementAccountStorageBytes } from '@/lib/server/storage-usage'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
@@ -217,7 +217,18 @@ async function registerDirectUpload(
   }
 
   const isImage = mime.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(name)
-  const pageCount = isImage ? 1 : null
+  const isPdf = mime === 'application/pdf' || /\.pdf$/i.test(name)
+  let pageCount: number | null = null
+  if (isImage) {
+    pageCount = 1
+  } else if (isPdf) {
+    try {
+      const buf = await downloadClashGapFile(storagePath)
+      pageCount = await pdfPageCountWithTimeout(buf)
+    } catch (e) {
+      console.error('[clash-gap upload] presigned page count failed:', e)
+    }
+  }
 
   const { data, error } = await supabase
     .from('clash_gap_analysis_files')
