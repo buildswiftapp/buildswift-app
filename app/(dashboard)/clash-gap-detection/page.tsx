@@ -1,10 +1,10 @@
 import { Suspense } from 'react'
-import { ClashGapDetectionPage } from '@/app/components/clash-gap-detection/clash-gap-detection-page'
+import { ClashGapSessionsPage } from '@/app/components/clash-gap-detection/clash-gap-sessions-page'
 
 export default function ClashGapDetectionRoutePage() {
   return (
     <Suspense fallback={null}>
-      <ClashGapDetectionPage />
+      <ClashGapSessionsPage />
     </Suspense>
   )
 }

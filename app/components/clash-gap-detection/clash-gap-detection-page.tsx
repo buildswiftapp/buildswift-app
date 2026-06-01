@@ -7,7 +7,10 @@ import { downloadAndSaveBlob, uploadClashGapFile } from '@/lib/api-upload'
 import {
   mapApiIssueToClashGapIssue,
   type ApiClashGapAnalysisDetail,
+  type ClashGapSessionMeta,
 } from '@/lib/clash-gap-api'
+
+import { Download } from 'lucide-react'
 import {
   CLASH_GAP_RFI_PREFILL_STORAGE_KEY,
   type ClashGapRfiPrefillPayload,
@@ -64,9 +67,12 @@ import { DetectionSettingsStep } from './detection-settings-step'
 import { DetectionStepFooter } from './detection-step-footer'
 import { DetectionStepper, type StepDisplayStatus, type StepperItem } from './detection-stepper'
 import { DetectionToolShell } from './detection-tool-shell'
+import { SessionLoadingOverlay } from './session-loading-overlay'
 import { SourceComparisonSheet } from './source-comparison-sheet'
 import { StagePanel } from './stage-panel'
 import { UploadSetupStep } from './upload-setup-step'
+
+const CLASH_GAP_SESSION_PATH = '/clash-gap-detection/session'
 
 const defaultSettings: DetectionSettings = {
   mode: 'both',
@@ -158,8 +164,6 @@ function buildRfiDraftFromIssue(
       (s, i) =>
         `${i + 1}. ${s.documentLabel} (page ${s.page}) — “${s.excerpt.slice(0, 120)}${s.excerpt.length > 120 ? '…' : ''}”`,
     ),
-    '',
-    actionLine,
   ].join('\n')
 
   const rawDescription = settings.rfiFormat === 'short' ? shortBody : detailedBody
@@ -243,8 +247,11 @@ export function ClashGapDetectionPage() {
   const [runningStage, setRunningStage] = useState<ClashGapStage | null>(null)
   const [clientUploadLabel, setClientUploadLabel] = useState<string | null>(null)
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null)
-  const [confirmOpen, setConfirmOpen] = useState(false)
-  const [isFinishing, setIsFinishing] = useState(false)
+  const [newSessionConfirmOpen, setNewSessionConfirmOpen] = useState(false)
+  const [isStartingNewSession, setIsStartingNewSession] = useState(false)
+  const [isSavingAndDone, setIsSavingAndDone] = useState(false)
+  const [isSavedSession, setIsSavedSession] = useState(false)
+  const [isLoadingSession, setIsLoadingSession] = useState(false)
   const [issues, setIssues] = useState<ClashGapIssue[]>([])
   const [bookmarkedIds, setBookmarkedIds] = useState(() => new Set<string>())
   const [disciplineFilter, setDisciplineFilter] = useState('all')
@@ -270,6 +277,7 @@ export function ClashGapDetectionPage() {
   const analysisIdRef = useRef<string | null>(analysisId)
   const creatingAnalysisRef = useRef<Promise<string> | null>(null)
   const pollingRef = useRef(false)
+  const savedAnalysisRef = useRef(false)
 
   useEffect(() => {
     analysisIdRef.current = analysisId
@@ -288,6 +296,8 @@ export function ClashGapDetectionPage() {
     async (id: string) => {
       const data = await apiFetch<ApiClashGapAnalysisDetail>(`/api/clash-gap/analyses/${id}`)
       setAnalysisId(id)
+      savedAnalysisRef.current = Boolean(data.analysis.saved_at)
+      setIsSavedSession(Boolean(data.analysis.saved_at))
       setProjectId(data.analysis.project_id)
       setSettings({
         ...defaultSettings,
@@ -364,9 +374,17 @@ export function ClashGapDetectionPage() {
 
   useEffect(() => {
     const analysisParam = searchParams.get('analysis')
+    const isNewSession = searchParams.get('new') === '1'
 
     if (!sessionRestored.current) {
       sessionRestored.current = true
+      if (isNewSession) {
+        try {
+          localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
+        } catch {
+        }
+        return
+      }
       if (!analysisParam && typeof window !== 'undefined') {
         try {
           const rawLocal = localStorage.getItem(CLASH_GAP_SESSION_STORAGE_KEY)
@@ -374,7 +392,7 @@ export function ClashGapDetectionPage() {
             const s = JSON.parse(rawLocal) as ClashGapSessionV1
             if (s.version === 1) {
               if (s.analysisId) {
-                router.replace(`/clash-gap-detection?analysis=${s.analysisId}`)
+                router.replace(`${CLASH_GAP_SESSION_PATH}?analysis=${s.analysisId}`)
                 return
               }
               if (s.projectId) setProjectId(s.projectId)
@@ -386,6 +404,11 @@ export function ClashGapDetectionPage() {
                   type: sanitizeClashGapDocumentType(r.type),
                 })) as DocumentUploadRow[],
               )
+              if (s.issues?.length) setIssues(s.issues)
+              if (s.bookmarkedIds?.length) setBookmarkedIds(new Set(s.bookmarkedIds))
+              if (s.selectedIssueId) setSelectedIssueId(s.selectedIssueId)
+              if (s.activeStep) setActiveStep(s.activeStep)
+              if (s.stages) setStages(s.stages)
             }
           }
         } catch {
@@ -393,43 +416,53 @@ export function ClashGapDetectionPage() {
       }
     }
 
-    if (analysisParam && analysisParam !== analysisId) {
-      void (async () => {
-        try {
-          const data = await loadAnalysis(analysisParam)
-          const loaded = parseStages(data.analysis.stages)
+    if (isNewSession || !analysisParam || analysisParam === analysisId) return
+
+    setIsLoadingSession(true)
+    void (async () => {
+      try {
+        const data = await loadAnalysis(analysisParam)
+        const loaded = parseStages(data.analysis.stages)
+        const meta = (data.analysis.session_meta ?? {}) as ClashGapSessionMeta
+        if (meta.bookmarkedIds?.length) setBookmarkedIds(new Set(meta.bookmarkedIds))
+        if (meta.selectedIssueId) setSelectedIssueId(meta.selectedIssueId)
+        if (data.analysis.saved_at) {
+          setActiveStep('result')
+        } else {
           setActiveStep(firstIncompleteStep(loaded, Boolean(data.files?.length)))
-          const running = CLASH_GAP_STAGES.find((s) => stageStatus(loaded, s) === 'running')
-          if (running && !pollingRef.current) {
-            setRunningStage(running)
-            try {
-              await pollStage(analysisParam, running)
-            } catch (e) {
-              toast.error(e instanceof Error ? e.message : 'Stage failed')
-            } finally {
-              setRunningStage(null)
-            }
-          }
-        } catch (e) {
-          const status = typeof (e as { status?: number })?.status === 'number' ? (e as { status?: number }).status : null
-          if (status === 404) {
-            toast.error('This analysis link is no longer available. Starting a new draft.')
-            setAnalysisId(null)
-            setStages({})
-            setIssues([])
-            setRows([])
-            setActiveStep('upload')
-            try {
-              localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
-            } catch {
-            }
-            router.replace('/clash-gap-detection')
-            return
-          }
-          toast.error(e instanceof Error ? e.message : 'Failed to load analysis')
         }
-      })()
-    }
+        const running = CLASH_GAP_STAGES.find((s) => stageStatus(loaded, s) === 'running')
+        if (running && !pollingRef.current) {
+          setRunningStage(running)
+          try {
+            await pollStage(analysisParam, running)
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : 'Stage failed')
+          } finally {
+            setRunningStage(null)
+          }
+        }
+      } catch (e) {
+        const status = typeof (e as { status?: number })?.status === 'number' ? (e as { status?: number }).status : null
+        if (status === 404) {
+          toast.error('This analysis link is no longer available. Starting a new draft.')
+          setAnalysisId(null)
+          setStages({})
+          setIssues([])
+          setRows([])
+          setActiveStep('upload')
+          try {
+            localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
+          } catch {
+          }
+          router.replace(`${CLASH_GAP_SESSION_PATH}?new=1`)
+          return
+        }
+        toast.error(e instanceof Error ? e.message : 'Failed to load analysis')
+      } finally {
+        setIsLoadingSession(false)
+      }
+    })()
   }, [searchParams])
 
   const linkedIssue = useMemo(
@@ -526,7 +559,7 @@ export function ClashGapDetectionPage() {
         const id = res.analysis.id
         analysisIdRef.current = id
         setAnalysisId(id)
-        router.replace(`/clash-gap-detection?analysis=${id}`)
+        router.replace(`${CLASH_GAP_SESSION_PATH}?analysis=${id}`)
         return id
       })().finally(() => {
         creatingAnalysisRef.current = null
@@ -674,39 +707,6 @@ export function ClashGapDetectionPage() {
     [],
   )
 
-  const finishAndCleanup = useCallback(async () => {
-    const id = analysisIdRef.current
-    if (!id) return
-    setIsFinishing(true)
-    try {
-      await downloadAndSaveBlob(
-        `/api/clash-gap/analyses/${id}/report`,
-        `clash-gap-report-${id.slice(0, 8)}.pdf`,
-        { method: 'POST' },
-      )
-      await apiFetch(`/api/clash-gap/analyses/${id}`, { method: 'DELETE' })
-      try {
-        localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
-      } catch {
-      }
-      setAnalysisId(null)
-      analysisIdRef.current = null
-      setStages({})
-      setIssues([])
-      setRows([])
-      setSelectedIssueId(null)
-      setBookmarkedIds(new Set())
-      setActiveStep('upload')
-      setConfirmOpen(false)
-      router.replace('/clash-gap-detection')
-      toast.success('Report saved. All uploaded files and analysis data were deleted.')
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not finish and clean up')
-    } finally {
-      setIsFinishing(false)
-    }
-  }, [router])
-
   const openSources = useCallback((issue: ClashGapIssue) => {
     setSheetIssue(issue)
     setSheetOpen(true)
@@ -728,14 +728,15 @@ export function ClashGapDetectionPage() {
       projectId,
       settings,
       rows: rows.map(({ file: _file, ...rest }) => ({ ...rest })),
-      issues: [],
-      ignoredIds: [],
+      issues,
+      ignoredIds: issues.filter((i) => i.status === 'dismissed').map((i) => i.id),
       bookmarkedIds: [...bookmarkedIds],
       selectedIssueId,
       phase: allStagesComplete(stages) ? 'results' : 'prepare',
       activeStep,
+      stages,
     }),
-    [analysisId, projectId, settings, rows, bookmarkedIds, selectedIssueId, stages, activeStep],
+    [analysisId, projectId, settings, rows, issues, bookmarkedIds, selectedIssueId, stages, activeStep],
   )
 
   const persistSession = useCallback(
@@ -751,7 +752,88 @@ export function ClashGapDetectionPage() {
     [buildSessionPayload],
   )
 
-  const saveSession = useCallback(() => persistSession(), [persistSession])
+  const resetToFreshSession = useCallback(() => {
+    savedAnalysisRef.current = false
+    setIsSavedSession(false)
+    setAnalysisId(null)
+    analysisIdRef.current = null
+    creatingAnalysisRef.current = null
+    autoRunRef.current = false
+    setActiveStep('upload')
+    setRows([])
+    setSettings(defaultSettings)
+    setSelectedTrades([])
+    setStages({})
+    setRunningStage(null)
+    setClientUploadLabel(null)
+    setIssues([])
+    setBookmarkedIds(new Set())
+    setDisciplineFilter('all')
+    setFilter('all')
+    setSearch('')
+    setSelectedIssueId(null)
+    setSheetIssue(null)
+    setSheetOpen(false)
+    setRfiDraft(null)
+    setViewerOpen(false)
+  }, [])
+
+  const startNewSession = useCallback(async () => {
+    const id = analysisIdRef.current
+    setIsStartingNewSession(true)
+    try {
+      if (id && !savedAnalysisRef.current) {
+        try {
+          await apiFetch(`/api/clash-gap/analyses/${id}`, { method: 'DELETE' })
+        } catch {
+        }
+      }
+      try {
+        localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
+      } catch {
+      }
+      resetToFreshSession()
+      setNewSessionConfirmOpen(false)
+      router.push('/clash-gap-detection/session?new=1')
+      toast.success('Ready for a new session.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not start a new session')
+    } finally {
+      setIsStartingNewSession(false)
+    }
+  }, [resetToFreshSession, router])
+
+  const goToList = useCallback(() => {
+    router.push('/clash-gap-detection')
+  }, [router])
+
+  const saveAndDone = useCallback(async () => {
+    const id = analysisIdRef.current
+    if (!id) return
+    setIsSavingAndDone(true)
+    try {
+      await apiFetch(`/api/clash-gap/analyses/${id}`, {
+        method: 'PATCH',
+        json: {
+          saved_at: new Date().toISOString(),
+          session_meta: {
+            bookmarkedIds: [...bookmarkedIds],
+            selectedIssueId,
+          },
+        },
+      })
+      try {
+        localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
+      } catch {
+      }
+      router.push('/clash-gap-detection')
+      toast.success('Session saved.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save session')
+    } finally {
+      setIsSavingAndDone(false)
+    }
+  }, [bookmarkedIds, selectedIssueId, router])
 
   const autosaveMountedRef = useRef(false)
   useEffect(() => {
@@ -824,7 +906,7 @@ export function ClashGapDetectionPage() {
       requestAnimationFrame(() => {
         rfiPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
       })
-      toast.success('Added to RFI draft')
+      toast.success('Ready to RFI draft')
     },
     [issues, settings, selectedTrades, rows],
   )
@@ -967,12 +1049,6 @@ export function ClashGapDetectionPage() {
             onClick: () =>
               id && downloadArtifact('merged-pdf', `/api/clash-gap/analyses/${id}/artifacts/merged`, `${base}-merged.pdf`, { method: 'GET' }),
           },
-          {
-            label: '.json',
-            busy: downloadingKey === 'ocr-json',
-            onClick: () =>
-              id && downloadArtifact('ocr-json', `/api/clash-gap/analyses/${id}/artifacts/ocr?format=json`, `${base}-ocr.json`, { method: 'GET' }),
-          },
         ]
       : []
 
@@ -1004,14 +1080,22 @@ export function ClashGapDetectionPage() {
 
   return (
     <>
+      <SessionLoadingOverlay open={isLoadingSession} />
       <DetectionToolShell
         stepper={stepper}
-        onSaveSession={saveSession}
+        showGoToList={isSavedSession && !isLoadingSession}
+        onGoToList={goToList}
+        showSaveAndDone={!isSavedSession && !isLoadingSession}
+        onSaveAndDone={() => void saveAndDone()}
+        saveAndDoneDisabled={!detectComplete || Boolean(runningStage) || !analysisId}
+        isSavingAndDone={isSavingAndDone}
         onRunDetection={() => {}}
         canRunDetection={false}
         isRunning={Boolean(runningStage)}
         showRunDetection={false}
       >
+        {!isLoadingSession ? (
+          <>
         {activeStep === 'upload' ? (
           <div className="flex flex-col gap-6">
             <UploadSetupStep
@@ -1137,6 +1221,7 @@ export function ClashGapDetectionPage() {
                       downloadArtifact('report', `/api/clash-gap/analyses/${analysisId}/report`, `${base}-report.pdf`, { method: 'POST' })
                     }
                   >
+                    <Download className="mr-2 h-4 w-4" strokeWidth={2} aria-hidden />
                     Report (.pdf)
                   </Button>
                   <Button
@@ -1148,6 +1233,7 @@ export function ClashGapDetectionPage() {
                       downloadArtifact('issues-csv', `/api/clash-gap/analyses/${analysisId}/artifacts/issues?format=csv`, `${base}-issues.csv`, { method: 'GET' })
                     }
                   >
+                    <Download className="mr-2 h-4 w-4" strokeWidth={2} aria-hidden />
                     Issues (.csv)
                   </Button>
                 </div>
@@ -1198,10 +1284,10 @@ export function ClashGapDetectionPage() {
                 : 'Finish the current stage to continue.'
           }
           showNext={activeStep !== 'chunk' && activeStep !== 'detection'}
-          onDone={() => setConfirmOpen(true)}
-          doneReady={detectComplete && !runningStage}
-          isFinishing={isFinishing}
+          hideNavigation={isSavedSession}
         />
+          </>
+        ) : null}
       </DetectionToolShell>
 
       <SourceComparisonSheet open={sheetOpen} onOpenChange={setSheetOpen} issue={sheetIssue} />
@@ -1212,27 +1298,32 @@ export function ClashGapDetectionPage() {
         analysisId={analysisId}
       />
 
-      <Dialog open={confirmOpen} onOpenChange={(o) => !isFinishing && setConfirmOpen(o)}>
+      <Dialog open={newSessionConfirmOpen} onOpenChange={(o) => !isStartingNewSession && setNewSessionConfirmOpen(o)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Download report & delete everything?</DialogTitle>
+            <DialogTitle>Start a new session?</DialogTitle>
             <DialogDescription>
-              Your PDF report will be downloaded to this device, then all uploaded files, page
-              images, OCR/merged text, and detected issues for this analysis are permanently
-              deleted from the server. This cannot be undone.
+              This clears in-progress work in this browser and permanently deletes the current
+              unsaved analysis, uploaded files, and results from the server. Saved sessions in your
+              list are not affected. Download any reports you need before continuing. This cannot be
+              undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" variant="outline" disabled={isFinishing} onClick={() => setConfirmOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isStartingNewSession}
+              onClick={() => setNewSessionConfirmOpen(false)}
+            >
               Cancel
             </Button>
             <Button
               type="button"
-              className="bg-emerald-600 text-white hover:bg-emerald-700"
-              disabled={isFinishing}
-              onClick={() => void finishAndCleanup()}
+              disabled={isStartingNewSession}
+              onClick={() => void startNewSession()}
             >
-              {isFinishing ? 'Saving & clearing…' : 'Download & delete'}
+              {isStartingNewSession ? 'Starting…' : 'New Session'}
             </Button>
           </DialogFooter>
         </DialogContent>

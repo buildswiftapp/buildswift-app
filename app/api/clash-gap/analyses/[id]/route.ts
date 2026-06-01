@@ -10,6 +10,7 @@ import { incrementAccountStorageBytes } from '@/lib/server/storage-usage'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 import { parseStages } from '@/lib/clash-gap-stages'
+import { mergeSavedSession, readSavedSession, withSavedSessionFields } from '@/lib/server/clash-gap/session-save'
 import { updateClashGapAnalysisSchema } from '@/lib/server/validators'
 
 type Params = { params: Promise<{ id: string }> }
@@ -39,6 +40,8 @@ export async function GET(_req: Request, { params }: Params) {
       .order('created_at', { ascending: true }),
   ])
 
+  const { savedAt, sessionMeta } = readSavedSession(analysis.summary)
+
   return ok({
     analysis: {
       id: analysis.id,
@@ -51,6 +54,8 @@ export async function GET(_req: Request, { params }: Params) {
       stages: parseStages((analysis as { stages?: unknown }).stages),
       created_at: analysis.created_at,
       completed_at: analysis.completed_at,
+      saved_at: savedAt,
+      session_meta: sessionMeta,
     },
     files: files ?? [],
     issues: issues ?? [],
@@ -125,6 +130,15 @@ export async function PATCH(req: Request, { params }: Params) {
     updates.project_id = parsed.data.project_id
   }
 
+  if (parsed.data.saved_at !== undefined || parsed.data.session_meta) {
+    const savedAt = parsed.data.saved_at ?? new Date().toISOString()
+    updates.summary = mergeSavedSession(
+      analysis.summary as Record<string, unknown> | null,
+      savedAt,
+      parsed.data.session_meta ?? {},
+    )
+  }
+
   const { data, error } = await supabase
     .from('clash_gap_analyses')
     .update(updates)
@@ -136,9 +150,9 @@ export async function PATCH(req: Request, { params }: Params) {
   if (error) return serverError(error.message)
 
   return ok({
-    analysis: {
+    analysis: withSavedSessionFields({
       ...data,
       settings: parseSettings(data.settings),
-    },
+    }),
   })
 }

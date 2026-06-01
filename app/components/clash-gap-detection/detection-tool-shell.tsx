@@ -1,13 +1,18 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { FileDown, Play, Save, Sparkles } from 'lucide-react'
+import { FileDown, List, Loader2, Play, Save, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 export function DetectionToolShell(props: {
   children?: ReactNode
   stepper: ReactNode
-  onSaveSession: () => void
+  onGoToList?: () => void
+  showGoToList?: boolean
+  onSaveAndDone?: () => void
+  showSaveAndDone?: boolean
+  saveAndDoneDisabled?: boolean
+  isSavingAndDone?: boolean
   onRunDetection: () => void
   canRunDetection: boolean
   runDetectionHint?: string | null
@@ -18,7 +23,12 @@ export function DetectionToolShell(props: {
   isGeneratingReport?: boolean
 }) {
   const {
-    onSaveSession,
+    onGoToList,
+    showGoToList,
+    onSaveAndDone,
+    showSaveAndDone,
+    saveAndDoneDisabled,
+    isSavingAndDone,
     onRunDetection,
     canRunDetection,
     runDetectionHint,
@@ -60,10 +70,27 @@ export function DetectionToolShell(props: {
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2 lg:justify-end">
-              <Button type="button" variant="outline" className="rounded-xl" onClick={onSaveSession}>
-                <Save className="mr-2 h-4 w-4" aria-hidden />
-                Save Session
-              </Button>
+              {showGoToList ? (
+                <Button type="button" variant="default" className="rounded-xl" onClick={onGoToList}>
+                  <List className="mr-2 h-4 w-4" aria-hidden />
+                  Go to list
+                </Button>
+              ) : null}
+              {showSaveAndDone ? (
+                <Button
+                  type="button"
+                  className="rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
+                  disabled={saveAndDoneDisabled || isSavingAndDone}
+                  onClick={onSaveAndDone}
+                >
+                  {isSavingAndDone ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Save className="mr-2 h-4 w-4" aria-hidden />
+                  )}
+                  {isSavingAndDone ? 'Saving…' : 'Done & Save'}
+                </Button>
+              ) : null}
               {showGenerateReport ? (
                 <Button
                   type="button"

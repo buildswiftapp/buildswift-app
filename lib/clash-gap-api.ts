@@ -25,6 +25,11 @@ export type ApiClashGapIssue = {
   category?: string | null
 }
 
+export type ClashGapSessionMeta = {
+  bookmarkedIds?: string[]
+  selectedIssueId?: string | null
+}
+
 export type ApiClashGapAnalysis = {
   id: string
   project_id: string
@@ -36,6 +41,15 @@ export type ApiClashGapAnalysis = {
   stages?: StagesMap
   created_at: string
   completed_at: string | null
+  saved_at?: string | null
+  session_meta?: ClashGapSessionMeta
+}
+
+export type ApiClashGapAnalysisListItem = ApiClashGapAnalysis & {
+  project_name?: string | null
+  issue_count?: number
+  plan_documents?: string[]
+  spec_documents?: string[]
 }
 
 export type ApiClashGapFile = {

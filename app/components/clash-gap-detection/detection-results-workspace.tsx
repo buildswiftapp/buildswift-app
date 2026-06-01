@@ -20,7 +20,6 @@ import {
   AlertTriangle,
   ArrowLeft,
   Ban,
-  Bookmark,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -30,10 +29,10 @@ import {
   Filter,
   Hammer,
   Search,
+  SendIcon,
   ShieldCheck,
   SquarePlus,
   Tag,
-  X,
 } from 'lucide-react'
 import type { RfiDraftState } from '@/lib/clash-gap-types'
 import { RfiDraftPanel } from './rfi-draft-panel'
@@ -349,11 +348,10 @@ export function DetectionResultsWorkspace(props: {
             </button>
           </div>
 
-          <div className="grid w-full min-w-0 grid-cols-[auto_auto_auto_auto_minmax(0,1fr)] items-center gap-1.5">
+          <div className="grid w-full min-w-0 grid-cols-[auto_auto_auto_minmax(0,1fr)] items-center gap-1.5">
             {chipClass('All', 'all', 'neutral', props.filter === 'all')}
             {chipClass('Conflicts', 'conflict', 'red', props.filter === 'conflict')}
             {chipClass('Missing', 'missing', 'orange', props.filter === 'missing')}
-            {chipClass('Verified', 'mismatch', 'emerald', props.filter === 'mismatch')}
             <Select value={props.disciplineFilter} onValueChange={props.onDisciplineFilterChange}>
               <SelectTrigger className="h-9 min-h-9 w-full min-w-0 rounded-full border-[#d1d5db] bg-white px-2.5 text-xs font-medium text-[#374151] shadow-none hover:bg-slate-50 [&_[data-slot=select-value]]:truncate">
                 <SelectValue placeholder="Discipline" />
@@ -501,24 +499,6 @@ export function DetectionResultsWorkspace(props: {
                     </h2>
                     {issueBadge(selected)}
                   </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-pressed={props.bookmarkedIds.has(selected.id)}
-                    className={cn(props.bookmarkedIds.has(selected.id) && 'text-violet-600')}
-                    onClick={() => props.onToggleBookmark(selected.id)}
-                  >
-                    <Bookmark
-                      className="h-5 w-5"
-                      fill={props.bookmarkedIds.has(selected.id) ? 'currentColor' : 'none'}
-                    />
-                  </Button>
-                  <Button type="button" variant="ghost" size="icon" onClick={() => props.onSelectIssue(null)}>
-                    <X className="h-5 w-5" />
-                  </Button>
                 </div>
               </div>
 
@@ -696,8 +676,8 @@ export function DetectionResultsWorkspace(props: {
                     className="rounded-xl bg-violet-600 text-white hover:bg-violet-700"
                     onClick={() => props.onAddToRfi(selected.id)}
                   >
-                    <SquarePlus className="mr-2 h-4 w-4" strokeWidth={2} aria-hidden />
-                    Add to RFI
+                    <SendIcon className="mr-2 h-4 w-4" strokeWidth={2} aria-hidden />
+                    Send to RFI
                   </Button>
                 </div>
               </CardContent>

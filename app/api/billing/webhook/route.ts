@@ -106,7 +106,7 @@ export async function POST(req: Request) {
 
   const resolveTierFromPrice = (priceId: string | null) => {
     if (priceId === process.env.STRIPE_PRICE_BUSINESS_MONTHLY) return 'business'
-    if (priceId === process.env.STRIPE_PRICE_PROFESSIONAL_MONTHLY) return 'professional'                                                                                                                                                                                                                                                // Default to trial (signup without card).
+    if (priceId === process.env.STRIPE_PRICE_PROFESSIONAL_MONTHLY) return 'professional'
     return 'trial'
   }
 
