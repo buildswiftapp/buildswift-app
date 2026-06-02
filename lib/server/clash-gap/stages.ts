@@ -67,8 +67,8 @@ function pageStageTimeoutMs(): number {
 }
 
 function ocrPageTimeoutMs(): number {
-  const n = Number(process.env.CLASH_GAP_OCR_PAGE_TIMEOUT_MS || 100_000)
-  return Number.isFinite(n) && n >= 1000 ? Math.floor(n) : 100_000
+  const n = Number(process.env.CLASH_GAP_OCR_PAGE_TIMEOUT_MS || 160_000)
+  return Number.isFinite(n) && n >= 1000 ? Math.floor(n) : 160_000
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -477,15 +477,10 @@ export async function runOcrStage(params: StageParams) {
     })
     await mergeSheets(params.supabase, params.analysisId)
 
-    const unreadable = failedPages + emptyPages
-    const detail =
-      unreadable > 0
-        ? `${sheets.length} page(s) read · ${unreadable} returned no text`
-        : undefined
     await markStageCompleted(params.supabase, params.analysisId, 'ocr', {
       processed: sheets.length,
       total: sheets.length,
-      detail,
+      detail: `${sheets.length} page(s) read.`,
     })
     return { pages: sheets.length, failedPages, emptyPages }
   } catch (error) {

@@ -89,16 +89,22 @@ export async function ocrImageWithOpenAI(
   const model = ocrModel()
 
   const maxAttempts = 2
-  const ocrTimeoutMs = Number(process.env.OPENAI_OCR_TIMEOUT_MS || 90_000)
+  const ocrTimeoutMs = Number(process.env.OPENAI_OCR_TIMEOUT_MS || 150_000)
   const imageDetail = (process.env.OPENAI_OCR_DETAIL || 'low') as 'low' | 'auto' | 'high'
   let lastError: unknown
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Own the timeout via AbortController and stream the response so HTTP headers
+    // arrive immediately — this avoids undici's UND_ERR_HEADERS_TIMEOUT and lets a
+    // dense page keep transcribing instead of being cut while still producing text.
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), ocrTimeoutMs)
     try {
-      const completion = await openai.chat.completions.create(
+      const stream = await openai.chat.completions.create(
         {
           model,
           temperature: 0,
+          stream: true,
           messages: [
             {
               role: 'system',
@@ -332,9 +338,13 @@ Remember:
             },
           ],
         },
-        { timeout: ocrTimeoutMs, maxRetries: 0 },
+        { signal: controller.signal, maxRetries: 0 },
       )
-      const text = completion.choices[0]?.message?.content?.trim() || ''
+      let acc = ''
+      for await (const part of stream) {
+        acc += part.choices[0]?.delta?.content ?? ''
+      }
+      const text = acc.trim()
       if (text && looksLikeRefusal(text)) {
         lastError = new Error('OCR returned a refusal instead of a transcription')
         if (attempt < maxAttempts - 1) continue
@@ -343,11 +353,14 @@ Remember:
       return text
     } catch (error) {
       lastError = error
-      if (attempt < maxAttempts - 1 && isRetryableNetworkError(error)) {
+      const retryable = controller.signal.aborted || isRetryableNetworkError(error)
+      if (attempt < maxAttempts - 1 && retryable) {
         await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)))
         continue
       }
       break
+    } finally {
+      clearTimeout(timer)
     }
   }
 
