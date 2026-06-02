@@ -30,6 +30,16 @@ function renderScale(): number {
   return Number(process.env.CLASH_GAP_RENDER_SCALE || 2)
 }
 
+function chunkImageMaxDim(): number {
+  const n = Number(process.env.CLASH_GAP_CHUNK_MAX_DIM || 2200)
+  return Number.isFinite(n) && n >= 512 ? Math.floor(n) : 2200
+}
+
+function chunkJpegQuality(): number {
+  const n = Number(process.env.CLASH_GAP_CHUNK_JPEG_QUALITY || 82)
+  return Number.isFinite(n) && n >= 1 && n <= 100 ? Math.floor(n) : 82
+}
+
 type PdfDocument = Awaited<ReturnType<PdfJsModule['getDocument']>['promise']>
 
 export async function withPdfDocument<T>(
@@ -91,6 +101,50 @@ export async function renderPdfPageToPng(
   scale?: number,
 ): Promise<Buffer> {
   return withPdfDocument(buffer, (pdf) => renderPdfPageFromDoc(pdf, pageIndex, scale))
+}
+
+export type RenderedPageImage = { bytes: Buffer; mime: string; ext: string }
+
+export async function renderPdfPageToImage(
+  pdf: PdfDocument,
+  pageIndex: number,
+): Promise<RenderedPageImage> {
+  const { createCanvas } = await loadCanvas()
+
+  const pageNumber = pageIndex + 1
+  if (pageNumber > pdf.numPages) {
+    throw new Error(`Page ${pageNumber} out of range (PDF has ${pdf.numPages} page(s))`)
+  }
+
+  const page = await pdf.getPage(pageNumber)
+  try {
+    const base = page.getViewport({ scale: 1 })
+    const longest = Math.max(base.width, base.height)
+    const maxDim = chunkImageMaxDim()
+    const fit = longest > 0 ? maxDim / longest : renderScale()
+    const scale = Math.max(0.1, Math.min(renderScale(), fit))
+
+    const viewport = page.getViewport({ scale })
+    const width = Math.ceil(viewport.width)
+    const height = Math.ceil(viewport.height)
+
+    const canvas = createCanvas(width, height)
+    const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D
+
+    await page.render({
+      canvas: canvas as unknown as HTMLCanvasElement,
+      canvasContext: ctx,
+      viewport,
+    }).promise
+
+    return {
+      bytes: canvas.toBuffer('image/jpeg', chunkJpegQuality()) as Buffer,
+      mime: 'image/jpeg',
+      ext: 'jpg',
+    }
+  } finally {
+    await page.cleanup()
+  }
 }
 
 export async function getPdfPageCount(buffer: Buffer): Promise<number> {

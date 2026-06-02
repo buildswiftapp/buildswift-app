@@ -126,7 +126,7 @@ export function UploadSetupStep(props: {
       const file = files[i]
       const okMime = ACCEPT.has(file.type) || (!file.type && ACCEPT_EXT.test(file.name))
       if (!okMime) {
-        toast.error(`${file.name} is not an accepted type (${formatAllowed()}).`)                                                                                                                                                                                                                                                                                                                                                                                                           
+        toast.error(`${file.name} is not an accepted type (${formatAllowed()}).`)
         continue
       }
       if (file.size > CLASH_GAP_MAX_BYTES) {
@@ -457,7 +457,11 @@ export function UploadSetupStep(props: {
                                 {r.status === 'pending' ? 'uploading…' : r.status}
                               </span>
                               {r.status === 'pending' ? (
-                                <ProgressBar tone="sky" className="w-28" />
+                                <ProgressBar
+                                  tone="sky"
+                                  className="w-28"
+                                  value={r.progress != null ? Math.round(r.progress * 100) : null}
+                                />
                               ) : null}
                             </div>
                           </td>

@@ -142,7 +142,8 @@ export async function GET(req: Request, { params }: Params) {
         const bytes = await downloadClashGapFile(sheet.image_path)
         const safe = sheet.file_name.replace(/[^\w.\-]+/g, '_')
         const page = String(sheet.page_index + 1).padStart(4, '0')
-        zip.file(`${safe}/page-${page}.png`, bytes)
+        const ext = (sheet.image_path.split('.').pop() || 'jpg').replace(/[^a-z0-9]/gi, '') || 'jpg'
+        zip.file(`${safe}/page-${page}.${ext}`, bytes)
         added++
       } catch {
       }

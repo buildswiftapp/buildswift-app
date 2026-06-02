@@ -10,7 +10,7 @@ import {
 import { getAuthContext } from '@/lib/server/auth'
 import { assertCanRunClashGapReport, assertCanUseAiAssist } from '@/lib/server/billing'
 import { getAnalysisForAccount } from '@/lib/server/clash-gap/access'
-import { formatClashGapError, isStaleClashGapProcessing } from '@/lib/server/clash-gap/errors'
+import { formatClashGapError } from '@/lib/server/clash-gap/errors'
 import { runDetectStage } from '@/lib/server/clash-gap/pipeline'
 import { runChunkStage, runOcrStage } from '@/lib/server/clash-gap/stages'
 import { markStageFailed, markStageRunning } from '@/lib/server/clash-gap/stage-state'
@@ -33,6 +33,15 @@ const STAGE_RUNNERS = {
   ocr: runOcrStage,
   detect: runDetectStage,
 } as const
+
+function isStageRunDead(_stage: ClashGapStage, updatedAt: string): boolean {
+  // Every stage now emits a progress heartbeat while alive, so a run that hasn't
+  // touched the row in this long is treated as dead and may be resumed.
+  const staleMs = Number(process.env.CLASH_GAP_STAGE_STALE_MS || 150_000)
+  const t = Date.parse(updatedAt)
+  if (!Number.isFinite(t)) return true
+  return Date.now() - t > staleMs
+}
 
 export async function POST(req: Request, { params }: Params) {
   const auth = await getAuthContext(req)
@@ -64,7 +73,7 @@ export async function POST(req: Request, { params }: Params) {
 
   if (
     stageStatus(stageMap, stageName) === 'running' &&
-    !isStaleClashGapProcessing('processing', analysis.updated_at)
+    !isStageRunDead(stageName, analysis.updated_at)
   ) {
     return ok({ analysisId: id, stage: stageName, status: 'running' })
   }

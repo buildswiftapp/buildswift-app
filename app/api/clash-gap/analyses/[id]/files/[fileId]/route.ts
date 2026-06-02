@@ -7,9 +7,14 @@ import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 import { z } from 'zod'
 
-const patchSchema = z.object({
-  file_role: z.enum(['plans', 'specs', 'addenda']),
-})
+const patchSchema = z
+  .object({
+    file_role: z.enum(['plans', 'specs', 'addenda']).optional(),
+    page_count: z.number().int().positive().optional(),
+  })
+  .refine((d) => d.file_role !== undefined || d.page_count !== undefined, {
+    message: 'Nothing to update',
+  })
 
 type Params = { params: Promise<{ id: string; fileId: string }> }
 
@@ -28,9 +33,13 @@ export async function PATCH(req: Request, { params }: Params) {
   const parsed = patchSchema.safeParse(await req.json().catch(() => ({})))
   if (!parsed.success) return badRequest('Invalid payload', parsed.error.flatten())
 
+  const update: Record<string, unknown> = {}
+  if (parsed.data.file_role !== undefined) update.file_role = parsed.data.file_role
+  if (parsed.data.page_count !== undefined) update.page_count = parsed.data.page_count
+
   const { data, error } = await supabase
     .from('clash_gap_analysis_files')
-    .update({ file_role: parsed.data.file_role })
+    .update(update)
     .eq('id', fileId)
     .eq('analysis_id', analysisId)
     .eq('account_id', auth.accountId)

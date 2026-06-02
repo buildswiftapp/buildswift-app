@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { getSupabaseEnv } from '@/lib/supabase/shared'
+import { resilientFetch } from '@/lib/server/resilient-fetch'
 
 let adminClient: ReturnType<typeof createClient> | null = null
 
@@ -12,6 +13,7 @@ export function createSupabaseAdminClient() {
 
   adminClient = createClient(env.supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: resilientFetch },
   })
   return adminClient
 }
