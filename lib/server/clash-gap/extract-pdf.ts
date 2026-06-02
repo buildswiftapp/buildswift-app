@@ -332,7 +332,7 @@ Remember:
             },
           ],
         },
-        { timeout: ocrTimeoutMs },
+        { timeout: ocrTimeoutMs, maxRetries: 0 },
       )
       const text = completion.choices[0]?.message?.content?.trim() || ''
       if (text && looksLikeRefusal(text)) {

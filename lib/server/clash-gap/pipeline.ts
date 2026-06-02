@@ -11,6 +11,7 @@ import { isImageUpload } from '@/lib/server/clash-gap/extract-pdf'
 import {
   markStageCompleted,
   markStageFailed,
+  markStageProgress,
   markStageRunning,
 } from '@/lib/server/clash-gap/stage-state'
 import { runChunkStage, runOcrStage } from '@/lib/server/clash-gap/stages'
@@ -55,8 +56,16 @@ function classifyModel() {
 }
 
 function llmConcurrency(): number {
-  const n = Number(process.env.CLASH_GAP_LLM_CONCURRENCY || 4)
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 4
+  const n = Number(process.env.CLASH_GAP_LLM_CONCURRENCY || 6)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 6
+}
+
+const RETRYABLE_LLM_STATUS = new Set([408, 409, 429, 500, 502, 503, 529])
+
+function isRetryableLlmError(error: unknown): boolean {
+  if (isRetryableNetworkError(error)) return true
+  const status = (error as { status?: number } | null)?.status
+  return typeof status === 'number' && RETRYABLE_LLM_STATUS.has(status)
 }
 
 function llmTimeoutMs(): number {
@@ -93,20 +102,26 @@ async function callJsonLlm(system: string, user: string, model: string) {
   let lastError: unknown
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), llmTimeoutMs())
     try {
-      const completion = await openai.chat.completions.create(
+      const stream = await openai.chat.completions.create(
         {
           model,
           temperature: 0.2,
           response_format: { type: 'json_object' },
+          stream: true,
           messages: [
             { role: 'system', content: system },
             { role: 'user', content: user },
           ],
         },
-        { timeout: llmTimeoutMs() },
+        { signal: controller.signal, maxRetries: 0 },
       )
-      const raw = completion.choices[0]?.message?.content
+      let raw = ''
+      for await (const chunk of stream) {
+        raw += chunk.choices[0]?.delta?.content ?? ''
+      }
       if (!raw) return { issues: [] }
       try {
         return JSON.parse(raw) as unknown
@@ -115,11 +130,14 @@ async function callJsonLlm(system: string, user: string, model: string) {
       }
     } catch (error) {
       lastError = error
-      if (attempt < maxAttempts - 1 && isRetryableNetworkError(error)) {
+      const retryable = controller.signal.aborted || isRetryableLlmError(error)
+      if (attempt < maxAttempts - 1 && retryable) {
         await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)))
         continue
       }
       throw new Error(formatClashGapError(error))
+    } finally {
+      clearTimeout(timer)
     }
   }
 
@@ -240,15 +258,30 @@ export async function runDetectStage(params: StageParams) {
 
     if (!sheets.length) throw new Error('No extracted text — run the OCR and merge stages first')
 
+    let llmDone = 0
+    let llmTotal = sheets.length
+    const bumpDetect = async (detail: string) => {
+      await markStageProgress(params.supabase, params.analysisId, 'detect', {
+        processed: llmDone,
+        total: llmTotal,
+        detail,
+      })
+    }
+    await bumpDetect('Classifying sheets…')
+
     await mapWithConcurrency(sheets, llmConcurrency(), async (sheet) => {
-      const { discipline, sheetId, structured } = await classifyAndStructureSheet(sheet)
-      await params.supabase
-        .from('clash_gap_extracted_sheets')
-        .update({ discipline, sheet_id: sheetId, structured })
-        .eq('id', sheet.id)
-      sheet.discipline = discipline
-      sheet.sheet_id = sheetId
-      sheet.structured = structured
+      if (!sheet.discipline) {
+        const { discipline, sheetId, structured } = await classifyAndStructureSheet(sheet)
+        await params.supabase
+          .from('clash_gap_extracted_sheets')
+          .update({ discipline, sheet_id: sheetId, structured })
+          .eq('id', sheet.id)
+        sheet.discipline = discipline
+        sheet.sheet_id = sheetId
+        sheet.structured = structured
+      }
+      llmDone++
+      if (llmDone % 3 === 0) await bumpDetect(`Classifying sheets… ${llmDone}/${llmTotal}`)
     })
 
     await params.supabase.from('clash_gap_issues').delete().eq('analysis_id', params.analysisId)
@@ -272,8 +305,12 @@ export async function runDetectStage(params: StageParams) {
     const gapSheets = effectivePlanSheets.filter((sheet) =>
       tradeMatches(sheet.discipline || 'other', trades),
     )
-    const gapPayloads = await mapWithConcurrency(gapSheets, llmConcurrency(), (sheet) =>
-      callJsonLlm(
+    const sections = splitSpecSections(specContext).slice(0, 8)
+    llmTotal = sheets.length + gapSheets.length + (effectivePlanSheets.length ? 1 : 0) + sections.length
+
+    await bumpDetect('Finding missing info…')
+    const gapPayloads = await mapWithConcurrency(gapSheets, llmConcurrency(), async (sheet) => {
+      const payload = await callJsonLlm(
         GAP_SYSTEM_PROMPT,
         gapUserPrompt({
           specLabel,
@@ -285,8 +322,11 @@ export async function runDetectStage(params: StageParams) {
           sensitivity: settings.sensitivity,
         }),
         model,
-      ),
-    )
+      )
+      llmDone++
+      if (llmDone % 3 === 0) await bumpDetect(`Finding missing info… ${llmDone}/${llmTotal}`)
+      return payload
+    })
     for (const payload of gapPayloads) {
       allLlmIssues.push(...parseLlmIssuesPayload(payload))
     }
@@ -304,6 +344,7 @@ export async function runDetectStage(params: StageParams) {
       const disciplines = allDisciplines.length <= 1 ? allDisciplines : filtered
 
       if (disciplines.length >= 1) {
+        await bumpDetect('Checking conflicts…')
         const sheetsForCall = effectivePlanSheets.filter((s) =>
           disciplines.includes(s.discipline || 'other'),
         )
@@ -326,16 +367,17 @@ export async function runDetectStage(params: StageParams) {
         )
         allLlmIssues.push(...parseLlmIssuesPayload(payload))
       }
+      llmDone++
     }
 
-    const sections = splitSpecSections(specContext).slice(0, 8)
     const mismatchPlanSheets = effectivePlanSheets.slice(0, 10).map((s) => ({
       sheetId: s.sheet_id || '',
       discipline: s.discipline || 'other',
       text: s.raw_text || '',
     }))
-    const mismatchPayloads = await mapWithConcurrency(sections, llmConcurrency(), (section) =>
-      callJsonLlm(
+    await bumpDetect('Checking mismatches…')
+    const mismatchPayloads = await mapWithConcurrency(sections, llmConcurrency(), async (section) => {
+      const payload = await callJsonLlm(
         MISMATCH_SYSTEM_PROMPT,
         mismatchUserPrompt({
           specLabel,
@@ -345,8 +387,11 @@ export async function runDetectStage(params: StageParams) {
           sensitivity: settings.sensitivity,
         }),
         model,
-      ),
-    )
+      )
+      llmDone++
+      if (llmDone % 2 === 0) await bumpDetect(`Checking mismatches… ${llmDone}/${llmTotal}`)
+      return payload
+    })
     for (const payload of mismatchPayloads) {
       allLlmIssues.push(...parseLlmIssuesPayload(payload))
     }

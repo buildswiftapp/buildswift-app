@@ -23,19 +23,22 @@ export function clashGapImagePath(params: {
   analysisId: string
   fileId: string
   pageIndex: number
+  ext?: string
 }) {
   const page = String(params.pageIndex + 1).padStart(4, '0')
-  return `${params.accountId}/clash-gap/${params.analysisId}/images/${params.fileId}-page-${page}.png`
+  const ext = (params.ext || 'jpg').replace(/[^a-z0-9]/gi, '') || 'jpg'
+  return `${params.accountId}/clash-gap/${params.analysisId}/images/${params.fileId}-page-${page}.${ext}`
 }
 
 export async function uploadClashGapImage(params: {
   storagePath: string
   bytes: Buffer
+  contentType?: string
 }): Promise<void> {
   const admin = createSupabaseAdminClient()
   if (!admin) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required for image upload')
   const { error } = await admin.storage.from(clashGapBucket()).upload(params.storagePath, params.bytes, {
-    contentType: 'image/png',
+    contentType: params.contentType || 'image/jpeg',
     upsert: true,
   })
   if (error) throw new Error(error.message)
@@ -87,30 +90,6 @@ export async function deleteClashGapAnalysisStorage(
   for (let i = 0; i < paths.length; i += 100) {
     await admin.storage.from(clashGapBucket()).remove(paths.slice(i, i + 100))
   }
-}
-
-export async function uploadClashGapFile(params: {
-  accountId: string
-  analysisId: string
-  fileName: string
-  mimeType: string
-  bytes: Buffer
-}) {
-  const admin = createSupabaseAdminClient()
-  if (!admin) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required for file upload')
-
-  const storagePath = clashGapStoragePath({
-    accountId: params.accountId,
-    analysisId: params.analysisId,
-    fileName: params.fileName,
-  })
-
-  const { error } = await admin.storage.from(clashGapBucket()).upload(storagePath, params.bytes, {
-    contentType: params.mimeType,
-    upsert: false,
-  })
-  if (error) throw new Error(error.message)
-  return storagePath
 }
 
 export async function deleteClashGapFile(storagePath: string): Promise<void> {

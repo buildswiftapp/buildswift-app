@@ -1,9 +1,17 @@
 import { apiFetch } from '@/lib/api'
 import { createSupabaseBrowserClient } from '@/lib/supabase/client'
 
-const CLASH_GAP_DIRECT_UPLOAD_THRESHOLD = 4 * 1024 * 1024
-
 export type ClashGapUploadedFile = { id: string; page_count: number | null }
+
+type PresignResponse = { bucket: string; storagePath: string; token: string; signedUrl: string }
+
+function isPdfFile(name: string, mime: string): boolean {
+  return mime === 'application/pdf' || /\.pdf$/i.test(name)
+}
+
+function isImageFile(name: string, mime: string): boolean {
+  return mime.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(name)
+}
 
 async function countPdfPagesClientSide(file: File): Promise<number | null> {
   try {
@@ -21,38 +29,54 @@ async function countPdfPagesClientSide(file: File): Promise<number | null> {
   }
 }
 
+function putToSignedUrl(
+  presign: PresignResponse,
+  file: File,
+  mime: string,
+  onProgress?: (fraction: number) => void,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', presign.signedUrl, true)
+    xhr.setRequestHeader('x-upsert', 'false')
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(e.loaded / e.total)
+    }
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300
+        ? resolve()
+        : reject(new Error(`Upload failed (${xhr.status})`))
+    xhr.onerror = () => reject(new Error('Network error during upload'))
+    const form = new FormData()
+    form.append('cacheControl', '3600')
+    form.append('', file)
+    xhr.send(form)
+  }).catch(async (err) => {
+    const supabase = createSupabaseBrowserClient()
+    if (!supabase) throw err instanceof Error ? err : new Error('Upload failed')
+    const { error } = await supabase.storage
+      .from(presign.bucket)
+      .uploadToSignedUrl(presign.storagePath, presign.token, file, {
+        contentType: mime || 'application/pdf',
+      })
+    if (error) throw new Error(error.message)
+    onProgress?.(1)
+  })
+}
+
 export async function uploadClashGapFile(params: {
   analysisId: string
   file: File
   fileRole: string
+  onProgress?: (fraction: number) => void
+  onPageCount?: (count: number) => void
 }): Promise<ClashGapUploadedFile> {
-  const { analysisId, file, fileRole } = params
+  const { analysisId, file, fileRole, onProgress, onPageCount } = params
   const mime = (file.type || 'application/octet-stream').split(';')[0].trim().toLowerCase()
-  const isPdf = mime === 'application/pdf' || /\.pdf$/i.test(file.name)
+  const isPdf = isPdfFile(file.name, mime)
+  const isImage = isImageFile(file.name, mime)
 
-  const pageCountPromise: Promise<number | null> = isPdf
-    ? countPdfPagesClientSide(file)
-    : Promise.resolve(null)
-
-  if (file.size <= CLASH_GAP_DIRECT_UPLOAD_THRESHOLD) {
-    const fd = new FormData()
-    fd.append('file', file)
-    fd.append('file_role', fileRole)
-    const pageCount = await pageCountPromise
-    if (pageCount != null) fd.append('page_count', String(pageCount))
-    const res = await apiUpload<{ file: ClashGapUploadedFile }>(
-      `/api/clash-gap/analyses/${analysisId}/files`,
-      fd,
-    )
-    return res.file
-  }
-
-  const supabase = createSupabaseBrowserClient()
-  if (!supabase) {
-    throw new Error('Storage client is unavailable. Reload the page and try again.')
-  }
-
-  const presign = await apiFetch<{ bucket: string; storagePath: string; token: string }>(
+  const presign = await apiFetch<PresignResponse>(
     `/api/clash-gap/analyses/${analysisId}/files/presign`,
     {
       method: 'POST',
@@ -60,14 +84,9 @@ export async function uploadClashGapFile(params: {
     },
   )
 
-  const { error } = await supabase.storage
-    .from(presign.bucket)
-    .uploadToSignedUrl(presign.storagePath, presign.token, file, {
-      contentType: mime || 'application/pdf',
-    })
-  if (error) throw new Error(error.message)
+  await putToSignedUrl(presign, file, mime, onProgress)
+  onProgress?.(1)
 
-  const pageCount = await pageCountPromise
   const res = await apiFetch<{ file: ClashGapUploadedFile }>(
     `/api/clash-gap/analyses/${analysisId}/files`,
     {
@@ -78,40 +97,26 @@ export async function uploadClashGapFile(params: {
         mime_type: mime,
         size_bytes: file.size,
         file_role: fileRole,
-        ...(pageCount != null ? { page_count: pageCount } : {}),
+        ...(isImage ? { page_count: 1 } : {}),
       },
     },
   )
-  return res.file
-}
+  const uploaded = res.file
 
-export async function apiUpload<T>(input: string, formData: FormData): Promise<T> {
-  const headers = new Headers()
-  const supabase = createSupabaseBrowserClient()
-  if (supabase) {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    const token = session?.access_token
-    if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (isPdf) {
+    void countPdfPagesClientSide(file).then((count) => {
+      if (count == null) return
+      onPageCount?.(count)
+      void apiFetch(`/api/clash-gap/analyses/${analysisId}/files/${uploaded.id}`, {
+        method: 'PATCH',
+        json: { page_count: count },
+      }).catch(() => {})
+    })
+  } else if (isImage) {
+    onPageCount?.(1)
   }
 
-  const res = await fetch(input, {
-    method: 'POST',
-    credentials: 'include',
-    headers,
-    body: formData,
-  })
-
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    const err = new Error(
-      (typeof data?.error === 'string' && data.error.trim()) || `Upload failed: ${res.status}`
-    )
-    ;(err as Error & { status?: number }).status = res.status
-    throw err
-  }
-  return data as T
+  return uploaded
 }
 
 export async function downloadAndSaveBlob(

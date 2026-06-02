@@ -64,7 +64,6 @@ import { Button } from '@/components/ui/button'
 import { DetectionResultsWorkspace } from './detection-results-workspace'
 import { DetectionResultViewer } from './detection-result-viewer'
 import { DetectionSettingsStep } from './detection-settings-step'
-import { DetectionStepFooter } from './detection-step-footer'
 import { DetectionStepper, type StepDisplayStatus, type StepperItem } from './detection-stepper'
 import { DetectionToolShell } from './detection-tool-shell'
 import { SessionLoadingOverlay } from './session-loading-overlay'
@@ -316,7 +315,12 @@ export function ClashGapDetectionPage() {
     async (id: string, stage: ClashGapStage) => {
       pollingRef.current = true
       const started = Date.now()
-      const maxMs = 12 * 60 * 1000
+      const maxMs = 20 * 60 * 1000
+      const stallMs = 165 * 1000
+      const maxResumes = 8
+      let resumes = 0
+      let lastProgress = -1
+      let lastProgressAt = Date.now()
       try {
         for (;;) {
           const data = await apiFetch<ApiClashGapAnalysisDetail>(`/api/clash-gap/analyses/${id}`)
@@ -326,8 +330,20 @@ export function ClashGapDetectionPage() {
           if (status === 'failed') {
             throw new Error(nextStages[stage]?.error || `${STAGE_RUN_LABEL[stage]} failed`)
           }
-          if (Date.now() - started > maxMs) {
-            throw new Error('This stage is taking longer than expected. Try again in a few minutes.')
+          const progress = nextStages[stage]?.processed ?? 0
+          if (progress > lastProgress) {
+            lastProgress = progress
+            lastProgressAt = Date.now()
+          } else if (Date.now() - lastProgressAt > stallMs) {
+            if (resumes >= maxResumes || Date.now() - started > maxMs) {
+              throw new Error('Processing stalled. Click Run again to resume from where it left off.')
+            }
+            resumes++
+            try {
+              await apiFetch(`/api/clash-gap/analyses/${id}/stages/${stage}/run`, { method: 'POST' })
+            } catch {
+            }
+            lastProgressAt = Date.now()
           }
           await new Promise((r) => setTimeout(r, 2500))
         }
@@ -520,28 +536,42 @@ export function ClashGapDetectionPage() {
         if (row.serverFileId) return row
         throw new Error('File is no longer available in this browser session. Remove and re-add it.')
       }
-      setClientUploadLabel(`Uploading ${row.filename}…`)
-      setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: 'pending' as const } : r)))
+      setRows((prev) =>
+        prev.map((r) => (r.id === row.id ? { ...r, status: 'pending' as const, progress: undefined } : r)),
+      )
       try {
         const uploaded = await uploadClashGapFile({
           analysisId: targetAnalysisId,
           file: row.file,
           fileRole: fileRoleFromDocType(row.type),
+          onProgress: (fraction) =>
+            setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, progress: fraction } : r))),
+          onPageCount: (count) =>
+            setRows((prev) =>
+              prev.map((r) => (r.id === row.id ? { ...r, pages: displayPageCount(count) } : r)),
+            ),
         })
         const updated: DocumentUploadRow = {
           ...row,
           serverFileId: uploaded.id,
           status: 'ready',
           pages: displayPageCount(uploaded.page_count),
+          progress: undefined,
           file: undefined,
         }
-        setRows((prev) => {
-          if (!prev.some((r) => r.id === row.id)) return prev
-          return prev.map((r) => (r.id === row.id ? updated : r))
-        })
+        setRows((prev) =>
+          prev.map((r) =>
+            r.id === row.id
+              ? { ...updated, pages: uploaded.page_count != null ? updated.pages : r.pages }
+              : r,
+          ),
+        )
         return updated
-      } finally {
-        setClientUploadLabel(null)
+      } catch (e) {
+        setRows((prev) =>
+          prev.map((r) => (r.id === row.id ? { ...r, status: 'error' as const, progress: undefined } : r)),
+        )
+        throw e
       }
     },
     [],
@@ -1296,21 +1326,6 @@ export function ClashGapDetectionPage() {
             />
           </div>
         ) : null}
-
-        <DetectionStepFooter
-          activeStep={activeStep}
-          onStepChange={setActiveStep}
-          canGoNext={canGoNext}
-          nextHint={
-            activeStep === 'upload'
-              ? uploadDocsHint
-              : canGoNext
-                ? null
-                : 'Finish the current stage to continue.'
-          }
-          showNext={activeStep !== 'chunk' && activeStep !== 'detection'}
-          hideNavigation={isSavedSession}
-        />
           </>
         ) : null}
       </DetectionToolShell>

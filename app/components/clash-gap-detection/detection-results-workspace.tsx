@@ -39,6 +39,18 @@ import { RfiDraftPanel } from './rfi-draft-panel'
 
 const PAGE_SIZE = 10
 
+function pageItems(current: number, total: number): (number | 'gap')[] {
+  if (total <= 5) return Array.from({ length: total }, (_, i) => i + 1)
+  const items: (number | 'gap')[] = [1]
+  const left = Math.max(2, current - 1)
+  const right = Math.min(total - 1, current + 1)
+  if (left > 2) items.push('gap')
+  for (let p = left; p <= right; p++) items.push(p)
+  if (right < total - 1) items.push('gap')
+  items.push(total)
+  return items
+}
+
 function detectionDisplayTitle(title: string): string {
   return title
     .trim()
@@ -298,7 +310,7 @@ export function DetectionResultsWorkspace(props: {
 
       <div className="rounded-2xl border border-[#e2e8f0] bg-white p-5 shadow-sm">
         <h3 className="text-base font-semibold text-[#0f172a]">Issues found</h3>
-        <div className="mt-3 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="mt-3 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
           <SummaryStatCard
             variant="conflict"
             count={conflicts}
@@ -310,12 +322,6 @@ export function DetectionResultsWorkspace(props: {
             count={missing}
             label="Missing info"
             barRatio={barRatio(missing)}
-          />
-          <SummaryStatCard
-            variant="verified"
-            count={verified}
-            label="Verified"
-            barRatio={barRatio(verified)}
           />
         </div>
       </div>
@@ -426,14 +432,14 @@ export function DetectionResultsWorkspace(props: {
             )}
           </div>
 
-          <div className="flex flex-col gap-3 border-t border-[#e2e8f0] pt-3 text-xs text-[#475569] sm:flex-row sm:items-center sm:justify-between">
-            <span>
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-[#e2e8f0] pt-3 text-xs text-[#475569]">
+            <span className="min-w-0 truncate">
               Showing{' '}
               {filtered.length === 0 ? 0 : start + 1}{' '}
               to{' '}
               {Math.min(start + PAGE_SIZE, filtered.length)} of {filtered.length} issues
             </span>
-            <div className="flex flex-wrap items-center gap-1">
+            <div className="flex flex-nowrap items-center gap-1">
               <Button
                 type="button"
                 variant="outline"
@@ -444,29 +450,32 @@ export function DetectionResultsWorkspace(props: {
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              {pageCount <= 7
-                ? Array.from({ length: pageCount }, (_, i) => i + 1).map((pn) => (
-                    <Button
-                      key={pn}
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className={cn(
-                        'h-9 min-w-[2.25rem] rounded-lg px-2 text-xs font-semibold',
-                        pn === safePage
-                          ? 'border-violet-600 bg-violet-600 text-white hover:bg-violet-600'
-                          : 'border-[#e2e8f0] bg-white font-semibold text-violet-600 hover:bg-slate-50',
-                      )}
-                      onClick={() => setPage(pn)}
-                    >
-                      {pn}
-                    </Button>
-                  ))
-                : (
-                    <span className="text-muted-foreground px-2 text-xs tabular-nums">
-                      {safePage} / {pageCount}
-                    </span>
-                  )}
+              {pageItems(safePage, pageCount).map((item, i) =>
+                item === 'gap' ? (
+                  <span
+                    key={`gap-${i}`}
+                    className="text-muted-foreground px-1 text-xs tabular-nums select-none"
+                  >
+                    …
+                  </span>
+                ) : (
+                  <Button
+                    key={item}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className={cn(
+                      'h-9 min-w-[2.25rem] rounded-lg px-2 text-xs font-semibold',
+                      item === safePage
+                        ? 'border-violet-600 bg-violet-600 text-white hover:bg-violet-600'
+                        : 'border-[#e2e8f0] bg-white font-semibold text-violet-600 hover:bg-slate-50',
+                    )}
+                    onClick={() => setPage(item)}
+                  >
+                    {item}
+                  </Button>
+                ),
+              )}
               <Button
                 type="button"
                 variant="outline"
