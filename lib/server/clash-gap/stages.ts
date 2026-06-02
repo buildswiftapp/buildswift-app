@@ -38,10 +38,21 @@ type FileRow = {
   storage_path: string
   file_name: string
   mime_type: string | null
+  page_count: number | null
 }
 
+// Overall ceiling on pages rendered in a single chunk run (across every uploaded
+// file). Guards the serverless time budget. Raised above the per-file cap so a
+// large plan set never starves the spec file of pages.
 function maxPagesPerRun(): number {
-  const n = Number(process.env.CLASH_GAP_MAX_PAGES_PER_RUN || 40)
+  const n = Number(process.env.CLASH_GAP_MAX_PAGES_PER_RUN || 120)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 120
+}
+
+// Per-file page cap. Each uploaded document gets its own share of pages so that
+// plans and specs are both represented even when one document is very large.
+function maxPagesPerFile(): number {
+  const n = Number(process.env.CLASH_GAP_MAX_PAGES_PER_FILE || 40)
   return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 40
 }
 
@@ -87,7 +98,7 @@ async function mapWithConcurrency<T>(
 async function loadFiles(supabase: any, analysisId: string): Promise<FileRow[]> {
   const { data, error } = await supabase
     .from('clash_gap_analysis_files')
-    .select('id, storage_path, file_name, mime_type')
+    .select('id, storage_path, file_name, mime_type, page_count')
     .eq('analysis_id', analysisId)
     .order('created_at', { ascending: true })
   if (error) throw new Error(error.message)
@@ -117,15 +128,25 @@ export async function runChunkStage(params: StageParams) {
       .delete()
       .in('analysis_file_id', fileIds)
 
-    const maxPages = maxPagesPerRun()
+    const overallCap = maxPagesPerRun()
+    const perFileCap = maxPagesPerFile()
     let pagesProcessed = 0
     let totalRendered = 0
+    let skippedPages = 0
+    let skippedFiles = 0
 
     for (const file of files) {
-      if (pagesProcessed >= maxPages) break
       const isPdf = isPdfFile(file)
       const isImage = isImageUpload(file.mime_type || '', file.file_name)
       if (!isPdf && !isImage) continue
+
+      const overallRemaining = overallCap - pagesProcessed
+      if (overallRemaining <= 0) {
+        // Overall run ceiling reached — this whole file is skipped.
+        skippedFiles++
+        skippedPages += isImage ? 1 : Math.max(0, file.page_count ?? 0)
+        continue
+      }
 
       const buffer = await downloadClashGapFile(file.storage_path)
       const sha256 = sha256Buffer(buffer)
@@ -134,8 +155,9 @@ export async function runChunkStage(params: StageParams) {
         const stageTimeout = pageStageTimeoutMs()
         const totalPages = await getPdfPageCount(buffer)
         await withPdfDocument(buffer, async (pdf) => {
-          const remaining = maxPages - pagesProcessed
-          const pagesToProcess = Math.min(totalPages, pdf.numPages, remaining)
+          const availablePages = Math.min(totalPages, pdf.numPages)
+          const pagesToProcess = Math.min(availablePages, perFileCap, overallRemaining)
+          skippedPages += Math.max(0, availablePages - pagesToProcess)
 
           await params.supabase
             .from('clash_gap_analysis_files')
@@ -195,12 +217,19 @@ export async function runChunkStage(params: StageParams) {
       }
     }
 
+    const detailParts = [`${totalRendered} page image(s)`]
+    if (skippedPages > 0) {
+      const fileNote = skippedFiles > 0 ? `, ${skippedFiles} file(s) not reached` : ''
+      detailParts.push(
+        `${skippedPages} page(s) skipped — limit ${perFileCap}/file, ${overallCap}/run${fileNote}`,
+      )
+    }
     await markStageCompleted(params.supabase, params.analysisId, 'chunk', {
       processed: totalRendered,
       total: totalRendered,
-      detail: `${totalRendered} page image(s)`,
+      detail: detailParts.join(' · '),
     })
-    return { pages: totalRendered }
+    return { pages: totalRendered, skippedPages }
   } catch (error) {
     const message = formatClashGapError(error)
     await markStageFailed(params.supabase, params.analysisId, 'chunk', message)
@@ -259,6 +288,8 @@ export async function runOcrStage(params: StageParams) {
     if (!sheets.length) throw new Error('No page images found — run the chunk stage first')
 
     let processed = 0
+    let failedPages = 0
+    let emptyPages = 0
     await mapWithConcurrency(sheets, ocrConcurrency(), async (sheet) => {
       let text = ''
       if (sheet.image_path) {
@@ -270,9 +301,14 @@ export async function runOcrStage(params: StageParams) {
           const sourceMime = isOriginalImage ? sheet.mime_type || 'image/png' : 'image/png'
           const ocr = await downscaleImageForOcr(bytes, sourceMime)
           text = await ocrImageWithOpenAI(ocr.bytes, ocr.mime, sheet.file_name, sheet.page_index)
+          if (!text.trim()) emptyPages++
         } catch (e) {
+          failedPages++
           console.error('[clash-gap ocr] failed for sheet', sheet.id, e)
         }
+      } else {
+        // No rendered image for this page (chunk could not render it).
+        failedPages++
       }
       await params.supabase
         .from('clash_gap_extracted_sheets')
@@ -295,11 +331,17 @@ export async function runOcrStage(params: StageParams) {
     })
     await mergeSheets(params.supabase, params.analysisId)
 
+    const unreadable = failedPages + emptyPages
+    const detail =
+      unreadable > 0
+        ? `${sheets.length} page(s) read · ${unreadable} returned no text`
+        : undefined
     await markStageCompleted(params.supabase, params.analysisId, 'ocr', {
       processed: sheets.length,
       total: sheets.length,
+      detail,
     })
-    return { pages: sheets.length }
+    return { pages: sheets.length, failedPages, emptyPages }
   } catch (error) {
     const message = formatClashGapError(error)
     await markStageFailed(params.supabase, params.analysisId, 'ocr', message)
