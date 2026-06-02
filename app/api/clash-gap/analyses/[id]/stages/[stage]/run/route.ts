@@ -35,8 +35,6 @@ const STAGE_RUNNERS = {
 } as const
 
 function isStageRunDead(_stage: ClashGapStage, updatedAt: string): boolean {
-  // Every stage now emits a progress heartbeat while alive, so a run that hasn't
-  // touched the row in this long is treated as dead and may be resumed.
   const staleMs = Number(process.env.CLASH_GAP_STAGE_STALE_MS || 150_000)
   const t = Date.parse(updatedAt)
   if (!Number.isFinite(t)) return true

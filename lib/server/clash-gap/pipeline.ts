@@ -60,7 +60,6 @@ function llmConcurrency(): number {
   return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 6
 }
 
-// Status codes worth retrying: rate limits, overload, and transient gateway errors.
 const RETRYABLE_LLM_STATUS = new Set([408, 409, 429, 500, 502, 503, 529])
 
 function isRetryableLlmError(error: unknown): boolean {
@@ -103,9 +102,6 @@ async function callJsonLlm(system: string, user: string, model: string) {
   let lastError: unknown
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    // Own the timeout via an AbortController, and disable the SDK's retries so we
-    // don't multiply slow calls. The response is streamed so HTTP headers arrive
-    // immediately — that avoids undici's UND_ERR_HEADERS_TIMEOUT on long generations.
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), llmTimeoutMs())
     try {
@@ -262,8 +258,6 @@ export async function runDetectStage(params: StageParams) {
 
     if (!sheets.length) throw new Error('No extracted text — run the OCR and merge stages first')
 
-    // Detect reports no progress on its own, which makes the step look frozen and
-    // trips the client's stall watchdog. Emit a heartbeat for every LLM call.
     let llmDone = 0
     let llmTotal = sheets.length
     const bumpDetect = async (detail: string) => {
@@ -276,7 +270,6 @@ export async function runDetectStage(params: StageParams) {
     await bumpDetect('Classifying sheets…')
 
     await mapWithConcurrency(sheets, llmConcurrency(), async (sheet) => {
-      // Resume support: keep sheets already classified by an interrupted run.
       if (!sheet.discipline) {
         const { discipline, sheetId, structured } = await classifyAndStructureSheet(sheet)
         await params.supabase
@@ -313,7 +306,6 @@ export async function runDetectStage(params: StageParams) {
       tradeMatches(sheet.discipline || 'other', trades),
     )
     const sections = splitSpecSections(specContext).slice(0, 8)
-    // Now the remaining call counts are known — refine the progress denominator.
     llmTotal = sheets.length + gapSheets.length + (effectivePlanSheets.length ? 1 : 0) + sections.length
 
     await bumpDetect('Finding missing info…')
