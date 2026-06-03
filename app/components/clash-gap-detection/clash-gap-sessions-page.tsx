@@ -34,8 +34,6 @@ import { toast } from 'sonner'
 
 const PAGE_SIZE = 8
 
-// Compact pagination: first/last page, the current page and its neighbours, with
-// an ellipsis for any gap (e.g. 1 … 4 5 6 … 12). ≤ 5 pages are shown in full.
 function pageItems(current: number, total: number): (number | 'gap')[] {
   if (total <= 5) return Array.from({ length: total }, (_, i) => i + 1)
   const items: (number | 'gap')[] = [1]

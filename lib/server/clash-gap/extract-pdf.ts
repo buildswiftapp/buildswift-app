@@ -94,9 +94,6 @@ export async function ocrImageWithOpenAI(
   let lastError: unknown
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    // Own the timeout via AbortController and stream the response so HTTP headers
-    // arrive immediately — this avoids undici's UND_ERR_HEADERS_TIMEOUT and lets a
-    // dense page keep transcribing instead of being cut while still producing text.
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), ocrTimeoutMs)
     try {
