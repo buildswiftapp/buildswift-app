@@ -1,5 +1,6 @@
 import { apiFetch } from '@/lib/api'
 import { createSupabaseBrowserClient } from '@/lib/supabase/client'
+import { formatUploadSizeLimit } from '@/lib/upload-limits'
 
 export type ClashGapUploadedFile = { id: string; page_count: number | null }
 
@@ -29,6 +30,26 @@ async function countPdfPagesClientSide(file: File): Promise<number | null> {
   }
 }
 
+function refineUploadError(err: unknown, file: File): Error {
+  const raw =
+    err instanceof Error
+      ? err.message
+      : String((err as { message?: unknown } | null)?.message ?? err ?? '')
+  const lc = raw.toLowerCase()
+  const tooLarge =
+    lc.includes('413') ||
+    lc.includes('payload too large') ||
+    lc.includes('maximum allowed size') ||
+    lc.includes('exceeded')
+  if (tooLarge) {
+    return new Error(
+      `Storage rejected "${file.name}" (${formatUploadSizeLimit(file.size)}) as too large. ` +
+        `Raise the Supabase file size limit for this bucket and the project global limit, then disable the spend cap, and retry.`,
+    )
+  }
+  return err instanceof Error ? err : new Error(raw || 'Upload failed')
+}
+
 function putToSignedUrl(
   presign: PresignResponse,
   file: File,
@@ -53,13 +74,13 @@ function putToSignedUrl(
     xhr.send(form)
   }).catch(async (err) => {
     const supabase = createSupabaseBrowserClient()
-    if (!supabase) throw err instanceof Error ? err : new Error('Upload failed')
+    if (!supabase) throw refineUploadError(err, file)
     const { error } = await supabase.storage
       .from(presign.bucket)
       .uploadToSignedUrl(presign.storagePath, presign.token, file, {
         contentType: mime || 'application/pdf',
       })
-    if (error) throw new Error(error.message)
+    if (error) throw refineUploadError(error, file)
     onProgress?.(1)
   })
 }

@@ -17,6 +17,8 @@ import {
 } from '@/components/ui/dialog'
 import {
   AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
   CircleAlert,
   CircleCheck,
   Clock,
@@ -27,7 +29,22 @@ import {
   Sparkles,
   Trash2,
 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+
+const PAGE_SIZE = 8
+
+function pageItems(current: number, total: number): (number | 'gap')[] {
+  if (total <= 5) return Array.from({ length: total }, (_, i) => i + 1)
+  const items: (number | 'gap')[] = [1]
+  const left = Math.max(2, current - 1)
+  const right = Math.min(total - 1, current + 1)
+  if (left > 2) items.push('gap')
+  for (let p = left; p <= right; p++) items.push(p)
+  if (right < total - 1) items.push('gap')
+  items.push(total)
+  return items
+}
 
 function formatSavedDate(iso: string | null | undefined): string {
   if (!iso) return '—'
@@ -57,6 +74,7 @@ function formatDocList(names: string[] | undefined): string {
 export function ClashGapSessionsPage() {
   const router = useRouter()
   const [sessions, setSessions] = useState<ApiClashGapAnalysisListItem[]>([])
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -108,6 +126,11 @@ export function ClashGapSessionsPage() {
       setDeletingId(null)
     }
   }
+
+  const pageCount = Math.max(1, Math.ceil(sessions.length / PAGE_SIZE))
+  const safePage = Math.min(page, pageCount)
+  const start = (safePage - 1) * PAGE_SIZE
+  const pageSessions = sessions.slice(start, start + PAGE_SIZE)
 
   return (
     <div className="min-h-full w-full bg-[#f9fafb] pb-10">
@@ -174,8 +197,9 @@ export function ClashGapSessionsPage() {
             </CardContent>
           </Card>
         ) : (
+          <>
           <div className="grid gap-3">
-            {sessions.map((session) => {
+            {pageSessions.map((session) => {
               const { total, conflicts, missing, verified } = issueSummary(session)
               const isDeleting = deletingId === session.id
               const projectName = session.project_name?.trim() || 'Untitled project'
@@ -264,6 +288,62 @@ export function ClashGapSessionsPage() {
               )
             })}
           </div>
+          {pageCount > 1 ? (
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-xs text-[#475569]">
+              <span className="min-w-0 truncate">
+                Showing {start + 1}–{Math.min(start + PAGE_SIZE, sessions.length)} of {sessions.length}
+              </span>
+              <div className="flex flex-nowrap items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 rounded-lg border-[#e2e8f0] bg-white"
+                  disabled={safePage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                {pageItems(safePage, pageCount).map((item, i) =>
+                  item === 'gap' ? (
+                    <span
+                      key={`gap-${i}`}
+                      className="text-muted-foreground select-none px-1 text-xs tabular-nums"
+                    >
+                      …
+                    </span>
+                  ) : (
+                    <Button
+                      key={item}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className={cn(
+                        'h-9 min-w-[2.25rem] rounded-lg px-2 text-xs font-semibold',
+                        item === safePage
+                          ? 'border-violet-600 bg-violet-600 text-white hover:bg-violet-600'
+                          : 'border-[#e2e8f0] bg-white text-violet-600 hover:bg-slate-50',
+                      )}
+                      onClick={() => setPage(item)}
+                    >
+                      {item}
+                    </Button>
+                  ),
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 rounded-lg border-[#e2e8f0] bg-white"
+                  disabled={safePage >= pageCount}
+                  onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          </>
         )}
       </div>
 

@@ -10,7 +10,7 @@ import {
   type ClashGapSessionMeta,
 } from '@/lib/clash-gap-api'
 
-import { Download } from 'lucide-react'
+import { Download, Play } from 'lucide-react'
 import {
   CLASH_GAP_RFI_PREFILL_STORAGE_KEY,
   type ClashGapRfiPrefillPayload,
@@ -1228,6 +1228,29 @@ export function ClashGapDetectionPage() {
               }}
             />
             <DetectionSettingsStep settings={settings} onSettingsChange={setSettings} />
+
+            <div className="flex flex-col gap-3 border-t border-[#e2e8f0] pt-6 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-sm text-[#64748b]">
+                {rows.some((r) => r.status === 'pending')
+                  ? 'Waiting for uploads to finish…'
+                  : hasUploadsReady
+                    ? 'Ready — Start runs Chunk → OCR → Detection automatically through to the final result.'
+                    : uploadDocsHint}
+              </span>
+              <Button
+                type="button"
+                size="lg"
+                className="rounded-xl bg-violet-600 text-white hover:bg-violet-700 sm:min-w-[220px]"
+                disabled={
+                  !hasUploadsReady || Boolean(runningStage) || rows.some((r) => r.status === 'pending')
+                }
+                title={!hasUploadsReady && uploadDocsHint ? uploadDocsHint : undefined}
+                onClick={() => setActiveStep('chunk')}
+              >
+                <Play className="mr-2 h-4 w-4 fill-current" aria-hidden />
+                Start analysis
+              </Button>
+            </div>
           </div>
         ) : null}
 
