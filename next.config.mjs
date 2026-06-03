@@ -8,7 +8,7 @@ const nextConfig = {
     unoptimized: true,
   },
   experimental: {
-    proxyClientMaxBodySize: '320mb',
+    proxyClientMaxBodySize: '1gb',
   },
 }
 

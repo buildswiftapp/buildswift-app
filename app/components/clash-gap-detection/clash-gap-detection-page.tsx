@@ -315,9 +315,9 @@ export function ClashGapDetectionPage() {
     async (id: string, stage: ClashGapStage) => {
       pollingRef.current = true
       const started = Date.now()
-      const maxMs = 20 * 60 * 1000
+      const maxMs = 6 * 60 * 60 * 1000
       const stallMs = 165 * 1000
-      const maxResumes = 8
+      const maxResumes = 80
       let resumes = 0
       let lastProgress = -1
       let lastProgressAt = Date.now()

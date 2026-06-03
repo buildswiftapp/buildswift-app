@@ -42,13 +42,13 @@ type FileRow = {
 }
 
 function maxPagesPerRun(): number {
-  const n = Number(process.env.CLASH_GAP_MAX_PAGES_PER_RUN || 250)
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 250
+  const n = Number(process.env.CLASH_GAP_MAX_PAGES_PER_RUN || 10000)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 10000
 }
 
 function maxPagesPerFile(): number {
-  const n = Number(process.env.CLASH_GAP_MAX_PAGES_PER_FILE || 120)
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 120
+  const n = Number(process.env.CLASH_GAP_MAX_PAGES_PER_FILE || 5000)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 5000
 }
 
 function ocrConcurrency(): number {

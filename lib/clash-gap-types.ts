@@ -19,7 +19,6 @@ export interface DocumentUploadRow {
   type: DocumentLabelType | null
   pages: number | '—'
   status: UploadStatus
-  /** 0–1 upload fraction while status is `pending`; undefined = indeterminate. */
   progress?: number
   file?: File
   serverFileId?: string
