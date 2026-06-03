@@ -315,10 +315,6 @@ export function ClashGapDetectionPage() {
     async (id: string, stage: ClashGapStage) => {
       pollingRef.current = true
       const started = Date.now()
-      // Large jobs (3000+ pages) run for a long time across several serverless
-      // invocations. Each killed run shows up as a progress stall and costs one
-      // resume; a healthy run that keeps advancing costs none. Keep these high
-      // so big analyses aren't aborted mid-flight.
       const maxMs = 6 * 60 * 60 * 1000
       const stallMs = 165 * 1000
       const maxResumes = 80
