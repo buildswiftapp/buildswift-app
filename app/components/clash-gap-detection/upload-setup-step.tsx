@@ -431,7 +431,13 @@ export function UploadSetupStep(props: {
                                 )}
                               >
                                 <SelectValue
-                                  placeholder={r.status === 'ready' ? 'Select type' : 'Uploading…'}
+                                  placeholder={
+                                    r.status === 'ready'
+                                      ? 'Select type'
+                                      : r.status === 'error'
+                                        ? 'Upload failed'
+                                        : 'Uploading…'
+                                  }
                                 />
                               </SelectTrigger>
                               <SelectContent>
