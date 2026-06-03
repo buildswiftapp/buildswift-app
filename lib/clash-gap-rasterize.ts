@@ -1,14 +1,23 @@
 import { apiFetch } from '@/lib/api'
 import { createSupabaseBrowserClient } from '@/lib/supabase/client'
 
-
 type PresignPage = { page_index: number; storagePath: string; token: string; signedUrl: string }
 type PresignResponse = { bucket: string; pages: PresignPage[] }
 
+// Match the server's old render output so OCR quality is unchanged.
 const MAX_DIM = 2200
 const JPEG_QUALITY = 0.82
-const BATCH = 8
-const CONCURRENCY = 3
+
+// Parallelism. Rendering rasterizes on the main thread (CPU-bound) so we keep it
+// modest; uploading is network-bound so it runs much wider. MAX_INFLIGHT caps how
+// many pages are "rendered-but-not-yet-uploaded" at once, which bounds both blob
+// memory and the number of concurrent uploads — the key to staying parallel
+// without blowing up memory on a 3000-page job.
+const RENDER_CONCURRENCY = 3
+const MAX_INFLIGHT = 12
+const PRESIGN_CHUNK = 50
+const PRESIGN_CONCURRENCY = 3
+const REGISTER_FLUSH = 25
 const PER_PAGE_ATTEMPTS = 3
 
 let pdfjsPromise: Promise<typeof import('pdfjs-dist')> | null = null
@@ -24,6 +33,31 @@ async function getPdfjs() {
     })
   }
   return pdfjsPromise
+}
+
+// Caps concurrent holders to `max`; the rest queue. Used for both the render
+// limit and the total-in-flight limit so the pipeline stays bounded.
+function createSemaphore(max: number) {
+  let active = 0
+  const queue: Array<() => void> = []
+  const runNext = () => {
+    if (active >= max) return
+    const next = queue.shift()
+    if (!next) return
+    active++
+    next()
+  }
+  return {
+    acquire: () =>
+      new Promise<void>((resolve) => {
+        queue.push(resolve)
+        runNext()
+      }),
+    release: () => {
+      active = Math.max(0, active - 1)
+      runNext()
+    },
+  }
 }
 
 function canvasToJpegBlob(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -72,10 +106,11 @@ export type RasterizeResult = { pages: number; rendered: number; skipped: number
 
 /**
  * Render every page of `file` to a JPEG in the browser, upload each via a
- * presigned URL, and register it as a sheet row. Resumable: pages already
- * uploaded (per the server's done-list) are skipped. Throws if any page can't
- * be rendered/uploaded after retries, so the chunk stage never silently falls
- * back to downloading the big file server-side.
+ * presigned URL, and register it as a sheet row. Renders and uploads run as a
+ * bounded parallel pipeline (render is CPU-bound and throttled; uploads run
+ * wide). Resumable: pages already uploaded (per the server's done-list) are
+ * skipped. Throws if any page can't be rendered/uploaded after retries, so the
+ * chunk stage never silently falls back to downloading the big file server-side.
  */
 export async function rasterizePdfPages(params: {
   analysisId: string
@@ -87,6 +122,10 @@ export async function rasterizePdfPages(params: {
 }): Promise<RasterizeResult> {
   const { analysisId, fileId, file, fileLabel, onProgress, signal } = params
   const label = fileLabel || file.name
+  const base = `/api/clash-gap/analyses/${analysisId}/files/${fileId}/pages`
+
+  const supabase = createSupabaseBrowserClient()
+  if (!supabase) throw new Error('Storage client unavailable')
 
   const pdfjs = await getPdfjs()
   const data = new Uint8Array(await file.arrayBuffer())
@@ -95,68 +134,106 @@ export async function rasterizePdfPages(params: {
   try {
     const total = doc.numPages
 
+    // Resume: skip pages already uploaded.
     let done = new Set<number>()
     try {
-      const res = await apiFetch<{ done: number[] }>(
-        `/api/clash-gap/analyses/${analysisId}/files/${fileId}/pages`,
-      )
+      const res = await apiFetch<{ done: number[] }>(base)
       done = new Set(res.done || [])
     } catch {
+      // No prior progress — render everything.
     }
 
-    const supabase = createSupabaseBrowserClient()
     const pending: number[] = []
     for (let i = 0; i < total; i++) if (!done.has(i)) pending.push(i)
 
     let processed = done.size
     let rendered = 0
-    onProgress?.({ processed, total, pageLabel: `${label} · page ${processed}/${total}` })
+    const report = () =>
+      onProgress?.({ processed, total, pageLabel: `${label} · page ${processed}/${total}` })
+    report()
 
-    for (let start = 0; start < pending.length; start += BATCH) {
+    if (!pending.length) return { pages: total, rendered, skipped: total }
+
+    // 1) Presign every pending page up front (chunked + concurrent). Cheap, and
+    //    it removes the per-batch presign stall from the render/upload pipeline.
+    const presignByIndex = new Map<number, PresignPage>()
+    let bucket = ''
+    const presignChunks: number[][] = []
+    for (let i = 0; i < pending.length; i += PRESIGN_CHUNK) {
+      presignChunks.push(pending.slice(i, i + PRESIGN_CHUNK))
+    }
+    await withConcurrency(presignChunks, PRESIGN_CONCURRENCY, async (chunk) => {
       if (signal?.aborted) throw new Error('Cancelled')
-      const batch = pending.slice(start, start + BATCH)
-
-      const presign = await retry(
+      const res = await retry(
         () =>
-          apiFetch<PresignResponse>(
-            `/api/clash-gap/analyses/${analysisId}/files/${fileId}/pages/presign`,
-            { method: 'POST', json: { page_indexes: batch } },
-          ),
+          apiFetch<PresignResponse>(`${base}/presign`, {
+            method: 'POST',
+            json: { page_indexes: chunk },
+          }),
         PER_PAGE_ATTEMPTS,
       )
-      const presignByIndex = new Map(presign.pages.map((p) => [p.page_index, p]))
+      bucket = res.bucket
+      for (const p of res.pages) presignByIndex.set(p.page_index, p)
+    })
 
-      const saved: Array<{ page_index: number; image_path: string }> = []
-      await withConcurrency(batch, CONCURRENCY, async (pageIndex) => {
+    // 2) Render (throttled) ∥ upload (wide), bounded by MAX_INFLIGHT.
+    const renderSem = createSemaphore(RENDER_CONCURRENCY)
+    const inFlight = createSemaphore(MAX_INFLIGHT)
+
+    const pendingRegister: Array<{ page_index: number; image_path: string }> = []
+    const registerTasks: Array<Promise<unknown>> = []
+    const flushRegister = (force = false) => {
+      while (pendingRegister.length && (force || pendingRegister.length >= REGISTER_FLUSH)) {
+        const batch = pendingRegister.splice(0, REGISTER_FLUSH)
+        registerTasks.push(
+          retry(
+            () => apiFetch(base, { method: 'POST', json: { pages: batch, page_count: total } }),
+            PER_PAGE_ATTEMPTS,
+          ),
+        )
+      }
+    }
+
+    const renderBounded = async (pageIndex: number): Promise<Blob> => {
+      await renderSem.acquire()
+      try {
+        return await retry(() => renderPageToJpeg(doc, pageIndex), PER_PAGE_ATTEMPTS)
+      } finally {
+        renderSem.release()
+      }
+    }
+
+    const runPage = async (pageIndex: number) => {
+      await inFlight.acquire()
+      try {
         if (signal?.aborted) throw new Error('Cancelled')
         const target = presignByIndex.get(pageIndex)
         if (!target) throw new Error(`Missing upload URL for page ${pageIndex + 1}`)
+
+        const blob = await renderBounded(pageIndex)
         await retry(async () => {
-          const blob = await renderPageToJpeg(doc, pageIndex)
-          if (!supabase) throw new Error('Storage client unavailable')
           const { error } = await supabase.storage
-            .from(presign.bucket)
+            .from(bucket)
             .uploadToSignedUrl(target.storagePath, target.token, blob, {
               contentType: 'image/jpeg',
               upsert: true,
             })
           if (error) throw new Error(error.message)
         }, PER_PAGE_ATTEMPTS)
-        saved.push({ page_index: pageIndex, image_path: target.storagePath })
+
+        pendingRegister.push({ page_index: pageIndex, image_path: target.storagePath })
         rendered++
         processed++
-        onProgress?.({ processed, total, pageLabel: `${label} · page ${processed}/${total}` })
-      })
-
-      await retry(
-        () =>
-          apiFetch(`/api/clash-gap/analyses/${analysisId}/files/${fileId}/pages`, {
-            method: 'POST',
-            json: { pages: saved, page_count: total },
-          }),
-        PER_PAGE_ATTEMPTS,
-      )
+        report()
+        flushRegister()
+      } finally {
+        inFlight.release()
+      }
     }
+
+    await Promise.all(pending.map((pageIndex) => runPage(pageIndex)))
+    flushRegister(true)
+    await Promise.all(registerTasks)
 
     return { pages: total, rendered, skipped: total - rendered }
   } finally {
@@ -186,6 +263,7 @@ async function renderPageToJpeg(
     return await canvasToJpegBlob(canvas)
   } finally {
     page.cleanup()
+    // Release the bitmap so peak memory stays flat across thousands of pages.
     if (canvas) {
       canvas.width = 0
       canvas.height = 0
