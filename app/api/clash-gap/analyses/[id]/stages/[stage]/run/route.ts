@@ -24,7 +24,7 @@ import {
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 
-export const maxDuration = 800
+export const maxDuration = 300
 
 type Params = { params: Promise<{ id: string; stage: string }> }
 
