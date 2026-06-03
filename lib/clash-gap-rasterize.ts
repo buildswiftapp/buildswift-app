@@ -1,18 +1,12 @@
+import '@/lib/uint8-polyfill'
 import { apiFetch } from '@/lib/api'
 import { createSupabaseBrowserClient } from '@/lib/supabase/client'
 
 type PresignPage = { page_index: number; storagePath: string; token: string; signedUrl: string }
 type PresignResponse = { bucket: string; pages: PresignPage[] }
 
-// Match the server's old render output so OCR quality is unchanged.
 const MAX_DIM = 2200
 const JPEG_QUALITY = 0.82
-
-// Parallelism. Rendering rasterizes on the main thread (CPU-bound) so we keep it
-// modest; uploading is network-bound so it runs much wider. MAX_INFLIGHT caps how
-// many pages are "rendered-but-not-yet-uploaded" at once, which bounds both blob
-// memory and the number of concurrent uploads — the key to staying parallel
-// without blowing up memory on a 3000-page job.
 const RENDER_CONCURRENCY = 3
 const MAX_INFLIGHT = 12
 const PRESIGN_CHUNK = 50
@@ -35,8 +29,6 @@ async function getPdfjs() {
   return pdfjsPromise
 }
 
-// Caps concurrent holders to `max`; the rest queue. Used for both the render
-// limit and the total-in-flight limit so the pipeline stays bounded.
 function createSemaphore(max: number) {
   let active = 0
   const queue: Array<() => void> = []
@@ -134,13 +126,11 @@ export async function rasterizePdfPages(params: {
   try {
     const total = doc.numPages
 
-    // Resume: skip pages already uploaded.
     let done = new Set<number>()
     try {
       const res = await apiFetch<{ done: number[] }>(base)
       done = new Set(res.done || [])
     } catch {
-      // No prior progress — render everything.
     }
 
     const pending: number[] = []
@@ -154,8 +144,6 @@ export async function rasterizePdfPages(params: {
 
     if (!pending.length) return { pages: total, rendered, skipped: total }
 
-    // 1) Presign every pending page up front (chunked + concurrent). Cheap, and
-    //    it removes the per-batch presign stall from the render/upload pipeline.
     const presignByIndex = new Map<number, PresignPage>()
     let bucket = ''
     const presignChunks: number[][] = []
@@ -176,7 +164,6 @@ export async function rasterizePdfPages(params: {
       for (const p of res.pages) presignByIndex.set(p.page_index, p)
     })
 
-    // 2) Render (throttled) ∥ upload (wide), bounded by MAX_INFLIGHT.
     const renderSem = createSemaphore(RENDER_CONCURRENCY)
     const inFlight = createSemaphore(MAX_INFLIGHT)
 
@@ -263,7 +250,6 @@ async function renderPageToJpeg(
     return await canvasToJpegBlob(canvas)
   } finally {
     page.cleanup()
-    // Release the bitmap so peak memory stays flat across thousands of pages.
     if (canvas) {
       canvas.width = 0
       canvas.height = 0
