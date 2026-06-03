@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { apiFetch } from '@/lib/api'
 import { downloadAndSaveBlob, uploadClashGapFile } from '@/lib/api-upload'
+import { rasterizePdfPages } from '@/lib/clash-gap-rasterize'
 import {
   mapApiIssueToClashGapIssue,
   type ApiClashGapAnalysisDetail,
@@ -279,6 +280,7 @@ export function ClashGapDetectionPage() {
   const creatingAnalysisRef = useRef<Promise<string> | null>(null)
   const pollingRef = useRef(false)
   const savedAnalysisRef = useRef(false)
+  const fileBlobsRef = useRef<Map<string, File>>(new Map())
 
   useEffect(() => {
     analysisIdRef.current = analysisId
@@ -551,6 +553,7 @@ export function ClashGapDetectionPage() {
               prev.map((r) => (r.id === row.id ? { ...r, pages: displayPageCount(count) } : r)),
             ),
         })
+        fileBlobsRef.current.set(uploaded.id, row.file)
         const updated: DocumentUploadRow = {
           ...row,
           serverFileId: uploaded.id,
@@ -666,6 +669,38 @@ export function ClashGapDetectionPage() {
     return step === 'upload' || step === 'result' ? null : STEP_TO_STAGE[step]
   }, [])
 
+  const rasterizeChunkPages = useCallback(async (id: string) => {
+    const detail = await apiFetch<ApiClashGapAnalysisDetail>(`/api/clash-gap/analyses/${id}`)
+    const pdfFiles = (detail.files ?? []).filter(
+      (f) => /\.pdf$/i.test(f.file_name) || (f.mime_type ?? '').toLowerCase().includes('pdf'),
+    )
+    for (const f of pdfFiles) {
+      const blob = fileBlobsRef.current.get(f.id)
+      if (!blob) {
+        throw new Error(
+          `"${f.file_name}" is no longer in this browser session. Re-add it (and keep this tab open) so its pages can be processed.`,
+        )
+      }
+      await rasterizePdfPages({
+        analysisId: id,
+        fileId: f.id,
+        file: blob,
+        fileLabel: f.file_name,
+        onProgress: (p) =>
+          setStages((prev) => ({
+            ...prev,
+            chunk: {
+              ...(prev.chunk ?? { status: 'running' }),
+              status: 'running',
+              processed: p.processed,
+              total: p.total,
+              detail: p.pageLabel,
+            },
+          })),
+      })
+    }
+  }, [])
+
   const runStage = useCallback(
     async (stage: ClashGapStage) => {
       if (runningStage) return
@@ -675,6 +710,7 @@ export function ClashGapDetectionPage() {
 
         if (stage === 'chunk') {
           await ensureUploadsReady(id)
+          await rasterizeChunkPages(id)
         }
         if (stage === 'detect') {
           await apiFetch(`/api/clash-gap/analyses/${id}`, {
@@ -703,7 +739,16 @@ export function ClashGapDetectionPage() {
         setClientUploadLabel(null)
       }
     },
-    [runningStage, ensureAnalysis, ensureUploadsReady, pollStage, settings, selectedTrades, rows],
+    [
+      runningStage,
+      ensureAnalysis,
+      ensureUploadsReady,
+      rasterizeChunkPages,
+      pollStage,
+      settings,
+      selectedTrades,
+      rows,
+    ],
   )
 
   const autoRunRef = useRef(false)
