@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "node scripts/build-pdf-worker.mjs && next dev",
+    "build": "node scripts/build-pdf-worker.mjs && next build",
     "start": "next start",
     "lint": "eslint .",
+    "postinstall": "node scripts/build-pdf-worker.mjs",
     "test:api:smoke": "node scripts/api-smoke.mjs"
   },
   "dependencies": {

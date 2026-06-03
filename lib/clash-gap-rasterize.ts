@@ -19,10 +19,7 @@ let pdfjsPromise: Promise<typeof import('pdfjs-dist')> | null = null
 async function getPdfjs() {
   if (!pdfjsPromise) {
     pdfjsPromise = import('pdfjs-dist').then((pdfjs) => {
-      pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-        'pdfjs-dist/build/pdf.worker.min.mjs',
-        import.meta.url,
-      ).toString()
+      pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
       return pdfjs
     })
   }
@@ -96,14 +93,6 @@ export type RasterizeProgress = { processed: number; total: number; pageLabel: s
 
 export type RasterizeResult = { pages: number; rendered: number; skipped: number }
 
-/**
- * Render every page of `file` to a JPEG in the browser, upload each via a
- * presigned URL, and register it as a sheet row. Renders and uploads run as a
- * bounded parallel pipeline (render is CPU-bound and throttled; uploads run
- * wide). Resumable: pages already uploaded (per the server's done-list) are
- * skipped. Throws if any page can't be rendered/uploaded after retries, so the
- * chunk stage never silently falls back to downloading the big file server-side.
- */
 export async function rasterizePdfPages(params: {
   analysisId: string
   fileId: string
