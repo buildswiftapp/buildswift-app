@@ -7,7 +7,7 @@ import { renderTextPdf } from '@/lib/server/clash-gap/text-pdf'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 
-export const maxDuration = 300
+export const maxDuration = 800
 
 type Params = { params: Promise<{ id: string; kind: string }> }
 

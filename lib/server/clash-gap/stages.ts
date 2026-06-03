@@ -41,14 +41,21 @@ type FileRow = {
   page_count: number | null
 }
 
+// Hard safety ceilings, not throughput limits: pages beyond these are dropped
+// (sheets at page_index >= the plan are deleted below). They sit well above any
+// realistic plan set so 3000+ page jobs are processed in full. Throughput is
+// handled by the chunk stage being resumable — each serverless invocation
+// renders as many still-pending pages as it can before maxDuration, and the
+// client re-triggers the run until every page has an image_path. Lower these
+// only if you deliberately want to cap how much a single analysis ingests.
 function maxPagesPerRun(): number {
-  const n = Number(process.env.CLASH_GAP_MAX_PAGES_PER_RUN || 250)
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 250
+  const n = Number(process.env.CLASH_GAP_MAX_PAGES_PER_RUN || 10000)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 10000
 }
 
 function maxPagesPerFile(): number {
-  const n = Number(process.env.CLASH_GAP_MAX_PAGES_PER_FILE || 120)
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 120
+  const n = Number(process.env.CLASH_GAP_MAX_PAGES_PER_FILE || 5000)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 5000
 }
 
 function ocrConcurrency(): number {
