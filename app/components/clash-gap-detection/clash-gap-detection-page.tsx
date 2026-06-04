@@ -395,6 +395,10 @@ export function ClashGapDetectionPage() {
   useEffect(() => {
     const analysisParam = searchParams.get('analysis')
     const isNewSession = searchParams.get('new') === '1'
+    const isReload =
+      typeof performance !== 'undefined' &&
+      (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)
+        ?.type === 'reload'
 
     if (!sessionRestored.current) {
       sessionRestored.current = true
@@ -405,6 +409,39 @@ export function ClashGapDetectionPage() {
         }
         return
       }
+
+      // A browser refresh wipes the uploaded PDFs from memory. If the draft
+      // still needs them (chunking not finished), discard it locally and send
+      // the user back to a clean upload step with an alert. Finished/saved
+      // analyses don't need the local files, so they reopen normally below.
+      if (isReload) {
+        let local: ClashGapSessionV1 | null = null
+        try {
+          const raw = localStorage.getItem(CLASH_GAP_SESSION_STORAGE_KEY)
+          if (raw) {
+            const parsed = JSON.parse(raw) as ClashGapSessionV1
+            if (parsed.version === 1) local = parsed
+          }
+        } catch {
+        }
+        const inProgressDraft =
+          !!local &&
+          local.phase !== 'results' &&
+          stageStatus(local.stages ?? {}, 'chunk') !== 'completed' &&
+          ((local.rows?.length ?? 0) > 0 || !!local.analysisId)
+        if (inProgressDraft) {
+          try {
+            localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
+          } catch {
+          }
+          toast.error(
+            'Your uploaded files were cleared because the page was refreshed. Please re-upload to continue.',
+          )
+          router.replace(`${CLASH_GAP_SESSION_PATH}?new=1`)
+          return
+        }
+      }
+
       if (!analysisParam && typeof window !== 'undefined') {
         try {
           const rawLocal = localStorage.getItem(CLASH_GAP_SESSION_STORAGE_KEY)
@@ -443,6 +480,26 @@ export function ClashGapDetectionPage() {
       try {
         const data = await loadAnalysis(analysisParam)
         const loaded = parseStages(data.analysis.stages)
+
+        // Refreshed a draft link that still needs the local PDFs (no finished
+        // chunk stage, not saved) — the files are gone, so clear and restart.
+        if (isReload && !data.analysis.saved_at && stageStatus(loaded, 'chunk') !== 'completed') {
+          try {
+            localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
+          } catch {
+          }
+          setAnalysisId(null)
+          setRows([])
+          setStages({})
+          setIssues([])
+          setActiveStep('upload')
+          toast.error(
+            'Your uploaded files were cleared because the page was refreshed. Please re-upload to continue.',
+          )
+          router.replace(`${CLASH_GAP_SESSION_PATH}?new=1`)
+          return
+        }
+
         const meta = (data.analysis.session_meta ?? {}) as ClashGapSessionMeta
         if (meta.bookmarkedIds?.length) setBookmarkedIds(new Set(meta.bookmarkedIds))
         if (meta.selectedIssueId) setSelectedIssueId(meta.selectedIssueId)
@@ -670,10 +727,28 @@ export function ClashGapDetectionPage() {
   }, [])
 
   const rasterizeChunkPages = useCallback(async (id: string) => {
+    // Show the progress bar (indeterminate) from the very start, while we
+    // identify each PDF's pages — before the first page render reports numbers.
+    setStages((prev) => ({
+      ...prev,
+      chunk: {
+        ...(prev.chunk ?? { status: 'running' }),
+        status: 'running',
+        processed: 0,
+        total: 0,
+        detail: 'Identifying pages…',
+      },
+    }))
     const detail = await apiFetch<ApiClashGapAnalysisDetail>(`/api/clash-gap/analyses/${id}`)
     const pdfFiles = (detail.files ?? []).filter(
       (f) => /\.pdf$/i.test(f.file_name) || (f.mime_type ?? '').toLowerCase().includes('pdf'),
     )
+
+    // Combined progress across every PDF: one bar over the summed page count of
+    // all files, so it advances continuously instead of resetting per file.
+    const grandTotal = pdfFiles.reduce((sum, f) => sum + (f.page_count ?? 0), 0)
+    let baseProcessed = 0
+
     for (const f of pdfFiles) {
       const blob = fileBlobsRef.current.get(f.id)
       if (!blob) {
@@ -681,7 +756,7 @@ export function ClashGapDetectionPage() {
           `"${f.file_name}" is no longer in this browser session. Re-add it (and keep this tab open) so its pages can be processed.`,
         )
       }
-      await rasterizePdfPages({
+      const result = await rasterizePdfPages({
         analysisId: id,
         fileId: f.id,
         file: blob,
@@ -692,12 +767,15 @@ export function ClashGapDetectionPage() {
             chunk: {
               ...(prev.chunk ?? { status: 'running' }),
               status: 'running',
-              processed: p.processed,
-              total: p.total,
+              processed: baseProcessed + p.processed,
+              // Keep the denominator >= processed if a file's page_count was
+              // unknown at upload time (grandTotal would then under-count).
+              total: Math.max(grandTotal, baseProcessed + p.total),
               detail: p.pageLabel,
             },
           })),
       })
+      baseProcessed += result.pages
     }
   }, [])
 
