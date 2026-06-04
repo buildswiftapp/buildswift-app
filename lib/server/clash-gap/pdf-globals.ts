@@ -1,3 +1,5 @@
+import '@/lib/uint8-polyfill'
+
 function installPdfGlobals() {
   if (typeof globalThis.DOMMatrix !== 'undefined') return
 
