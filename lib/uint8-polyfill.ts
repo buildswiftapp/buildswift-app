@@ -1,3 +1,34 @@
+function installMapUpsertMethods(): void {
+  if (typeof Map === 'undefined') return
+
+  const proto = Map.prototype as Map<unknown, unknown> & {
+    getOrInsert?: (key: unknown, defaultValue: unknown) => unknown
+    getOrInsertComputed?: (key: unknown, callbackFn: (key: unknown) => unknown) => unknown
+  }
+
+  if (typeof proto.getOrInsert !== 'function') {
+    Object.defineProperty(proto, 'getOrInsert', {
+      value(key: unknown, defaultValue: unknown): unknown {
+        if (!this.has(key)) this.set(key, defaultValue)
+        return this.get(key)
+      },
+      writable: true,
+      configurable: true,
+    })
+  }
+
+  if (typeof proto.getOrInsertComputed !== 'function') {
+    Object.defineProperty(proto, 'getOrInsertComputed', {
+      value(key: unknown, callbackFn: (key: unknown) => unknown): unknown {
+        if (!this.has(key)) this.set(key, callbackFn(key))
+        return this.get(key)
+      },
+      writable: true,
+      configurable: true,
+    })
+  }
+}
+
 type Uint8ArrayCtorWithCodecs = typeof Uint8Array & {
   fromHex?: (hex: string) => Uint8Array
   fromBase64?: (str: string) => Uint8Array
@@ -71,6 +102,7 @@ function installUint8ArrayCodecs(): void {
   }
 }
 
+installMapUpsertMethods()
 installUint8ArrayCodecs()
 
 export {}

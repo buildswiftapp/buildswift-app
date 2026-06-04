@@ -1,4 +1,5 @@
 import { formatClashGapError, isRetryableNetworkError } from '@/lib/server/clash-gap/errors'
+import { fetchAllRows } from '@/lib/server/clash-gap/fetch-all-rows'
 import { getOpenAIClient } from '@/lib/server/openai'
 import { writeAuditLog } from '@/lib/server/audit'
 import { incrementMonthlyClashGapReports } from '@/lib/server/account-usage'
@@ -235,13 +236,17 @@ export async function runDetectStage(params: StageParams) {
       files.map((f: { id: string; file_name: string; file_role: string }) => [f.id, f]),
     )
 
-    const { data: sheetRows, error: sheetsError } = await params.supabase
-      .from('clash_gap_extracted_sheets')
-      .select('*')
-      .in('analysis_file_id', fileIds)
-    if (sheetsError) throw new Error(sheetsError.message)
+    const sheetRows = await fetchAllRows<any>((from, to) =>
+      params.supabase
+        .from('clash_gap_extracted_sheets')
+        .select('*')
+        .in('analysis_file_id', fileIds)
+        .order('analysis_file_id', { ascending: true })
+        .order('page_index', { ascending: true })
+        .range(from, to),
+    )
 
-    const sheets: SheetRow[] = (sheetRows || []).map((row: any) => {
+    const sheets: SheetRow[] = sheetRows.map((row: any) => {
       const file = fileById.get(row.analysis_file_id)
       return {
         id: row.id,

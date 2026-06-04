@@ -13,6 +13,27 @@ if (!existsSync(workerSrc)) {
 
 const polyfill = `// Injected by scripts/build-pdf-worker.mjs — see lib/uint8-polyfill.ts
 (function () {
+  if (typeof Map !== 'undefined') {
+    var mapProto = Map.prototype;
+    if (typeof mapProto.getOrInsert !== 'function') {
+      Object.defineProperty(mapProto, 'getOrInsert', {
+        value: function (key, defaultValue) {
+          if (!this.has(key)) this.set(key, defaultValue);
+          return this.get(key);
+        },
+        writable: true, configurable: true,
+      });
+    }
+    if (typeof mapProto.getOrInsertComputed !== 'function') {
+      Object.defineProperty(mapProto, 'getOrInsertComputed', {
+        value: function (key, callbackFn) {
+          if (!this.has(key)) this.set(key, callbackFn(key));
+          return this.get(key);
+        },
+        writable: true, configurable: true,
+      });
+    }
+  }
   if (typeof Uint8Array === 'undefined') return;
   var proto = Uint8Array.prototype;
   var ctor = Uint8Array;
