@@ -2,6 +2,7 @@ import JSZip from 'jszip'
 import { badRequest, notFound, serverError, unauthorized } from '@/lib/server/api-response'
 import { getAuthContext } from '@/lib/server/auth'
 import { getAnalysisForAccount } from '@/lib/server/clash-gap/access'
+import { fetchAllRows } from '@/lib/server/clash-gap/fetch-all-rows'
 import { downloadClashGapFile } from '@/lib/server/clash-gap/storage'
 import { renderTextPdf } from '@/lib/server/clash-gap/text-pdf'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
@@ -45,16 +46,19 @@ async function loadSheets(supabase: any, analysisId: string): Promise<SheetRow[]
     .order('created_at', { ascending: true })
   const fileById = new Map((files || []).map((f: any) => [f.id, f]))
   if (!files?.length) return []
-  const { data } = await supabase
-    .from('clash_gap_extracted_sheets')
-    .select('id, analysis_file_id, page_index, image_path, ocr_text, raw_text, sheet_id')
-    .in(
-      'analysis_file_id',
-      files.map((f: any) => f.id),
-    )
-    .order('analysis_file_id', { ascending: true })
-    .order('page_index', { ascending: true })
-  return (data || []).map((row: any) => {
+  const data = await fetchAllRows<any>((from, to) =>
+    supabase
+      .from('clash_gap_extracted_sheets')
+      .select('id, analysis_file_id, page_index, image_path, ocr_text, raw_text, sheet_id')
+      .in(
+        'analysis_file_id',
+        files.map((f: any) => f.id),
+      )
+      .order('analysis_file_id', { ascending: true })
+      .order('page_index', { ascending: true })
+      .range(from, to),
+  )
+  return data.map((row: any) => {
     const file = fileById.get(row.analysis_file_id) as any
     return {
       id: row.id,

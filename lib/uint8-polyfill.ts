@@ -6,7 +6,6 @@ function installMapUpsertMethods(): void {
     getOrInsertComputed?: (key: unknown, callbackFn: (key: unknown) => unknown) => unknown
   }
 
-  // PDF.js v5.5+ uses these ES2027 Map methods; not yet in all Chromium builds.
   if (typeof proto.getOrInsert !== 'function') {
     Object.defineProperty(proto, 'getOrInsert', {
       value(key: unknown, defaultValue: unknown): unknown {

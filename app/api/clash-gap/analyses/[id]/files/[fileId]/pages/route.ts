@@ -1,6 +1,7 @@
 import { badRequest, notFound, ok, serverError, unauthorized } from '@/lib/server/api-response'
 import { getAuthContext } from '@/lib/server/auth'
 import { getAnalysisForAccount } from '@/lib/server/clash-gap/access'
+import { fetchAllRows } from '@/lib/server/clash-gap/fetch-all-rows'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 
@@ -31,15 +32,18 @@ export async function GET(req: Request, { params }: Params) {
   const file = await resolveFile(supabase, analysisId, fileId, auth.accountId)
   if (!file) return notFound('File not found')
 
-  const { data, error } = await supabase
-    .from('clash_gap_extracted_sheets')
-    .select('page_index')
-    .eq('analysis_file_id', fileId)
-    .not('image_path', 'is', null)
-  if (error) return serverError(error.message)
+  const data = await fetchAllRows<{ page_index: number }>((from, to) =>
+    supabase
+      .from('clash_gap_extracted_sheets')
+      .select('page_index')
+      .eq('analysis_file_id', fileId)
+      .not('image_path', 'is', null)
+      .order('page_index', { ascending: true })
+      .range(from, to),
+  )
 
-  const done = (data || [])
-    .map((r: any) => r.page_index)
+  const done = data
+    .map((r) => r.page_index)
     .filter((n: unknown): n is number => Number.isInteger(n))
   return ok({ done })
 }

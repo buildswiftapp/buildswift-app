@@ -1,4 +1,5 @@
 import { formatClashGapError } from '@/lib/server/clash-gap/errors'
+import { fetchAllRows } from '@/lib/server/clash-gap/fetch-all-rows'
 import { updateAnalysisStep } from '@/lib/server/clash-gap/access'
 import {
   markStageCompleted,
@@ -140,11 +141,16 @@ async function loadExistingSheets(
 ): Promise<Map<string, Map<number, ExistingSheet>>> {
   const byFile = new Map<string, Map<number, ExistingSheet>>()
   if (!fileIds.length) return byFile
-  const { data } = await supabase
-    .from('clash_gap_extracted_sheets')
-    .select('id, analysis_file_id, page_index, image_path')
-    .in('analysis_file_id', fileIds)
-  for (const row of (data || []) as any[]) {
+  const data = await fetchAllRows<any>((from, to) =>
+    supabase
+      .from('clash_gap_extracted_sheets')
+      .select('id, analysis_file_id, page_index, image_path')
+      .in('analysis_file_id', fileIds)
+      .order('analysis_file_id', { ascending: true })
+      .order('page_index', { ascending: true })
+      .range(from, to),
+  )
+  for (const row of data) {
     let pages = byFile.get(row.analysis_file_id)
     if (!pages) {
       pages = new Map<number, ExistingSheet>()
@@ -383,17 +389,16 @@ async function loadSheetsWithFiles(supabase: any, analysisId: string): Promise<O
   const files = await loadFiles(supabase, analysisId)
   if (!files.length) return []
   const fileById = new Map(files.map((f) => [f.id, f]))
-  const { data, error } = await supabase
-    .from('clash_gap_extracted_sheets')
-    .select('id, analysis_file_id, page_index, image_path, ocr_text')
-    .in(
-      'analysis_file_id',
-      files.map((f) => f.id),
-    )
-    .order('analysis_file_id', { ascending: true })
-    .order('page_index', { ascending: true })
-  if (error) throw new Error(error.message)
-  return (data || []).map((row: any) => {
+  const data = await fetchAllRows<any>((from, to) =>
+    supabase
+      .from('clash_gap_extracted_sheets')
+      .select('id, analysis_file_id, page_index, image_path, ocr_text')
+      .in('analysis_file_id', files.map((f) => f.id))
+      .order('analysis_file_id', { ascending: true })
+      .order('page_index', { ascending: true })
+      .range(from, to),
+  )
+  return data.map((row: any) => {
     const file = fileById.get(row.analysis_file_id)
     return {
       id: row.id,
@@ -499,15 +504,17 @@ async function mergeSheets(supabase: any, analysisId: string): Promise<number> {
   const fileIds = files.map((f) => f.id)
   if (!fileIds.length) throw new Error('No files uploaded')
 
-  const { data: sheetRows, error } = await supabase
-    .from('clash_gap_extracted_sheets')
-    .select('id, analysis_file_id, page_index, ocr_text')
-    .in('analysis_file_id', fileIds)
-    .order('analysis_file_id', { ascending: true })
-    .order('page_index', { ascending: true })
-  if (error) throw new Error(error.message)
+  const sheetRows = await fetchAllRows<any>((from, to) =>
+    supabase
+      .from('clash_gap_extracted_sheets')
+      .select('id, analysis_file_id, page_index, ocr_text')
+      .in('analysis_file_id', fileIds)
+      .order('analysis_file_id', { ascending: true })
+      .order('page_index', { ascending: true })
+      .range(from, to),
+  )
 
-  const sheets = (sheetRows || []) as Array<{
+  const sheets = sheetRows as Array<{
     id: string
     analysis_file_id: string
     page_index: number
