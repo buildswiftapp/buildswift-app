@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { apiFetch } from '@/lib/api'
-import { downloadAndSaveBlob, uploadClashGapFile } from '@/lib/api-upload'
+import { downloadAndSaveBlob, uploadClashGapFile, countPdfPagesClientSide } from '@/lib/api-upload'
+import {
+  clientChunkMaxPages,
+  clientChunkSkipDetail,
+  shouldClientRasterize,
+} from '@/lib/clash-gap-chunk-policy'
 import { rasterizePdfPages } from '@/lib/clash-gap-rasterize'
 import {
   mapApiIssueToClashGapIssue,
@@ -410,10 +415,6 @@ export function ClashGapDetectionPage() {
         return
       }
 
-      // A browser refresh wipes the uploaded PDFs from memory. If the draft
-      // still needs them (chunking not finished), discard it locally and send
-      // the user back to a clean upload step with an alert. Finished/saved
-      // analyses don't need the local files, so they reopen normally below.
       if (isReload) {
         let local: ClashGapSessionV1 | null = null
         try {
@@ -430,6 +431,10 @@ export function ClashGapDetectionPage() {
           stageStatus(local.stages ?? {}, 'chunk') !== 'completed' &&
           ((local.rows?.length ?? 0) > 0 || !!local.analysisId)
         if (inProgressDraft) {
+          if (local.analysisId) {
+            router.replace(`${CLASH_GAP_SESSION_PATH}?analysis=${local.analysisId}`)
+            return
+          }
           try {
             localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
           } catch {
@@ -480,10 +485,12 @@ export function ClashGapDetectionPage() {
       try {
         const data = await loadAnalysis(analysisParam)
         const loaded = parseStages(data.analysis.stages)
-
-        // Refreshed a draft link that still needs the local PDFs (no finished
-        // chunk stage, not saved) — the files are gone, so clear and restart.
-        if (isReload && !data.analysis.saved_at && stageStatus(loaded, 'chunk') !== 'completed') {
+        if (
+          isReload &&
+          !data.analysis.saved_at &&
+          stageStatus(loaded, 'chunk') !== 'completed' &&
+          !(data.files?.length ?? 0)
+        ) {
           try {
             localStorage.removeItem(CLASH_GAP_SESSION_STORAGE_KEY)
           } catch {
@@ -727,8 +734,6 @@ export function ClashGapDetectionPage() {
   }, [])
 
   const rasterizeChunkPages = useCallback(async (id: string) => {
-    // Show the progress bar (indeterminate) from the very start, while we
-    // identify each PDF's pages — before the first page render reports numbers.
     setStages((prev) => ({
       ...prev,
       chunk: {
@@ -744,22 +749,38 @@ export function ClashGapDetectionPage() {
       (f) => /\.pdf$/i.test(f.file_name) || (f.mime_type ?? '').toLowerCase().includes('pdf'),
     )
 
-    // Combined progress across every PDF: one bar over the summed page count of
-    // all files, so it advances continuously instead of resetting per file.
     const grandTotal = pdfFiles.reduce((sum, f) => sum + (f.page_count ?? 0), 0)
     let baseProcessed = 0
+    const serverOnly: string[] = []
 
     for (const f of pdfFiles) {
       const blob = fileBlobsRef.current.get(f.id)
-      if (!blob) {
-        throw new Error(
-          `"${f.file_name}" is no longer in this browser session. Re-add it (and keep this tab open) so its pages can be processed.`,
-        )
+      let pageCount = f.page_count ?? null
+      if (pageCount == null && blob) {
+        pageCount = await countPdfPagesClientSide(blob)
+        if (pageCount != null) {
+          void apiFetch(`/api/clash-gap/analyses/${id}/files/${f.id}`, {
+            method: 'PATCH',
+            json: { page_count: pageCount },
+          }).catch(() => {})
+        }
       }
+      if (
+        !shouldClientRasterize({
+          pageCount,
+          hasLocalFile: Boolean(blob),
+        })
+      ) {
+        const reason =
+          pageCount != null && pageCount > clientChunkMaxPages() ? 'large_pdf' : 'no_local_file'
+        serverOnly.push(clientChunkSkipDetail({ fileName: f.file_name, reason, pageCount }))
+        continue
+      }
+
       const result = await rasterizePdfPages({
         analysisId: id,
         fileId: f.id,
-        file: blob,
+        file: blob!,
         fileLabel: f.file_name,
         onProgress: (p) =>
           setStages((prev) => ({
@@ -768,14 +789,32 @@ export function ClashGapDetectionPage() {
               ...(prev.chunk ?? { status: 'running' }),
               status: 'running',
               processed: baseProcessed + p.processed,
-              // Keep the denominator >= processed if a file's page_count was
-              // unknown at upload time (grandTotal would then under-count).
               total: Math.max(grandTotal, baseProcessed + p.total),
               detail: p.pageLabel,
             },
           })),
       })
       baseProcessed += result.pages
+    }
+
+    if (serverOnly.length) {
+      const detailText = serverOnly.join(' · ')
+      setStages((prev) => ({
+        ...prev,
+        chunk: {
+          ...(prev.chunk ?? { status: 'running' }),
+          status: 'running',
+          processed: baseProcessed,
+          total: Math.max(grandTotal, baseProcessed) || undefined,
+          detail: detailText,
+        },
+      }))
+      if (serverOnly.length === pdfFiles.length) {
+        toast.info(
+          `Large or remote PDFs are processed on the server (resumable). Browser limit: ${clientChunkMaxPages()} pages per file.`,
+          { duration: 6000 },
+        )
+      }
     }
   }, [])
 
@@ -1196,7 +1235,7 @@ export function ClashGapDetectionPage() {
     const meta: Record<typeof step, { title: string; description: string; runLabel: string; gateHint: string }> = {
       chunk: {
         title: 'Chunk — split PDFs into page images',
-        description: 'Every PDF page becomes a single image (a 5-page PDF → 5 images). Uploaded images count as one page each.',
+        description: `Every PDF page becomes a single image (a 5-page PDF → 5 images). Uploaded images count as one page each. PDFs over ${clientChunkMaxPages()} pages are processed on the server so you can refresh or close the tab without losing progress.`,
         runLabel: 'chunking',
         gateHint: 'Upload at least one document on the Upload step first.',
       },
