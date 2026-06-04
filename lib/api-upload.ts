@@ -14,7 +14,7 @@ function isImageFile(name: string, mime: string): boolean {
   return mime.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(name)
 }
 
-async function countPdfPagesClientSide(file: File): Promise<number | null> {
+export async function countPdfPagesClientSide(file: File): Promise<number | null> {
   try {
     const { PDFDocument } = await import('pdf-lib')
     const bytes = new Uint8Array(await file.arrayBuffer())
