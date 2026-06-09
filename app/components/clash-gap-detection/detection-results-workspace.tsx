@@ -398,7 +398,52 @@ export function DetectionResultsWorkspace(props: {
                       <p className="mt-1.5 line-clamp-2 text-left text-[13px] leading-relaxed text-[#6b7280]">
                         {issue.summary}
                       </p>
-                      {sheetTags(issue.sources).length > 0 ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                        {issue.issueType ? (
+                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                            {issue.issueType}
+                          </span>
+                        ) : (
+                          issueBadge(issue, true)
+                        )}
+                        {issue.csiDivision ? (
+                          <span className="text-[11px] font-medium text-[#6b7280]">
+                            {issue.csiDivision}
+                          </span>
+                        ) : null}
+                        {issue.evidenceStrength ? (
+                          <span className="text-[11px] text-[#6b7280]">
+                            Evidence: <span className="font-semibold text-[#374151]">{issue.evidenceStrength}</span>
+                          </span>
+                        ) : null}
+                        {issue.contractorImpact ? (
+                          <span className="text-[11px] text-[#6b7280]">
+                            Impact: <span className="font-semibold text-[#374151]">{issue.contractorImpact}</span>
+                          </span>
+                        ) : null}
+                        {issue.isLinkedToExisting ? (
+                          <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-800">
+                            Linked
+                          </span>
+                        ) : null}
+                        {issue.recommendedAction ? (
+                          <span className="rounded-md bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-800">
+                            {issue.recommendedAction}
+                          </span>
+                        ) : null}
+                      </div>
+                      {(issue.keyReferences?.length ?? 0) > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {issue.keyReferences!.map((ref) => (
+                            <span
+                              key={ref}
+                              className="rounded-md bg-[#f3f4f6] px-2 py-0.5 text-[11px] font-medium text-[#4b5563]"
+                            >
+                              {ref}
+                            </span>
+                          ))}
+                        </div>
+                      ) : sheetTags(issue.sources).length > 0 ? (
                         <div className="mt-2.5 flex flex-wrap gap-1.5">
                           {sheetTags(issue.sources).map((t) => (
                             <span
@@ -410,15 +455,6 @@ export function DetectionResultsWorkspace(props: {
                           ))}
                         </div>
                       ) : null}
-                      <div className="mt-3 flex flex-wrap items-center gap-2.5">
-                        {issueBadge(issue, true)}
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[11px] font-medium capitalize text-[#6b7280]">
-                            {issue.severity}
-                          </span>
-                          <SeverityDots level={issue.severity} />
-                        </div>
-                      </div>
                     </div>
                     <div
                       className="flex h-8 w-8 shrink-0 items-center justify-center self-center rounded-lg border border-[#e2e8f0] bg-white text-[#9ca3af] transition-colors group-hover:border-[#cbd5e1] group-hover:text-[#6b7280]"
@@ -513,35 +549,77 @@ export function DetectionResultsWorkspace(props: {
 
               <CardContent className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5">
                 <p className="text-sm leading-relaxed text-[#475569]">{selected.summary}</p>
-                {selected.suggestedAction ? (
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-[#64748b]">
+                  {selected.issueType ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Tag className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+                      Issue type:{' '}
+                      <span className="font-semibold text-[#0f172a]">{selected.issueType}</span>
+                    </span>
+                  ) : null}
+                  {selected.csiDivision ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Hammer className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+                      CSI:{' '}
+                      <span className="font-semibold text-[#0f172a]">{selected.csiDivision}</span>
+                    </span>
+                  ) : null}
+                  {selected.evidenceStrength ? (
+                    <span>
+                      Evidence:{' '}
+                      <span className="font-semibold text-[#0f172a]">{selected.evidenceStrength}</span>
+                    </span>
+                  ) : null}
+                  {selected.contractorImpact ? (
+                    <span>
+                      Impact:{' '}
+                      <span className="font-semibold text-[#0f172a]">{selected.contractorImpact}</span>
+                    </span>
+                  ) : null}
+                  {selected.userDisposition ? (
+                    <span className="font-semibold text-emerald-700">
+                      Disposition: {selected.userDisposition}
+                    </span>
+                  ) : null}
+                  {selected.recommendedAction && !selected.userDisposition ? (
+                    <span className="text-violet-700">
+                      Recommended: {selected.recommendedAction}
+                    </span>
+                  ) : null}
+                </div>
+
+                {selected.matchRationale ? (
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                    <h3 className="text-sm font-semibold text-[#0f172a]">Issue lineage</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-[#475569]">{selected.matchRationale}</p>
+                  </div>
+                ) : null}
+
+                {selected.whyItMatters ? (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <h3 className="text-sm font-semibold text-[#0f172a]">Why it matters</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-[#475569]">{selected.whyItMatters}</p>
+                  </div>
+                ) : null}
+
+                {selected.decisionRationale ? (
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <h3 className="text-sm font-semibold text-[#0f172a]">Decision rationale</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-[#475569]">{selected.decisionRationale}</p>
+                  </div>
+                ) : null}
+
+                {selected.suggestedResolution ? (
+                  <p className="text-sm leading-relaxed text-[#475569]">
+                    <span className="font-semibold text-[#334155]">Suggested resolution: </span>
+                    {selected.suggestedResolution}
+                  </p>
+                ) : selected.suggestedAction ? (
                   <p className="text-sm leading-relaxed text-[#475569]">
                     <span className="font-semibold text-[#334155]">Suggested action: </span>
                     {selected.suggestedAction}
                   </p>
                 ) : null}
-
-                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-[#64748b]">
-                  <span className="inline-flex items-center gap-1.5">
-                    <Hammer className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
-                    Discipline:{' '}
-                    <span className="font-semibold text-[#0f172a]">
-                      {selected.discipline ?? '—'}
-                    </span>
-                  </span>
-                  {selected.category ? (
-                    <span className="inline-flex items-center gap-1.5">
-                      <Tag className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
-                      Category:{' '}
-                      <span className="font-semibold text-[#0f172a]">{selected.category}</span>
-                    </span>
-                  ) : null}
-                  <span className="inline-flex items-center gap-1.5 capitalize">
-                    <ShieldCheck className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
-                    Confidence:{' '}
-                    <span className="font-semibold text-[#0f172a]">{selected.confidence}</span>
-                    <SeverityDots level={selected.severity} />
-                  </span>
-                </div>
 
                 <div>
                   <h3 className="text-sm font-semibold text-[#0f172a]">

@@ -45,6 +45,26 @@ export const updateClashGapAnalysisSchema = z.object({
 
 export const patchClashGapIssueSchema = z.object({
   status: z.enum(['pending', 'reviewed', 'dismissed', 'resolved']).optional(),
+  workflow_status: z
+    .enum([
+      'open',
+      'under_review',
+      'internal_review',
+      'field_verification',
+      'rfi_drafting',
+      'rfi_sent',
+      'waiting_for_response',
+      'resolved',
+      'closed',
+    ])
+    .optional(),
+  user_disposition: z
+    .enum(['External RFI', 'Internal Review', 'Field Verification', 'Dismiss'])
+    .optional()
+    .nullable(),
+  priority: z.enum(['critical', 'high', 'medium', 'low']).optional().nullable(),
+  assigned_to: z.string().uuid().optional().nullable(),
+  due_date: z.string().optional().nullable(),
   resolved_document_id: z.string().uuid().optional().nullable(),
 })
 

@@ -3,7 +3,7 @@ import { writeAuditLog } from '@/lib/server/audit'
 import { downgradeAccountToFree } from '@/lib/server/billing'
 import { getOrCreateMonthlyUsageRow } from '@/lib/server/account-usage'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
-import { getStripeClient } from '@/lib/server/stripe'
+import { getStripeClient, readSubscriptionPeriod } from '@/lib/server/stripe'
 
 export const runtime = 'nodejs'
 
@@ -81,8 +81,9 @@ export async function POST(req: Request) {
       try {
         const subscription = await stripe.subscriptions.retrieve(invoiceSubscription)
         const priceId = subscription.items.data[0]?.price?.id ?? null
+        const { currentPeriodEnd } = readSubscriptionPeriod(subscription)
         return {
-          currentPeriodEnd: toIsoFromUnix(subscription.current_period_end),
+          currentPeriodEnd,
           cancelAt: toIsoFromUnix(subscription.cancel_at),
           subscriptionId: subscription.id,
           priceId,
@@ -124,8 +125,9 @@ export async function POST(req: Request) {
       let priceId: string | null = null
       if (subscriptionId) {
         const subscription = await stripe.subscriptions.retrieve(subscriptionId)
-        currentPeriodEnd = new Date(subscription.current_period_end * 1000).toISOString()
-        currentPeriodStart = new Date(subscription.current_period_start * 1000).toISOString()
+        const period = readSubscriptionPeriod(subscription)
+        currentPeriodEnd = period.currentPeriodEnd
+        currentPeriodStart = period.currentPeriodStart
         priceId = subscription.items.data[0]?.price?.id ?? null
       }
 
@@ -168,12 +170,7 @@ export async function POST(req: Request) {
       const sub = event.data.object as Stripe.Subscription
       const customerId = typeof sub.customer === 'string' ? sub.customer : null
       const priceId = sub.items.data[0]?.price?.id ?? null
-      const currentPeriodEnd = sub.current_period_end
-        ? new Date(sub.current_period_end * 1000).toISOString()
-        : null
-      const currentPeriodStart = sub.current_period_start
-        ? new Date(sub.current_period_start * 1000).toISOString()
-        : null
+      const { currentPeriodEnd, currentPeriodStart } = readSubscriptionPeriod(sub)
       const cancelAt = sub.cancel_at ? new Date(sub.cancel_at * 1000).toISOString() : null
       if (customerId) {
         await updateByCustomer(customerId, {

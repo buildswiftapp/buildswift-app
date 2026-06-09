@@ -18,9 +18,25 @@ export function getPriceIdForTier(tier: PaidBillingTier): string | null {
   return process.env.STRIPE_PRICE_STARTER_MONTHLY || null
 }
 
-export function checkoutLineItemForTier(
-  tier: PaidBillingTier
-): Stripe.Checkout.SessionCreateParams.LineItem {
+export function readSubscriptionPeriod(sub: unknown): {
+  currentPeriodEnd: string | null
+  currentPeriodStart: string | null
+} {
+  const endUnix = (sub as { current_period_end?: number | null }).current_period_end
+  const startUnix = (sub as { current_period_start?: number | null }).current_period_start
+  return {
+    currentPeriodEnd:
+      typeof endUnix === 'number' && Number.isFinite(endUnix)
+        ? new Date(endUnix * 1000).toISOString()
+        : null,
+    currentPeriodStart:
+      typeof startUnix === 'number' && Number.isFinite(startUnix)
+        ? new Date(startUnix * 1000).toISOString()
+        : null,
+  }
+}
+
+export function checkoutLineItemForTier(tier: PaidBillingTier) {
   const priceId = getPriceIdForTier(tier)
   if (priceId) return { price: priceId, quantity: 1 }
 

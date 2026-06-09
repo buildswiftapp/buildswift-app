@@ -1,5 +1,15 @@
+'use client'
+
+import dynamic from 'next/dynamic'
 import { Suspense } from 'react'
-import { ClashGapDetectionPage } from '@/app/components/clash-gap-detection/clash-gap-detection-page'
+
+const ClashGapDetectionPage = dynamic(
+  () =>
+    import('@/app/components/clash-gap-detection/clash-gap-detection-page').then(
+      (m) => m.ClashGapDetectionPage,
+    ),
+  { ssr: false, loading: () => null },
+)
 
 export default function ClashGapDetectionSessionRoutePage() {
   return (

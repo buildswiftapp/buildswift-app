@@ -1,10 +1,22 @@
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const scriptPath = fileURLToPath(import.meta.url)
 const workerSrc = resolve(root, 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs')
 const outFile = resolve(root, 'public/pdf.worker.min.mjs')
+
+if (existsSync(outFile) && existsSync(workerSrc)) {
+  try {
+    const newestSrc = Math.max(statSync(workerSrc).mtimeMs, statSync(scriptPath).mtimeMs)
+    if (statSync(outFile).mtimeMs >= newestSrc) {
+      console.log('[build-pdf-worker] up to date, skipping')
+      process.exit(0)
+    }
+  } catch {
+  }
+}
 
 if (!existsSync(workerSrc)) {
   console.error(`[build-pdf-worker] pdfjs-dist worker not found at ${workerSrc}`)

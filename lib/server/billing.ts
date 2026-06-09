@@ -217,6 +217,7 @@ export async function getAccountBillingState(supabase: SupabaseLike, accountId: 
     return {
       subscriptionTier: 'trial',
       billingStatus: 'canceled',
+      currentPeriodStart: null,
       currentPeriodEnd: null,
       cancelAt: null,
       trialStartDate: state.trialStartDate,

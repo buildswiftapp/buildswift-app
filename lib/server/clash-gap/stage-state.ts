@@ -46,12 +46,18 @@ export async function patchStageState(
 }
 
 export async function markStageRunning(supabase: any, analysisId: string, stage: ClashGapStage) {
+  const stages = await readStages(supabase, analysisId)
+  const current = stages[stage]
+  const keepProgress =
+    current?.status === 'running' &&
+    ((current.processed != null && current.processed > 0) || current.startedAt != null)
+
   return patchStageState(supabase, analysisId, stage, {
     status: 'running',
-    startedAt: new Date().toISOString(),
+    startedAt: keepProgress ? (current?.startedAt ?? new Date().toISOString()) : new Date().toISOString(),
     completedAt: null,
     error: null,
-    processed: 0,
+    ...(keepProgress ? {} : { processed: 0 }),
   })
 }
 

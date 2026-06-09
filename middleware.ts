@@ -15,6 +15,7 @@ function isProtectedPath(pathname: string) {
     pathname.startsWith('/team') ||
     pathname.startsWith('/help') ||
     pathname.startsWith('/change-orders') ||
+    pathname.startsWith('/clash-gap-detection') ||
     pathname.startsWith('/rfis')
   )
 }

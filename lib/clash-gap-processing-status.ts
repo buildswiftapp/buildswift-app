@@ -117,8 +117,8 @@ export function formatProcessingStatusLabel(
         return parts ? `Rendering ${parts}` : 'Rendering PDF pages'
       case 'ocr':
         return parts
-          ? `OpenAI OCR ${parts}`
-          : 'OpenAI OCR (reading text from pages)'
+          ? `Document AI OCR ${parts}`
+          : 'Document AI OCR (reading text from pages)'
       case 'merge':
         return parts ? `Merging text ${parts}` : 'Merging text results'
       case 'classify':

@@ -26,7 +26,29 @@ export interface DocumentUploadRow {
 
 export type IssueType = 'conflict' | 'missing' | 'mismatch'
 
-export type IssueStatus = 'pending' | 'reviewed' | 'dismissed' | 'resolved'
+export const INSIGHT_USER_DISPOSITIONS = [
+  'External RFI',
+  'Internal Review',
+  'Field Verification',
+  'Dismiss',
+] as const
+
+export const INSIGHT_WORKFLOW_STATUSES = [
+  'open',
+  'under_review',
+  'internal_review',
+  'field_verification',
+  'rfi_drafting',
+  'rfi_sent',
+  'waiting_for_response',
+  'resolved',
+  'closed',
+] as const
+
+export type InsightWorkflowStatus = (typeof INSIGHT_WORKFLOW_STATUSES)[number]
+export type InsightUserDisposition = (typeof INSIGHT_USER_DISPOSITIONS)[number]
+
+export type IssueStatus = 'pending' | 'reviewed' | 'dismissed' | 'resolved' | InsightWorkflowStatus
 
 export interface IssueSourceReference {
   documentLabel: string
@@ -40,19 +62,34 @@ export interface ClashGapIssue {
   type: IssueType
   title: string
   summary: string
-  confidence: 'low' | 'medium' | 'high'
-  severity: 'low' | 'medium' | 'high'
+  severity: 'low' | 'medium' | 'high' | 'critical'
   sources: IssueSourceReference[]
   location?: string
   sheetReference?: string
   suggestedAction?: string
-  confidenceScore?: number
   status?: IssueStatus
   resolvedDocumentId?: string
   discipline?: string
   category?: string
   rationale?: string
   relatedIssueIds?: string[]
+  issueType?: string
+  csiDivision?: string
+  evidenceStrength?: 'Strong' | 'Moderate' | 'Weak'
+  contractorImpact?: 'High' | 'Medium' | 'Low'
+  recommendedAction?: 'Internal Review' | 'External RFI' | 'Field Verification' | 'Dismiss'
+  keyReferences?: string[]
+  userDisposition?: InsightUserDisposition
+  workflowStatus?: InsightWorkflowStatus
+  priority?: 'critical' | 'high' | 'medium' | 'low'
+  isLinkedToExisting?: boolean
+  matchRationale?: string
+  whyItMatters?: string
+  suggestedResolution?: string
+  decisionRationale?: string
+  documentSearchResults?: string[]
+  confidence?: 'low' | 'medium' | 'high'
+  confidenceScore?: number
 }
 
 export type DetectionMode = 'gaps' | 'conflicts' | 'both'
@@ -74,6 +111,7 @@ export interface DetectionSettings {
 export interface ClashGapAnalysisSummary {
   total: number
   by_type: { clash: number; gap: number; mismatch: number }
+  by_action?: { internal_review: number; external_rfi: number }
 }
 
 export type DetectionWizardStep = 'upload' | 'chunk' | 'ocr' | 'detection' | 'result'
