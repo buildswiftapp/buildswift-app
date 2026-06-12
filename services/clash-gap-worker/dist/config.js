@@ -11,15 +11,22 @@ export const config = {
     workerSecret: process.env.WORKER_SECRET || '',
     storageBucket: process.env.CLASH_GAP_BUCKET || 'document-attachments',
     supabasePageSize: 1000,
-    chunkDpi: intEnv('CHUNK_DPI', 240, 72),
+    chunkDpi: intEnv('CHUNK_DPI', 300, 72),
     chunkJpegQuality: intEnv('CHUNK_JPEG_QUALITY', 92, 50),
     chunkMaxImageWidth: intEnv('CHUNK_MAX_IMAGE_WIDTH', 4800, 512),
     chunkRenderWorkers: intEnv('CHUNK_RENDER_WORKERS', 3, 1),
     chunkWorkers: intEnv('CHUNK_WORKERS', 6, 1),
-    chunkBatchSize: intEnv('CHUNK_BATCH_SIZE', 5, 1),
+    chunkBatchSize: intEnv('CHUNK_BATCH_SIZE', 1, 1),
+    chunkPageBatchSize: intEnv('CHUNK_PAGE_BATCH_SIZE', 40, 1),
     maxPagesPerFile: intEnv('CLASH_GAP_MAX_PAGES_PER_FILE', 5000, 1),
     ocrWorkers: intEnv('OCR_WORKERS', 4, 1),
+    ocrPageWorkers: intEnv('OCR_PAGE_WORKERS', 6, 1),
+    /** DPI for OCR-only re-renders (higher than chunk preview for readable small text). */
+    ocrDpi: intEnv('OCR_DPI', 400, 72),
+    ocrMaxImageWidth: intEnv('OCR_MAX_IMAGE_WIDTH', 6400, 512),
     ocrEmbeddedMinLen: intEnv('OCR_EMBEDDED_MIN_LEN', 120, 0),
+    /** Default true: CAD/architectural PDFs often have garbled embedded text layers. */
+    ocrForceImage: process.env.OCR_FORCE_IMAGE !== '0' && process.env.OCR_FORCE_IMAGE !== 'false',
     ocrProgressEvery: intEnv('OCR_PROGRESS_EVERY', 5, 1),
     documentAiProjectId: process.env.DOCUMENT_AI_PROJECT_ID?.trim() ||
         process.env.GOOGLE_CLOUD_PROJECT?.trim() ||

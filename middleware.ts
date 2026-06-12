@@ -20,19 +20,27 @@ function isProtectedPath(pathname: string) {
   )
 }
 
+function redirectWithSessionCookies(url: URL, sessionResponse: NextResponse) {
+  const redirectResponse = NextResponse.redirect(url)
+  for (const cookie of sessionResponse.cookies.getAll()) {
+    redirectResponse.cookies.set(cookie)
+  }
+  return redirectResponse
+}
+
 export async function middleware(request: NextRequest) {
-  const { response, session, enabled } = await updateSession(request)
+  const { response, user, enabled } = await updateSession(request)
   if (!enabled) return response
 
   const pathname = request.nextUrl.pathname
   const isAuthPath = AUTH_ROUTES.some((route) => pathname.startsWith(route))
 
-  if (isAuthPath && session) {
-    return NextResponse.redirect(new URL('/dashboard', request.url))
+  if (isAuthPath && user) {
+    return redirectWithSessionCookies(new URL('/dashboard', request.url), response)
   }
 
-  if (isProtectedPath(pathname) && !session) {
-    return NextResponse.redirect(new URL('/login', request.url))
+  if (isProtectedPath(pathname) && !user) {
+    return redirectWithSessionCookies(new URL('/login', request.url), response)
   }
 
   return response

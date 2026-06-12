@@ -24,10 +24,13 @@ export async function openPdfDocument(buffer: Buffer): Promise<PDFDocumentProxy>
   return getDocument({ data: new Uint8Array(buffer), useSystemFonts: true }).promise
 }
 
-function viewportForPage(page: Awaited<ReturnType<PDFDocumentProxy['getPage']>>, dpi: number) {
+function viewportForPage(
+  page: Awaited<ReturnType<PDFDocumentProxy['getPage']>>,
+  dpi: number,
+  maxWidth = config.chunkMaxImageWidth,
+) {
   let scale = dpi / 72
   let viewport = page.getViewport({ scale })
-  const maxWidth = config.chunkMaxImageWidth
   if (viewport.width > maxWidth) {
     scale *= maxWidth / viewport.width
     viewport = page.getViewport({ scale })
@@ -35,8 +38,8 @@ function viewportForPage(page: Awaited<ReturnType<PDFDocumentProxy['getPage']>>,
   return viewport
 }
 
-function canvasToJpeg(canvas: Canvas): Buffer {
-  const quality = Math.min(1, Math.max(0.5, config.chunkJpegQuality / 100))
+function canvasToJpeg(canvas: Canvas, qualityPercent = config.chunkJpegQuality): Buffer {
+  const quality = Math.min(1, Math.max(0.5, qualityPercent / 100))
   return canvas.toBuffer('image/jpeg', quality)
 }
 
@@ -44,15 +47,20 @@ export async function renderPageToJpeg(
   doc: PDFDocumentProxy,
   pageIndex: number,
   dpi: number,
+  options?: { maxWidth?: number; jpegQuality?: number },
 ): Promise<Buffer> {
   const page = await doc.getPage(pageIndex + 1)
-  const viewport = viewportForPage(page, dpi)
-  const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height))
-  const ctx = canvas.getContext('2d')
-  await page.render({
-    canvas: canvas as never,
-    canvasContext: ctx as never,
-    viewport,
-  }).promise
-  return canvasToJpeg(canvas)
+  try {
+    const viewport = viewportForPage(page, dpi, options?.maxWidth)
+    const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height))
+    const ctx = canvas.getContext('2d')
+    await page.render({
+      canvas: canvas as never,
+      canvasContext: ctx as never,
+      viewport,
+    }).promise
+    return canvasToJpeg(canvas, options?.jpegQuality)
+  } finally {
+    await page.cleanup()
+  }
 }

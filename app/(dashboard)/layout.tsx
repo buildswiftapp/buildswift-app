@@ -22,10 +22,10 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       }
 
       const {
-        data: { session },
-      } = await supabase.auth.getSession()
+        data: { user },
+      } = await supabase.auth.getUser()
 
-      if (!session) {
+      if (!user) {
         router.replace('/login')
         return
       }

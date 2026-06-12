@@ -312,7 +312,7 @@ export function ClashGapDetectionPage() {
   )
 
   const pollStage = useCallback(
-    async (id: string, stage: ClashGapStage) => {
+    async (id: string, stage: ClashGapStage, opts?: { requireRunningFirst?: boolean }) => {
       pollingRef.current = true
       const started = Date.now()
       const maxMs = 6 * 60 * 60 * 1000
@@ -321,12 +321,21 @@ export function ClashGapDetectionPage() {
       let resumes = 0
       let lastProgress = -1
       let lastProgressAt = Date.now()
+      let sawRunning = !opts?.requireRunningFirst
       try {
         for (;;) {
           const data = await apiFetch<ApiClashGapAnalysisDetail>(`/api/clash-gap/analyses/${id}`)
           const nextStages = applyAnalysis(data)
           const status = stageStatus(nextStages, stage)
-          if (status === 'completed') return
+          if (status === 'running') sawRunning = true
+          if (status === 'completed') {
+            if (!sawRunning) {
+              if (Date.now() - started > 30_000) return
+              await new Promise((r) => setTimeout(r, 1000))
+              continue
+            }
+            return
+          }
           if (status === 'failed') {
             throw new Error(nextStages[stage]?.error || `${STAGE_RUN_LABEL[stage]} failed`)
           }
@@ -755,7 +764,9 @@ export function ClashGapDetectionPage() {
         }
 
         await apiFetch(`/api/clash-gap/analyses/${id}/stages/${stage}/run`, { method: 'POST' })
-        await pollStage(id, stage)
+        await pollStage(id, stage, {
+          requireRunningFirst: stageStatus(stages, stage) === 'completed',
+        })
         toast.success(`${STAGE_RUN_LABEL[stage][0]!.toUpperCase()}${STAGE_RUN_LABEL[stage].slice(1)} complete.`)
         
         if (stage === 'chunk') setActiveStep('ocr')
@@ -776,6 +787,7 @@ export function ClashGapDetectionPage() {
       settings,
       selectedTrades,
       rows,
+      stages,
     ],
   )
 
@@ -1154,7 +1166,7 @@ export function ClashGapDetectionPage() {
       ocr: {
         title: 'OCR — read text from each image',
         description:
-          'Each page is transcribed with Google Document AI on the worker (embedded PDF text when available), then merged into one text stream per document.',
+          'Each page is transcribed with Google Document AI on the page image (240–300 DPI). Readable embedded PDF text is kept when valid; garbled CAD exports are re-OCR’d from the image.',
         runLabel: 'OCR',
         gateHint: 'Run the Chunk stage first.',
       },

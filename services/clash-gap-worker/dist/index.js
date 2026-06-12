@@ -19,21 +19,25 @@ function enqueueChunkJob(input, log) {
             chunkQueues.delete(key);
     });
 }
-app.get('/health', async () => ({
-    status: 'ok',
-    service: 'clash-gap-worker',
-    ocr: 'document-ai',
-    document_ai: documentAiStatus(),
-}));
+async function healthPayload() {
+    return {
+        status: 'ok',
+        service: 'clash-gap-worker',
+        ocr: 'document-ai',
+        document_ai: documentAiStatus(),
+    };
+}
+app.get('/health', async () => healthPayload());
+app.get('/api/health', async () => healthPayload());
 app.addHook('preHandler', async (req, reply) => {
-    if (req.method === 'GET' && req.url === '/health')
+    if (req.method === 'GET' && (req.url === '/health' || req.url === '/api/health'))
         return;
     const secret = req.headers['x-worker-secret'];
     if (secret !== config.workerSecret) {
         return reply.code(401).send({ error: 'Unauthorized' });
     }
 });
-app.post('/chunk', async (req, reply) => {
+async function handleChunk(req, reply) {
     const body = req.body;
     const { analysis_id, file_id, pdf_storage_path, account_id } = body;
     if (!analysis_id || !file_id || !pdf_storage_path || !account_id) {
@@ -45,21 +49,25 @@ app.post('/chunk', async (req, reply) => {
         pdfStoragePath: pdf_storage_path,
         accountId: account_id,
     };
-    setImmediate(() => enqueueChunkJob(input, req.log));
+    setImmediate(() => enqueueChunkJob(input, app.log));
     return reply.code(202).send({ status: 'accepted', analysis_id });
-});
-app.post('/ocr', async (req, reply) => {
+}
+app.post('/chunk', handleChunk);
+app.post('/api/chunk', handleChunk);
+async function handleOcr(req, reply) {
     const body = req.body;
     const analysis_id = body?.analysis_id;
     if (!analysis_id)
         return reply.code(400).send({ error: 'analysis_id required' });
     setImmediate(() => {
         runOcrJob(analysis_id).catch((e) => {
-            req.log.error({ err: e, analysisId: analysis_id }, 'ocr job failed');
+            app.log.error({ err: e, analysisId: analysis_id }, 'ocr job failed');
         });
     });
     return reply.code(202).send({ status: 'accepted', analysis_id });
-});
+}
+app.post('/ocr', handleOcr);
+app.post('/api/ocr', handleOcr);
 async function main() {
     assertConfig();
     await app.listen({ host: '0.0.0.0', port: config.port });

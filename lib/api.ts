@@ -1,5 +1,11 @@
 import { createSupabaseBrowserClient } from '@/lib/supabase/client'
 
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504])
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export async function apiFetch<T>(
   input: string,
   init?: RequestInit & { json?: Record<string, unknown> }
@@ -20,17 +26,27 @@ export async function apiFetch<T>(
     }
   }
 
-  const res = await fetch(input, {
-    ...init,
-    credentials: 'include',
-    headers,
-    body: init?.json ? JSON.stringify(init.json) : init?.body,
-  })
+  const body = init?.json ? JSON.stringify(init.json) : init?.body
+  const maxAttempts = 3
+  let lastRes: Response | null = null
+  let data: Record<string, unknown> = {}
 
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    const err = new Error(data?.error || `Request failed: ${res.status}`)
-    ;(err as any).status = res.status
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const res = await fetch(input, {
+      ...init,
+      credentials: 'include',
+      headers,
+      body,
+    })
+    lastRes = res
+    data = (await res.json().catch(() => ({}))) as Record<string, unknown>
+    if (res.ok || !RETRYABLE_STATUSES.has(res.status) || attempt >= maxAttempts - 1) break
+    await sleep(400 * (attempt + 1))
+  }
+
+  if (!lastRes?.ok) {
+    const err = new Error((data?.error as string) || `Request failed: ${lastRes?.status}`)
+    ;(err as any).status = lastRes?.status
     ;(err as any).code = data?.code
     throw err
   }

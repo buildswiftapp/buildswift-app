@@ -7,6 +7,7 @@ import { documentAiStatus } from './lib/document-ai.js'
 const app = Fastify({ logger: true })
 
 const chunkQueues = new Map<string, Promise<void>>()
+const ocrQueues = new Map<string, Promise<void>>()
 
 function enqueueChunkJob(input: ChunkJobInput, log: typeof app.log): void {
   const key = input.analysisId
@@ -22,22 +23,27 @@ function enqueueChunkJob(input: ChunkJobInput, log: typeof app.log): void {
   })
 }
 
-app.get('/health', async () => ({
-  status: 'ok',
-  service: 'clash-gap-worker',
-  ocr: 'document-ai',
-  document_ai: documentAiStatus(),
-}))
+async function healthPayload() {
+  return {
+    status: 'ok',
+    service: 'clash-gap-worker',
+    ocr: 'document-ai',
+    document_ai: documentAiStatus(),
+  }
+}
+
+app.get('/health', async () => healthPayload())
+app.get('/api/health', async () => healthPayload())
 
 app.addHook('preHandler', async (req, reply) => {
-  if (req.method === 'GET' && req.url === '/health') return
+  if (req.method === 'GET' && (req.url === '/health' || req.url === '/api/health')) return
   const secret = req.headers['x-worker-secret']
   if (secret !== config.workerSecret) {
     return reply.code(401).send({ error: 'Unauthorized' })
   }
 })
 
-app.post('/chunk', async (req, reply) => {
+async function handleChunk(req: { body: unknown }, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
   const body = req.body as Record<string, string>
   const { analysis_id, file_id, pdf_storage_path, account_id } = body
   if (!analysis_id || !file_id || !pdf_storage_path || !account_id) {
@@ -49,21 +55,36 @@ app.post('/chunk', async (req, reply) => {
     pdfStoragePath: pdf_storage_path,
     accountId: account_id,
   }
-  setImmediate(() => enqueueChunkJob(input, req.log))
+  setImmediate(() => enqueueChunkJob(input, app.log))
   return reply.code(202).send({ status: 'accepted', analysis_id })
-})
+}
 
-app.post('/ocr', async (req, reply) => {
+app.post('/chunk', handleChunk)
+app.post('/api/chunk', handleChunk)
+
+function enqueueOcrJob(analysisId: string, log: typeof app.log): void {
+  const tail = ocrQueues.get(analysisId) ?? Promise.resolve()
+  const job = tail
+    .then(() => runOcrJob(analysisId))
+    .catch((e) => {
+      log.error({ err: e, analysisId }, 'ocr job failed')
+    })
+  ocrQueues.set(analysisId, job)
+  void job.finally(() => {
+    if (ocrQueues.get(analysisId) === job) ocrQueues.delete(analysisId)
+  })
+}
+
+async function handleOcr(req: { body: unknown }, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
   const body = req.body as { analysis_id?: string }
   const analysis_id = body?.analysis_id
   if (!analysis_id) return reply.code(400).send({ error: 'analysis_id required' })
-  setImmediate(() => {
-    runOcrJob(analysis_id).catch((e) => {
-      req.log.error({ err: e, analysisId: analysis_id }, 'ocr job failed')
-    })
-  })
+  setImmediate(() => enqueueOcrJob(analysis_id, app.log))
   return reply.code(202).send({ status: 'accepted', analysis_id })
-})
+}
+
+app.post('/ocr', handleOcr)
+app.post('/api/ocr', handleOcr)
 
 async function main() {
   assertConfig()

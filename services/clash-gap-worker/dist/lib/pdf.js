@@ -14,29 +14,33 @@ if (!mapProto.getOrInsertComputed) {
 export async function openPdfDocument(buffer) {
     return getDocument({ data: new Uint8Array(buffer), useSystemFonts: true }).promise;
 }
-function viewportForPage(page, dpi) {
+function viewportForPage(page, dpi, maxWidth = config.chunkMaxImageWidth) {
     let scale = dpi / 72;
     let viewport = page.getViewport({ scale });
-    const maxWidth = config.chunkMaxImageWidth;
     if (viewport.width > maxWidth) {
         scale *= maxWidth / viewport.width;
         viewport = page.getViewport({ scale });
     }
     return viewport;
 }
-function canvasToJpeg(canvas) {
-    const quality = Math.min(1, Math.max(0.5, config.chunkJpegQuality / 100));
+function canvasToJpeg(canvas, qualityPercent = config.chunkJpegQuality) {
+    const quality = Math.min(1, Math.max(0.5, qualityPercent / 100));
     return canvas.toBuffer('image/jpeg', quality);
 }
-export async function renderPageToJpeg(doc, pageIndex, dpi) {
+export async function renderPageToJpeg(doc, pageIndex, dpi, options) {
     const page = await doc.getPage(pageIndex + 1);
-    const viewport = viewportForPage(page, dpi);
-    const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
-    const ctx = canvas.getContext('2d');
-    await page.render({
-        canvas: canvas,
-        canvasContext: ctx,
-        viewport,
-    }).promise;
-    return canvasToJpeg(canvas);
+    try {
+        const viewport = viewportForPage(page, dpi, options?.maxWidth);
+        const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+        const ctx = canvas.getContext('2d');
+        await page.render({
+            canvas: canvas,
+            canvasContext: ctx,
+            viewport,
+        }).promise;
+        return canvasToJpeg(canvas, options?.jpegQuality);
+    }
+    finally {
+        await page.cleanup();
+    }
 }

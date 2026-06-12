@@ -13,7 +13,6 @@ import {
   markStageCompleted,
   markStageFailed,
   markStageProgress,
-  markStageRunning,
 } from '@/lib/server/clash-gap/stage-state'
 import { runChunkStage, runOcrStage } from '@/lib/server/clash-gap/stages'
 import {
@@ -243,13 +242,6 @@ function batchInsightSheets(sheets: InsightDocumentSheet[]): InsightDocumentShee
 export async function runDetectStage(params: StageParams) {
   const analysis = await getAnalysisForAccount(params.supabase, params.analysisId, params.accountId)
   if (!analysis) throw new Error('Analysis not found')
-
-  await markStageRunning(params.supabase, params.analysisId, 'detect')
-  await updateAnalysisStep(params.supabase, params.analysisId, {
-    status: 'processing',
-    processing_step: 'detect',
-    error_message: null,
-  })
 
   try {
     const settings = parseSettings(analysis.settings)

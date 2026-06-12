@@ -1,4 +1,3 @@
-import { after } from 'next/server'
 import {
   badRequest,
   forbidden,
@@ -9,7 +8,7 @@ import {
 } from '@/lib/server/api-response'
 import { getAuthContext } from '@/lib/server/auth'
 import { assertCanRunClashGapReport, assertCanUseAiAssist } from '@/lib/server/billing'
-import { getAnalysisForAccount } from '@/lib/server/clash-gap/access'
+import { getAnalysisForAccount, updateAnalysisStep } from '@/lib/server/clash-gap/access'
 import { formatClashGapError } from '@/lib/server/clash-gap/errors'
 import { runDetectStage } from '@/lib/server/clash-gap/pipeline'
 import { runChunkStage, runOcrStage } from '@/lib/server/clash-gap/stages'
@@ -39,6 +38,27 @@ function isStageRunDead(_stage: ClashGapStage, updatedAt: string): boolean {
   const t = Date.parse(updatedAt)
   if (!Number.isFinite(t)) return true
   return Date.now() - t > staleMs
+}
+
+function runStageInBackground(
+  job: {
+    supabase: any
+    analysisId: string
+    accountId: string
+    userId: string
+    userEmail: string | null
+  },
+  stageName: ClashGapStage,
+  runner: (job: typeof job) => Promise<unknown>,
+) {
+  void runner(job).catch(async (e) => {
+    const message = formatClashGapError(e)
+    try {
+      await markStageFailed(job.supabase, job.analysisId, stageName, message)
+    } catch (markErr) {
+      console.error('[clash-gap stage] could not record failure', stageName, markErr)
+    }
+  })
 }
 
 export async function POST(req: Request, { params }: Params) {
@@ -101,23 +121,18 @@ export async function POST(req: Request, { params }: Params) {
   const runner = STAGE_RUNNERS[stageName]
 
   try {
-    await markStageRunning(job.supabase, job.analysisId, stageName)
+    await markStageRunning(supabase, id, stageName)
+    await updateAnalysisStep(supabase, id, {
+      status: 'processing',
+      processing_step: stageName === 'detect' ? 'detect' : stageName,
+      error_message: null,
+    })
   } catch (e) {
-    return serverError(formatClashGapError(e))
+    const message = formatClashGapError(e)
+    return serverError(message)
   }
 
-  after(async () => {
-    try {
-      await runner(job)
-    } catch (e) {
-      const message = formatClashGapError(e)
-      try {
-        await markStageFailed(job.supabase, job.analysisId, stageName, message)
-      } catch (markErr) {
-        console.error('[clash-gap stage] could not record failure', stageName, markErr)
-      }
-    }
-  })
+  runStageInBackground(job, stageName, runner)
 
   return ok({ analysisId: id, stage: stageName, status: 'running' })
 }

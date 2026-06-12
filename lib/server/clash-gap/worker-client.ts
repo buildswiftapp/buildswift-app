@@ -59,27 +59,39 @@ function formatWorkerFetchError(error: unknown, path: string): Error {
 }
 
 async function postWorker(path: string, body: Record<string, unknown>): Promise<void> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), WORKER_POST_TIMEOUT_MS)
-  try {
-    const res = await fetch(`${workerUrl()}${path}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Worker-Secret': workerSecret(),
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
-    if (!res.ok) {
+  const paths = path.startsWith('/api/') ? [path] : [path, `/api${path}`]
+  let lastError: Error | null = null
+
+  for (const route of paths) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), WORKER_POST_TIMEOUT_MS)
+    try {
+      const res = await fetch(`${workerUrl()}${route}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Worker-Secret': workerSecret(),
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+      if (res.ok) return
       const text = await res.text().catch(() => '')
-      throw new Error(`Worker ${path} failed (${res.status}): ${text || res.statusText}`)
+      if (res.status === 404 && paths.length > 1 && route === paths[0]) {
+        lastError = new Error(`Worker ${route} failed (${res.status}): ${text || res.statusText}`)
+        continue
+      }
+      throw new Error(`Worker ${route} failed (${res.status}): ${text || res.statusText}`)
+    } catch (error) {
+      lastError = formatWorkerFetchError(error, route)
+      if (paths.length > 1 && route === paths[0]) continue
+      throw lastError
+    } finally {
+      clearTimeout(timer)
     }
-  } catch (error) {
-    throw formatWorkerFetchError(error, path)
-  } finally {
-    clearTimeout(timer)
   }
+
+  throw lastError ?? new Error(`Worker ${path} failed`)
 }
 
 export async function triggerChunkJob(params: {

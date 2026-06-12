@@ -3,7 +3,6 @@ import { updateAnalysisStep } from '@/lib/server/clash-gap/access'
 import {
   markStageCompleted,
   markStageFailed,
-  markStageRunning,
 } from '@/lib/server/clash-gap/stage-state'
 import { isImageUpload } from '@/lib/server/clash-gap/extract-pdf'
 import {
@@ -108,13 +107,6 @@ async function registerImageUploads(supabase: any, files: FileRow[]): Promise<nu
 export async function runChunkStage(params: StageParams) {
   assertWorkerConfigured()
 
-  await markStageRunning(params.supabase, params.analysisId, 'chunk')
-  await updateAnalysisStep(params.supabase, params.analysisId, {
-    status: 'processing',
-    processing_step: 'chunk',
-    error_message: null,
-  })
-
   try {
     const files = await loadFiles(params.supabase, params.analysisId)
     if (!files.length) throw new Error('No files uploaded')
@@ -156,13 +148,6 @@ export async function runChunkStage(params: StageParams) {
 
 export async function runOcrStage(params: StageParams) {
   assertWorkerConfigured()
-
-  await markStageRunning(params.supabase, params.analysisId, 'ocr')
-  await updateAnalysisStep(params.supabase, params.analysisId, {
-    status: 'processing',
-    processing_step: 'ocr',
-    error_message: null,
-  })
 
   try {
     await triggerOcrJob(params.analysisId)

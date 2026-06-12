@@ -1,4 +1,5 @@
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -23,6 +24,44 @@ const REQUIRED_APP_KEYS = [
   'CLASH_GAP_WORKER_SECRET',
   'CLASH_GAP_BUCKET',
 ]
+
+function detectExternalIp() {
+  for (const cmd of [
+    'curl -s --max-time 3 ifconfig.me',
+    'curl -s --max-time 3 icanhazip.com',
+  ]) {
+    try {
+      const ip = execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return ip
+    } catch {
+      // try next provider
+    }
+  }
+  return null
+}
+
+function upsertEnvKey(content, key, value) {
+  const line = `${key}=${value}`
+  const pattern = new RegExp(`^${key}=.*$`, 'm')
+  if (pattern.test(content)) return content.replace(pattern, line)
+  return content.replace(/\s*$/, '') + `\n${line}\n`
+}
+
+function syncDevOriginIp(envPath, ip) {
+  if (!ip || !existsSync(envPath)) return false
+
+  let content = readFileSync(envPath, 'utf8')
+  const appUrl = `http://${ip}`
+  const origins = ip
+
+  const nextAppUrl = upsertEnvKey(content, 'NEXT_PUBLIC_APP_URL', appUrl)
+  const nextOrigins = upsertEnvKey(nextAppUrl, 'ALLOWED_DEV_ORIGINS', origins)
+  if (nextOrigins === content) return false
+
+  writeFileSync(envPath, nextOrigins, 'utf8')
+  console.log(`[ensure-dev-env] Synced dev origin IP in ${envPath.replace(`${root}/`, '')}: ${ip}`)
+  return true
+}
 
 function ensureFile(from, to, label) {
   if (existsSync(to)) return false
@@ -71,6 +110,8 @@ const merged = mergeMissingKeys(
   '.env.local',
 )
 
+const syncedIp = syncDevOriginIp(join(root, '.env.local'), detectExternalIp())
+
 const workerDir = join(root, 'services/clash-gap-worker')
 let workerCreated = false
 if (ensureFile(join(workerDir, '.env.example'), join(workerDir, '.env'), 'services/clash-gap-worker/.env')) {
@@ -78,7 +119,7 @@ if (ensureFile(join(workerDir, '.env.example'), join(workerDir, '.env'), 'servic
   workerCreated = true
 }
 
-if (created.length || merged || workerCreated) {
+if (created.length || merged || syncedIp || workerCreated) {
   console.log('[ensure-dev-env] Restart `npm run dev` after env changes.')
   console.log('[ensure-dev-env] Start worker: npm run dev:worker')
 }

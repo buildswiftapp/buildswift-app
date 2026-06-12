@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node scripts/build-pdf-worker.mjs && node scripts/ensure-dev-env.mjs && node scripts/ensure-dev-cache.mjs && next dev",
+    "dev": "node scripts/build-pdf-worker.mjs && node scripts/ensure-dev-env.mjs && node scripts/ensure-dev-cache.mjs && next dev -H 0.0.0.0",
     "dev:clean": "rm -rf .next && node scripts/build-pdf-worker.mjs && node scripts/ensure-dev-env.mjs && next dev",
     "dev:worker": "node scripts/ensure-dev-env.mjs && npm run dev --prefix services/clash-gap-worker",
     "setup:env": "node scripts/ensure-dev-env.mjs",

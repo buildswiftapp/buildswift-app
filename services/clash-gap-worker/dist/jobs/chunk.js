@@ -148,8 +148,9 @@ export async function runChunkJob(input) {
                 pending.push(i);
         }
         const baseline = await countRenderedPages(analysisId);
-        let progressTotal = Math.max(baseline.total, baseline.processed + pending.length);
+        let progressTotal = Math.max(baseline.total, baseline.processed + pending.length, totalPages);
         let uploadedSinceBaseline = 0;
+        await setProgress(analysisId, 'chunk', baseline.processed, progressTotal, `page ${baseline.processed}/${progressTotal}`);
         const bumpProgress = async (force = false) => {
             if (!force && uploadedSinceBaseline % config.chunkBatchSize !== 0)
                 return;
@@ -158,32 +159,35 @@ export async function runChunkJob(input) {
         await bumpProgress(true);
         const renderLimit = pLimit(config.chunkRenderWorkers);
         const uploadLimit = pLimit(config.chunkWorkers);
-        await Promise.all(pending.map((pageIndex) => renderLimit(async () => {
-            const jpeg = await renderPageToJpeg(doc, pageIndex, config.chunkDpi);
-            return { pageIndex, jpeg };
-        }).then(({ pageIndex, jpeg }) => uploadLimit(async () => {
-            const storagePath = clashGapImagePath({
-                accountId,
-                analysisId,
-                fileId,
-                pageIndex,
-                ext: 'jpg',
-            });
-            const { error: upError } = await sb()
-                .storage.from(config.storageBucket)
-                .upload(storagePath, jpeg, { contentType: 'image/jpeg', upsert: true });
-            if (upError)
-                throw new Error(upError.message);
-            await upsertSheetRow({
-                fileId,
-                pageIndex,
-                imagePath: storagePath,
-                existingId: rowIds.get(pageIndex),
-            });
-            completed.add(pageIndex);
-            uploadedSinceBaseline++;
-            await bumpProgress();
-        }))));
+        for (let batchStart = 0; batchStart < pending.length; batchStart += config.chunkPageBatchSize) {
+            const batch = pending.slice(batchStart, batchStart + config.chunkPageBatchSize);
+            await Promise.all(batch.map((pageIndex) => renderLimit(async () => {
+                const jpeg = await renderPageToJpeg(doc, pageIndex, config.chunkDpi);
+                return { pageIndex, jpeg };
+            }).then(({ pageIndex, jpeg }) => uploadLimit(async () => {
+                const storagePath = clashGapImagePath({
+                    accountId,
+                    analysisId,
+                    fileId,
+                    pageIndex,
+                    ext: 'jpg',
+                });
+                const { error: upError } = await sb()
+                    .storage.from(config.storageBucket)
+                    .upload(storagePath, jpeg, { contentType: 'image/jpeg', upsert: true });
+                if (upError)
+                    throw new Error(upError.message);
+                await upsertSheetRow({
+                    fileId,
+                    pageIndex,
+                    imagePath: storagePath,
+                    existingId: rowIds.get(pageIndex),
+                });
+                completed.add(pageIndex);
+                uploadedSinceBaseline++;
+                await bumpProgress(true);
+            }))));
+        }
         await sb()
             .from('clash_gap_extracted_sheets')
             .delete()
