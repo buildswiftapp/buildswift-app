@@ -84,6 +84,13 @@ export type ApiClashGapAnalysisDetail = {
   issues: ApiClashGapIssue[]
 }
 
+export type ApiClashGapAnalysisStatus = {
+  analysis: Pick<
+    ApiClashGapAnalysis,
+    'id' | 'status' | 'processing_step' | 'error_message' | 'stages'
+  > & { updated_at?: string }
+}
+
 function dbTypeToUi(type: ApiClashGapIssue['type'], issueTypeV2?: string | null): IssueType {
   if (issueTypeV2) {
     const t = issueTypeV2.toLowerCase()

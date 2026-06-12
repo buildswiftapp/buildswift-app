@@ -77,34 +77,49 @@ async function countRenderedPages(analysisId: string): Promise<{ processed: numb
   if (error) throw new Error(error.message)
   if (!files?.length) return { processed: 0, total: 0 }
 
-  let processed = 0
-  let total = 0
-  for (const file of files as Array<{
+  const processable = (files as Array<{
     id: string
     mime_type: string | null
     file_name: string
     page_count: number | null
-  }>) {
+  }>).filter((file) => {
     const mime = (file.mime_type || '').toLowerCase()
     const isImage =
       mime.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(file.file_name)
     const isPdf = mime.includes('pdf') || file.file_name.toLowerCase().endsWith('.pdf')
-    if (!isPdf && !isImage) continue
+    return isPdf || isImage
+  })
 
+  const countsByFile = new Map<string, number>()
+  const fileIds = processable.map((f) => f.id)
+  if (fileIds.length) {
+    const rows = await fetchAllRows<{ analysis_file_id: string }>(async (from, to) =>
+      sb()
+        .from('clash_gap_extracted_sheets')
+        .select('analysis_file_id')
+        .in('analysis_file_id', fileIds)
+        .not('image_path', 'is', null)
+        .range(from, to),
+    )
+    for (const row of rows) {
+      countsByFile.set(row.analysis_file_id, (countsByFile.get(row.analysis_file_id) ?? 0) + 1)
+    }
+  }
+
+  let processed = 0
+  let total = 0
+  for (const file of processable) {
+    const mime = (file.mime_type || '').toLowerCase()
+    const isImage =
+      mime.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(file.file_name)
     const expected = isImage ? 1 : file.page_count ?? 0
     if (expected > 0) total += expected
-
-    const { count } = await sb()
-      .from('clash_gap_extracted_sheets')
-      .select('id', { count: 'exact', head: true })
-      .eq('analysis_file_id', file.id)
-      .not('image_path', 'is', null)
-    processed += count ?? 0
+    processed += countsByFile.get(file.id) ?? 0
   }
   return { processed, total: total || processed }
 }
 
-async function tryCompleteChunkStage(analysisId: string): Promise<void> {
+export async function tryCompleteChunkStage(analysisId: string): Promise<void> {
   const { data: files, error } = await sb()
     .from('clash_gap_analysis_files')
     .select('id, mime_type, file_name, page_count, chunk_status')
@@ -138,17 +153,11 @@ async function tryCompleteChunkStage(analysisId: string): Promise<void> {
 
     const expected = isImage ? 1 : file.page_count ?? 0
     if (!isImage && expected <= 0) return
-
-    const { count } = await sb()
-      .from('clash_gap_extracted_sheets')
-      .select('id', { count: 'exact', head: true })
-      .eq('analysis_file_id', file.id)
-      .not('image_path', 'is', null)
-    const have = count ?? 0
-    if (have < expected) return
   }
 
   const { processed, total } = await countRenderedPages(analysisId)
+  if (processed < total) return
+
   await markStageCompleted(analysisId, 'chunk', {
     processed,
     total: total || processed,
@@ -159,13 +168,7 @@ async function tryCompleteChunkStage(analysisId: string): Promise<void> {
 export async function runChunkJob(input: ChunkJobInput): Promise<void> {
   const { analysisId, fileId, pdfStoragePath, accountId } = input
 
-  await setStage(analysisId, 'chunk', 'running')
   await setFileChunkStatus(fileId, 'running')
-  await updateAnalysisStep(analysisId, {
-    status: 'processing',
-    processing_step: 'chunk',
-    error_message: null,
-  })
 
   try {
     const { data: blob, error: dlError } = await sb()
@@ -203,7 +206,7 @@ export async function runChunkJob(input: ChunkJobInput): Promise<void> {
     )
 
     const bumpProgress = async (force = false) => {
-      if (!force && uploadedSinceBaseline % config.chunkBatchSize !== 0) return
+      if (!force && uploadedSinceBaseline % config.chunkProgressEvery !== 0) return
       await setProgress(
         analysisId,
         'chunk',
@@ -247,7 +250,7 @@ export async function runChunkJob(input: ChunkJobInput): Promise<void> {
               })
               completed.add(pageIndex)
               uploadedSinceBaseline++
-              await bumpProgress(true)
+              await bumpProgress()
             }),
           ),
         ),

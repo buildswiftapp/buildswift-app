@@ -35,7 +35,6 @@ export async function updateSession(request: NextRequest) {
     } = await supabase.auth.getUser()
     return { response, user, enabled: true as const }
   } catch {
-    // Supabase can be briefly unreachable during long worker jobs; don't break polling/API.
     return { response, user: null, enabled: false as const }
   }
 }

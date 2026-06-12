@@ -1,9 +1,3 @@
-/**
- * Detects garbled embedded PDF text (common on CAD/architectural exports with
- * missing ToUnicode maps). Such text looks long enough to pass a min-length
- * check but reads as nonsense, e.g. "6+(|7-7,7(|-(821'5))225".
- */
-
 function letterRatio(text: string): number {
   const letters = text.match(/[a-zA-Z]/g)?.length ?? 0
   return letters / Math.max(1, text.length)
@@ -41,7 +35,6 @@ function looksLikeGarbledCadText(text: string): boolean {
   const punctHeavy = tokens.filter((t) => /[+()[\]{}|\\/<>@#$%^&*=~`'"!?:;]{1,}/.test(t)).length
   if (punctHeavy >= 2 && punctHeavy / Math.max(1, tokens.length) > 0.12) return true
 
-  // CAD exports often interleave digits and symbols with almost no real words.
   if (trimmed.length > 50 && wordLikeTokenCount(trimmed) < 6 && specialCharRatio(trimmed) > 0.05) {
     return true
   }

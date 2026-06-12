@@ -1,5 +1,3 @@
-/** HTTP client for the clash-gap worker (local dev or Cloud Run). Chunk + Document AI OCR. */
-
 const LOCAL_WORKER_URL = 'http://localhost:8080'
 const WORKER_POST_TIMEOUT_MS = 30_000
 
@@ -94,6 +92,16 @@ async function postWorker(path: string, body: Record<string, unknown>): Promise<
   throw lastError ?? new Error(`Worker ${path} failed`)
 }
 
+export async function triggerChunkStage(params: {
+  analysisId: string
+  accountId: string
+}): Promise<void> {
+  await postWorker('/chunk-stage', {
+    analysis_id: params.analysisId,
+    account_id: params.accountId,
+  })
+}
+
 export async function triggerChunkJob(params: {
   analysisId: string
   fileId: string
@@ -110,54 +118,4 @@ export async function triggerChunkJob(params: {
 
 export async function triggerOcrJob(analysisId: string): Promise<void> {
   await postWorker('/ocr', { analysis_id: analysisId })
-}
-
-export async function triggerChunkStageForAnalysis(params: {
-  analysisId: string
-  accountId: string
-  supabase: any
-}): Promise<{ delegated: boolean; pdfJobs: number }> {
-  const { data: files, error } = await params.supabase
-    .from('clash_gap_analysis_files')
-    .select('id, storage_path, file_name, mime_type, page_count')
-    .eq('analysis_id', params.analysisId)
-    .order('created_at', { ascending: true })
-  if (error) throw new Error(error.message)
-  if (!files?.length) throw new Error('No files uploaded')
-
-  const pdfJobs: Array<{ fileId: string; path: string }> = []
-  for (const file of files as Array<{
-    id: string
-    storage_path: string
-    file_name: string
-    mime_type: string | null
-  }>) {
-    const mime = (file.mime_type || '').toLowerCase()
-    const isPdf = mime.includes('pdf') || file.file_name.toLowerCase().endsWith('.pdf')
-    if (!isPdf) continue
-
-    const { count } = await params.supabase
-      .from('clash_gap_extracted_sheets')
-      .select('id', { count: 'exact', head: true })
-      .eq('analysis_file_id', file.id)
-      .not('image_path', 'is', null)
-    const expected = (file as { page_count?: number | null }).page_count ?? 0
-    if (expected > 0 && (count ?? 0) >= expected) continue
-
-    pdfJobs.push({ fileId: file.id, path: file.storage_path })
-  }
-
-  if (!pdfJobs.length) return { delegated: false, pdfJobs: 0 }
-
-  await Promise.all(
-    pdfJobs.map((job) =>
-      triggerChunkJob({
-        analysisId: params.analysisId,
-        fileId: job.fileId,
-        pdfStoragePath: job.path,
-        accountId: params.accountId,
-      }),
-    ),
-  )
-  return { delegated: true, pdfJobs: pdfJobs.length }
 }

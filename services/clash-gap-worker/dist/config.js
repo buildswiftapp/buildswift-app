@@ -21,11 +21,9 @@ export const config = {
     maxPagesPerFile: intEnv('CLASH_GAP_MAX_PAGES_PER_FILE', 5000, 1),
     ocrWorkers: intEnv('OCR_WORKERS', 4, 1),
     ocrPageWorkers: intEnv('OCR_PAGE_WORKERS', 6, 1),
-    /** DPI for OCR-only re-renders (higher than chunk preview for readable small text). */
     ocrDpi: intEnv('OCR_DPI', 400, 72),
     ocrMaxImageWidth: intEnv('OCR_MAX_IMAGE_WIDTH', 6400, 512),
     ocrEmbeddedMinLen: intEnv('OCR_EMBEDDED_MIN_LEN', 120, 0),
-    /** Default true: CAD/architectural PDFs often have garbled embedded text layers. */
     ocrForceImage: process.env.OCR_FORCE_IMAGE !== '0' && process.env.OCR_FORCE_IMAGE !== 'false',
     ocrProgressEvery: intEnv('OCR_PROGRESS_EVERY', 5, 1),
     documentAiProjectId: process.env.DOCUMENT_AI_PROJECT_ID?.trim() ||

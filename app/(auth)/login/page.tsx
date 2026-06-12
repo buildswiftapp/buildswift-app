@@ -68,7 +68,6 @@ export default function LoginPage() {
       return
     }
 
-    // Full navigation ensures middleware receives the auth cookies set by the server route.
     window.location.assign('/dashboard')
   }
 

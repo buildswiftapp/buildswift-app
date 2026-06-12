@@ -7,6 +7,7 @@ import { downloadAndSaveBlob, uploadClashGapFile } from '@/lib/api-upload'
 import {
   mapApiIssueToClashGapIssue,
   type ApiClashGapAnalysisDetail,
+  type ApiClashGapAnalysisStatus,
   type ClashGapSessionMeta,
 } from '@/lib/clash-gap-api'
 
@@ -284,6 +285,12 @@ export function ClashGapDetectionPage() {
     analysisIdRef.current = analysisId
   }, [analysisId])
 
+  const applyStagePoll = useCallback((data: ApiClashGapAnalysisStatus) => {
+    const nextStages = parseStages(data.analysis.stages)
+    setStages(nextStages)
+    return nextStages
+  }, [])
+
   const applyAnalysis = useCallback((data: ApiClashGapAnalysisDetail) => {
     const nextStages = parseStages(data.analysis.stages)
     setStages(nextStages)
@@ -324,16 +331,22 @@ export function ClashGapDetectionPage() {
       let sawRunning = !opts?.requireRunningFirst
       try {
         for (;;) {
-          const data = await apiFetch<ApiClashGapAnalysisDetail>(`/api/clash-gap/analyses/${id}`)
-          const nextStages = applyAnalysis(data)
+          const data = await apiFetch<ApiClashGapAnalysisStatus>(
+            `/api/clash-gap/analyses/${id}/status`,
+          )
+          const nextStages = applyStagePoll(data)
           const status = stageStatus(nextStages, stage)
           if (status === 'running') sawRunning = true
           if (status === 'completed') {
             if (!sawRunning) {
-              if (Date.now() - started > 30_000) return
+              if (Date.now() - started > 30_000) {
+                await loadAnalysis(id)
+                return
+              }
               await new Promise((r) => setTimeout(r, 1000))
               continue
             }
+            await loadAnalysis(id)
             return
           }
           if (status === 'failed') {
@@ -360,13 +373,13 @@ export function ClashGapDetectionPage() {
             }
             lastProgressAt = Date.now()
           }
-          await new Promise((r) => setTimeout(r, 2500))
+          await new Promise((r) => setTimeout(r, 3000))
         }
       } finally {
         pollingRef.current = false
       }
     },
-    [applyAnalysis],
+    [applyStagePoll, loadAnalysis],
   )
 
   useEffect(() => {

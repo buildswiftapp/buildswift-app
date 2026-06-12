@@ -1,25 +1,45 @@
 import Fastify from 'fastify'
+import pLimit from 'p-limit'
 import { assertConfig, config } from './config.js'
 import { runChunkJob, type ChunkJobInput } from './jobs/chunk.js'
+import { runChunkStageForAnalysis } from './jobs/chunk-stage.js'
 import { runOcrJob } from './jobs/ocr.js'
 import { documentAiStatus } from './lib/document-ai.js'
 
 const app = Fastify({ logger: true })
 
-const chunkQueues = new Map<string, Promise<void>>()
+const chunkFileLimits = new Map<string, ReturnType<typeof pLimit>>()
+const chunkStageQueues = new Map<string, Promise<void>>()
 const ocrQueues = new Map<string, Promise<void>>()
 
+function chunkLimitForAnalysis(analysisId: string) {
+  let limit = chunkFileLimits.get(analysisId)
+  if (!limit) {
+    limit = pLimit(config.chunkFileWorkers)
+    chunkFileLimits.set(analysisId, limit)
+  }
+  return limit
+}
+
 function enqueueChunkJob(input: ChunkJobInput, log: typeof app.log): void {
-  const key = input.analysisId
-  const tail = chunkQueues.get(key) ?? Promise.resolve()
-  const job = tail
-    .then(() => runChunkJob(input))
-    .catch((e) => {
+  void chunkLimitForAnalysis(input.analysisId)(() =>
+    runChunkJob(input).catch((e) => {
       log.error({ err: e, analysisId: input.analysisId, fileId: input.fileId }, 'chunk job failed')
+    }),
+  )
+}
+
+function enqueueChunkStage(params: { analysisId: string; accountId: string }, log: typeof app.log): void {
+  const key = params.analysisId
+  const tail = chunkStageQueues.get(key) ?? Promise.resolve()
+  const job = tail
+    .then(() => runChunkStageForAnalysis(params))
+    .catch((e) => {
+      log.error({ err: e, analysisId: params.analysisId }, 'chunk stage failed')
     })
-  chunkQueues.set(key, job)
+  chunkStageQueues.set(key, job)
   void job.finally(() => {
-    if (chunkQueues.get(key) === job) chunkQueues.delete(key)
+    if (chunkStageQueues.get(key) === job) chunkStageQueues.delete(key)
   })
 }
 
@@ -61,6 +81,23 @@ async function handleChunk(req: { body: unknown }, reply: { code: (n: number) =>
 
 app.post('/chunk', handleChunk)
 app.post('/api/chunk', handleChunk)
+
+async function handleChunkStage(
+  req: { body: unknown },
+  reply: { code: (n: number) => { send: (b: unknown) => unknown } },
+) {
+  const body = req.body as { analysis_id?: string; account_id?: string }
+  const analysis_id = body?.analysis_id
+  const account_id = body?.account_id
+  if (!analysis_id || !account_id) {
+    return reply.code(400).send({ error: 'analysis_id and account_id required' })
+  }
+  setImmediate(() => enqueueChunkStage({ analysisId: analysis_id, accountId: account_id }, app.log))
+  return reply.code(202).send({ status: 'accepted', analysis_id })
+}
+
+app.post('/chunk-stage', handleChunkStage)
+app.post('/api/chunk-stage', handleChunkStage)
 
 function enqueueOcrJob(analysisId: string, log: typeof app.log): void {
   const tail = ocrQueues.get(analysisId) ?? Promise.resolve()

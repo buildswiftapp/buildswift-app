@@ -2,8 +2,36 @@ import { createSupabaseBrowserClient } from '@/lib/supabase/client'
 
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504])
 
+let cachedAccessToken: string | null = null
+let cachedAccessTokenExpiresAt = 0
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function resolveAccessToken(): Promise<string | null> {
+  const now = Date.now()
+  if (cachedAccessToken && cachedAccessTokenExpiresAt > now + 5_000) {
+    return cachedAccessToken
+  }
+
+  const supabase = createSupabaseBrowserClient()
+  if (!supabase) return null
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  const token = session?.access_token ?? null
+  cachedAccessToken = token
+  cachedAccessTokenExpiresAt = session?.expires_at
+    ? session.expires_at * 1000
+    : now + 60_000
+  return token
+}
+
+export function clearApiAuthCache() {
+  cachedAccessToken = null
+  cachedAccessTokenExpiresAt = 0
 }
 
 export async function apiFetch<T>(
@@ -15,15 +43,9 @@ export async function apiFetch<T>(
     headers.set('Content-Type', 'application/json')
   }
 
-  const supabase = createSupabaseBrowserClient()
-  if (supabase) {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    const token = session?.access_token
-    if (token) {
-      headers.set('Authorization', `Bearer ${token}`)
-    }
+  const token = await resolveAccessToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
   }
 
   const body = init?.json ? JSON.stringify(init.json) : init?.body

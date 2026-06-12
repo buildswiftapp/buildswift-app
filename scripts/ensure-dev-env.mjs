@@ -34,7 +34,6 @@ function detectExternalIp() {
       const ip = execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
       if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return ip
     } catch {
-      // try next provider
     }
   }
   return null
