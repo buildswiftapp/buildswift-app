@@ -1,10 +1,15 @@
 import pLimit from 'p-limit'
 import { config } from '../config.js'
-import { processImageWithDocumentAi } from '../lib/document-ai.js'
+import { processImageWithDocumentAi, processPdfWithDocumentAi } from '../lib/document-ai.js'
 import { extractEmbeddedTextFromPage } from '../lib/embedded-text.js'
 import { renderPageToJpeg } from '../lib/pdf.js'
 import { PdfCache } from '../lib/pdf-cache.js'
-import { isUsableEmbeddedText, pickBestPageText } from '../lib/text-quality.js'
+import {
+  isUsableEmbeddedText,
+  needsHighDpiImageOcr,
+  pickBestPageTexts,
+  textQualityScore,
+} from '../lib/text-quality.js'
 import { markStageCompleted, setProgress, setStage, updateAnalysisStep } from '../lib/stages.js'
 import { fetchAllRows } from '../lib/storage.js'
 import { sb } from '../supabase.js'
@@ -155,7 +160,7 @@ async function ocrPageImage(
     const { doc } = await pdfCache.get(file.id, file.storage_path)
     buffer = await renderPageToJpeg(doc, sheet.page_index, config.ocrDpi, {
       maxWidth: config.ocrMaxImageWidth,
-      jpegQuality: Math.max(config.chunkJpegQuality, 95),
+      jpegQuality: 98,
     })
     mime = 'image/jpeg'
   } else {
@@ -172,39 +177,38 @@ async function ocrPdfFile(
   pdfCache: PdfCache,
 ): Promise<Map<string, string>> {
   const results = new Map<string, string>()
-  const { doc } = await pdfCache.get(file.id, file.storage_path)
+  const { doc, buffer } = await pdfCache.get(file.id, file.storage_path)
 
-  const embeddedByPage = new Map<number, Awaited<ReturnType<typeof extractEmbeddedTextFromPage>>>()
-  for (const sheet of sheets) {
-    embeddedByPage.set(sheet.page_index, await extractEmbeddedTextFromPage(doc, sheet.page_index))
+  let batchPageTexts = new Map<number, string>()
+  try {
+    batchPageTexts = await processPdfWithDocumentAi(buffer)
+  } catch (e) {
+    console.warn('[clash-gap ocr] batch Document AI failed for file', file.id, e)
   }
-
-  const needsImageOcr: SheetTodo[] = []
-  for (const sheet of sheets) {
-    const embedded = embeddedByPage.get(sheet.page_index)!
-    const embeddedText = embedded.fullText.trim()
-    if (
-      !config.ocrForceImage &&
-      embeddedText.length >= config.ocrEmbeddedMinLen &&
-      isUsableEmbeddedText(embeddedText)
-    ) {
-      results.set(sheet.id, normalizeWhitespace(embeddedText))
-    } else {
-      needsImageOcr.push(sheet)
-    }
-  }
-
-  if (!needsImageOcr.length) return results
 
   const pageLimit = pLimit(config.ocrPageWorkers)
   await Promise.all(
-    needsImageOcr.map((sheet) =>
+    sheets.map((sheet) =>
       pageLimit(async () => {
-        const embeddedText = embeddedByPage.get(sheet.page_index)!.fullText
-        const imageText = await ocrPageImage(sheet, file, pdfCache)
+        const embedded = await extractEmbeddedTextFromPage(doc, sheet.page_index)
+        const embeddedText = embedded.fullText.trim()
+        const docAiText = normalizeWhitespace(batchPageTexts.get(sheet.page_index) ?? '')
+
+        let imageText = ''
+        const runImageOcr =
+          needsHighDpiImageOcr(docAiText, embeddedText) ||
+          (config.ocrForceImage && textQualityScore(docAiText) < 0.45)
+        if (runImageOcr) {
+          try {
+            imageText = await ocrPageImage(sheet, file, pdfCache)
+          } catch (e) {
+            console.warn('[clash-gap ocr] high-DPI page OCR failed', sheet.id, e)
+          }
+        }
+
         results.set(
           sheet.id,
-          normalizeWhitespace(pickBestPageText(embeddedText, imageText)),
+          normalizeWhitespace(pickBestPageTexts(embeddedText, docAiText, imageText)),
         )
       }),
     ),
@@ -281,6 +285,24 @@ export async function runOcrJob(analysisId: string): Promise<void> {
             failedPages += sheets.length
             const message = e instanceof Error ? e.message : String(e)
             console.error('[clash-gap ocr] file failed', fileId, message)
+            if (file && isPdfFile(file)) {
+              try {
+                const { doc } = await pdfCache.get(file.id, file.storage_path)
+                for (const sheet of sheets) {
+                  const embedded = await extractEmbeddedTextFromPage(doc, sheet.page_index)
+                  const fallback = isUsableEmbeddedText(embedded.fullText)
+                    ? normalizeWhitespace(embedded.fullText)
+                    : ''
+                  await sb()
+                    .from('clash_gap_extracted_sheets')
+                    .update({ ocr_text: fallback })
+                    .eq('id', sheet.id)
+                }
+                continue
+              } catch {
+                // fall through to empty
+              }
+            }
             for (const sheet of sheets) {
               await sb()
                 .from('clash_gap_extracted_sheets')

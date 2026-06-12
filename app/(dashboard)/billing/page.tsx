@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, type ElementType } from 'react'
+import { useEffect, useMemo, useState, Suspense, type ElementType } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { BrickWall, Check, FileDown, FolderKanban, HardDrive, Shield, Sparkles, Sprout, Star } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
@@ -41,7 +41,7 @@ const TIER_ICONS: Record<'trial' | 'starter' | 'professional' | 'business', Elem
   business: Shield,
 }
 
-export default function BillingPage() {
+function BillingPageContent() {
   const searchParams = useSearchParams()
   const [summary, setSummary] = useState<BillingSummary | null>(null)
   const [loadingSummary, setLoadingSummary] = useState(true)
@@ -583,5 +583,13 @@ export default function BillingPage() {
 
       </div>
     </div>
+  )
+}
+
+export default function BillingPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-muted-foreground">Loading billing…</div>}>
+      <BillingPageContent />
+    </Suspense>
   )
 }

@@ -12,6 +12,7 @@ type Paragraph = { layout?: Layout | null }
 type Page = {
   blocks?: Block[] | null
   paragraphs?: Paragraph[] | null
+  lines?: { layout?: Layout | null }[] | null
   tables?: Table[] | null
 }
 type Document = {
@@ -78,10 +79,25 @@ function extractPageText(document: Document, pageIndex: number): string {
     }
   }
 
+  if (!parts.length) {
+    for (const line of page.lines ?? []) {
+      const text = textFromAnchor(fullText, line.layout?.textAnchor).trim()
+      if (text) parts.push(text)
+    }
+  }
+
   const tables = extractTablesFromPage(fullText, page)
   if (tables) parts.push(tables)
 
-  return parts.join('\n\n').trim()
+  const joined = parts.join('\n\n').trim()
+  if (joined) return joined
+
+  // Single-page image OCR sometimes only populates document.text
+  if ((document.pages?.length ?? 0) <= 1 && fullText.trim()) {
+    return fullText.trim()
+  }
+
+  return ''
 }
 
 function pageTextsFromDocument(document: Document): Map<number, string> {
