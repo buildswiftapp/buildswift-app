@@ -1,15 +1,19 @@
 import pLimit from 'p-limit'
 import { config } from '../config.js'
-import { processImageWithDocumentAi, processPdfWithDocumentAi } from '../lib/document-ai.js'
 import { extractEmbeddedTextFromPage } from '../lib/embedded-text.js'
+import { ocrImageWithVisionTiles } from '../lib/image-tiles.js'
+import {
+  minTextLengthForKind,
+  normalizeFileRole,
+  ocrDpiForKind,
+  resolvePageKind,
+  shouldRunTiledEscalation,
+  type PageKind,
+} from '../lib/page-router.js'
 import { renderPageToJpeg } from '../lib/pdf.js'
 import { PdfCache } from '../lib/pdf-cache.js'
-import {
-  isUsableEmbeddedText,
-  needsHighDpiImageOcr,
-  pickBestPageTexts,
-  textQualityScore,
-} from '../lib/text-quality.js'
+import { mergePageTexts, ocrQualityPasses, isUsableEmbeddedText } from '../lib/text-quality.js'
+import { ocrImageWithVision } from '../lib/vision-ocr.js'
 import { markStageCompleted, setProgress, setStage, updateAnalysisStep } from '../lib/stages.js'
 import { fetchAllRows } from '../lib/storage.js'
 import { sb } from '../supabase.js'
@@ -26,6 +30,7 @@ type FileRow = {
   storage_path: string
   file_name: string
   mime_type: string | null
+  file_role: string
 }
 
 function normalizeWhitespace(text: string): string {
@@ -35,13 +40,6 @@ function normalizeWhitespace(text: string): string {
 function isPdfFile(file: { mime_type: string | null; file_name: string }): boolean {
   const mime = (file.mime_type || '').toLowerCase()
   return mime.includes('pdf') || file.file_name.toLowerCase().endsWith('.pdf')
-}
-
-function imageMimeType(fileName: string, buffer: Buffer): string {
-  if (buffer[0] === 0xff && buffer[1] === 0xd8) return 'image/jpeg'
-  if (buffer[0] === 0x89 && buffer[1] === 0x50) return 'image/png'
-  if (/\.jpe?g$/i.test(fileName)) return 'image/jpeg'
-  return 'image/png'
 }
 
 function groupByFile(todo: SheetTodo[]): Map<string, SheetTodo[]> {
@@ -57,7 +55,7 @@ function groupByFile(todo: SheetTodo[]): Map<string, SheetTodo[]> {
 async function loadFiles(analysisId: string): Promise<Map<string, FileRow>> {
   const { data, error } = await sb()
     .from('clash_gap_analysis_files')
-    .select('id, storage_path, file_name, mime_type')
+    .select('id, storage_path, file_name, mime_type, file_role')
     .eq('analysis_id', analysisId)
     .order('created_at', { ascending: true })
   if (error) throw new Error(error.message)
@@ -148,27 +146,77 @@ async function downloadFromStorage(path: string): Promise<Buffer> {
   return Buffer.from(await blob.arrayBuffer())
 }
 
-async function ocrPageImage(
+async function loadPageImage(
   sheet: SheetTodo,
   file: FileRow | undefined,
-  pdfCache?: PdfCache,
-): Promise<string> {
-  let buffer: Buffer
-  let mime: string
-
+  pdfCache: PdfCache | undefined,
+  dpi: number,
+): Promise<Buffer> {
   if (pdfCache && file && isPdfFile(file)) {
-    const { doc } = await pdfCache.get(file.id, file.storage_path)
-    buffer = await renderPageToJpeg(doc, sheet.page_index, config.ocrDpi, {
-      maxWidth: config.ocrMaxImageWidth,
-      jpegQuality: 98,
-    })
-    mime = 'image/jpeg'
-  } else {
-    buffer = await downloadFromStorage(sheet.image_path)
-    mime = imageMimeType(file?.file_name ?? sheet.image_path, buffer)
+    try {
+      const { doc } = await pdfCache.get(file.id, file.storage_path)
+      return await renderPageToJpeg(doc, sheet.page_index, dpi, {
+        maxWidth: config.ocrMaxImageWidth,
+        jpegQuality: 98,
+      })
+    } catch (e) {
+      console.warn('[clash-gap ocr] render failed, using chunk image', sheet.id, e)
+    }
+  }
+  return downloadFromStorage(sheet.image_path)
+}
+
+async function runVisionOnPage(
+  sheet: SheetTodo,
+  file: FileRow | undefined,
+  pdfCache: PdfCache | undefined,
+  kind: PageKind,
+): Promise<string> {
+  const dpi = ocrDpiForKind(kind)
+  const buffer = await loadPageImage(sheet, file, pdfCache, dpi)
+  return normalizeWhitespace(await ocrImageWithVision(buffer))
+}
+
+async function ocrPage(params: {
+  sheet: SheetTodo
+  file: FileRow
+  pdfCache?: PdfCache
+  embeddedText: string
+}): Promise<string> {
+  const { sheet, file, pdfCache, embeddedText } = params
+  const fileRole = normalizeFileRole(file.file_role)
+  const kind = resolvePageKind(fileRole, embeddedText)
+  const minLen = minTextLengthForKind(kind)
+
+  if (kind === 'TEXT') {
+    return normalizeWhitespace(embeddedText)
   }
 
-  return normalizeWhitespace(await processImageWithDocumentAi(buffer, mime))
+  let merged = normalizeWhitespace(embeddedText)
+
+  try {
+    const visionText = await runVisionOnPage(sheet, file, pdfCache, kind)
+    merged = normalizeWhitespace(mergePageTexts(merged, visionText))
+  } catch (e) {
+    console.warn('[clash-gap ocr] Vision OCR failed', sheet.id, kind, e)
+  }
+
+  if (!ocrQualityPasses(merged, minLen) && shouldRunTiledEscalation(kind)) {
+    try {
+      const dpi = ocrDpiForKind(kind)
+      const buffer = await loadPageImage(sheet, file, pdfCache, dpi)
+      const tiled = normalizeWhitespace(
+        await ocrImageWithVisionTiles(buffer, config.ocrTileWorkers),
+      )
+      if (tiled) merged = normalizeWhitespace(mergePageTexts(merged, tiled))
+    } catch (e) {
+      console.warn('[clash-gap ocr] tiled Vision OCR failed', sheet.id, e)
+    }
+  }
+
+  if (merged) return merged
+  if (isUsableEmbeddedText(embeddedText)) return normalizeWhitespace(embeddedText)
+  return ''
 }
 
 async function ocrPdfFile(
@@ -177,38 +225,21 @@ async function ocrPdfFile(
   pdfCache: PdfCache,
 ): Promise<Map<string, string>> {
   const results = new Map<string, string>()
-  const { doc, buffer } = await pdfCache.get(file.id, file.storage_path)
-
-  let batchPageTexts = new Map<number, string>()
-  try {
-    batchPageTexts = await processPdfWithDocumentAi(buffer)
-  } catch (e) {
-    console.warn('[clash-gap ocr] batch Document AI failed for file', file.id, e)
-  }
+  const { doc } = await pdfCache.get(file.id, file.storage_path)
 
   const pageLimit = pLimit(config.ocrPageWorkers)
   await Promise.all(
     sheets.map((sheet) =>
       pageLimit(async () => {
         const embedded = await extractEmbeddedTextFromPage(doc, sheet.page_index)
-        const embeddedText = embedded.fullText.trim()
-        const docAiText = normalizeWhitespace(batchPageTexts.get(sheet.page_index) ?? '')
-
-        let imageText = ''
-        const runImageOcr =
-          needsHighDpiImageOcr(docAiText, embeddedText) ||
-          (config.ocrForceImage && textQualityScore(docAiText) < 0.45)
-        if (runImageOcr) {
-          try {
-            imageText = await ocrPageImage(sheet, file, pdfCache)
-          } catch (e) {
-            console.warn('[clash-gap ocr] high-DPI page OCR failed', sheet.id, e)
-          }
-        }
-
         results.set(
           sheet.id,
-          normalizeWhitespace(pickBestPageTexts(embeddedText, docAiText, imageText)),
+          await ocrPage({
+            sheet,
+            file,
+            pdfCache,
+            embeddedText: embedded.fullText.trim(),
+          }),
         )
       }),
     ),
@@ -219,7 +250,7 @@ async function ocrPdfFile(
 
 async function ocrImageSheets(
   sheets: SheetTodo[],
-  file?: FileRow,
+  file: FileRow,
   pdfCache?: PdfCache,
 ): Promise<Map<string, string>> {
   const results = new Map<string, string>()
@@ -227,8 +258,15 @@ async function ocrImageSheets(
   await Promise.all(
     sheets.map((sheet) =>
       pageLimit(async () => {
-        const text = await ocrPageImage(sheet, file, pdfCache)
-        results.set(sheet.id, text)
+        results.set(
+          sheet.id,
+          await ocrPage({
+            sheet,
+            file,
+            pdfCache,
+            embeddedText: '',
+          }),
+        )
       }),
     ),
   )
@@ -268,9 +306,14 @@ export async function runOcrJob(analysisId: string): Promise<void> {
       [...groupByFile(todo).entries()].map(([fileId, sheets]) =>
         limit(async () => {
           const file = files.get(fileId)
+          if (!file) {
+            failedPages += sheets.length
+            return
+          }
+
           try {
             const texts =
-              file && isPdfFile(file)
+              isPdfFile(file)
                 ? await ocrPdfFile(file, sheets, pdfCache)
                 : await ocrImageSheets(sheets, file, pdfCache)
 
@@ -285,7 +328,8 @@ export async function runOcrJob(analysisId: string): Promise<void> {
             failedPages += sheets.length
             const message = e instanceof Error ? e.message : String(e)
             console.error('[clash-gap ocr] file failed', fileId, message)
-            if (file && isPdfFile(file)) {
+            let recovered = false
+            if (isPdfFile(file)) {
               try {
                 const { doc } = await pdfCache.get(file.id, file.storage_path)
                 for (const sheet of sheets) {
@@ -298,16 +342,17 @@ export async function runOcrJob(analysisId: string): Promise<void> {
                     .update({ ocr_text: fallback })
                     .eq('id', sheet.id)
                 }
-                continue
+                recovered = true
               } catch {
-                // fall through to empty
               }
             }
-            for (const sheet of sheets) {
-              await sb()
-                .from('clash_gap_extracted_sheets')
-                .update({ ocr_text: '' })
-                .eq('id', sheet.id)
+            if (!recovered) {
+              for (const sheet of sheets) {
+                await sb()
+                  .from('clash_gap_extracted_sheets')
+                  .update({ ocr_text: '' })
+                  .eq('id', sheet.id)
+              }
             }
           }
 
@@ -326,8 +371,8 @@ export async function runOcrJob(analysisId: string): Promise<void> {
 
     const detail =
       failedPages > 0
-        ? `${totalWithImages} page(s) read via Document AI (${failedPages} with errors).`
-        : `${totalWithImages} page(s) read via Document AI.`
+        ? `${totalWithImages} page(s) read via Google Vision OCR (${failedPages} with errors).`
+        : `${totalWithImages} page(s) read via Google Vision OCR.`
 
     await markStageCompleted(analysisId, 'ocr', {
       processed: totalWithImages,

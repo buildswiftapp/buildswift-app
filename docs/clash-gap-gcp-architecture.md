@@ -2,47 +2,46 @@
 
 BuildSwift runs on **Google Cloud** with **Supabase Pro** as the database, auth, and file store.
 
-Chunk and OCR run on the **clash-gap worker** — locally (`http://localhost:8080`) or on **Cloud Run** in production. OCR uses **Google Document AI** only.
+Chunk and OCR run on the **clash-gap worker** — locally (`http://localhost:8080`) or on **Cloud Run** in production. OCR uses **Google Cloud Vision API**.
 
 ## 3-step pipeline
 
 | Step | Name | Where it runs | Engine |
 |------|------|---------------|--------|
-| **1** | **Chunk** | Worker | PDF.js + canvas → JPEG per page (UI preview) |
-| **2** | **OCR** | Worker | **Google Document AI** (+ embedded PDF text when available) |
+| **1** | **Chunk** | Worker | PDF.js + canvas → JPEG per page (UI preview, 180 DPI) |
+| **2** | **OCR** | Worker | **Google Cloud Vision** (+ embedded PDF text when available) |
 | **3** | **Detect** | Next.js app (Cloud Run) | **OpenAI** INSIGHT AI Review Engine |
 
 ```
 Upload → [1 Chunk] → [2 OCR] → [3 Detect] → Results
               ↓              ↓            ↓
          Worker         Worker      Next.js app
-         (JPEG)    (Document AI)    (OpenAI)
+      (preview JPEG)  (Vision OCR)    (OpenAI)
               ↓              ↓            ↓
          Supabase Storage + Postgres (stages, sheets, issues)
 ```
 
-## OCR logic
+## OCR routing (hybrid)
 
-For each PDF file:
+For each page, the worker picks **one primary path**:
 
-1. **Embedded text** — if a page has enough selectable text (≥120 chars), use it directly (fast, free).
-2. **Document AI** — one API call per PDF for remaining pages; extracts blocks, paragraphs, and tables (legends, schedules).
-3. **Merge** — combine embedded + Document AI text per page → store in `ocr_text` and `raw_text`.
-
-Image uploads (non-PDF) are sent to Document AI one image at a time.
+1. **Specs / addenda with good embedded text** — use embedded PDF text directly (no Vision call).
+2. **Specs / addenda (scanned or weak embedded)** — Vision `documentTextDetection` at 250 DPI.
+3. **Plans / drawings** — Vision at 400 DPI; if quality gate fails, **tiled OCR** (top + bottom regions).
+4. **Merge** — combine embedded + Vision text → store in `ocr_text` and `raw_text`.
 
 ## Services
 
 ### 1. Next.js app
 
 - Triggers worker for chunk + OCR via `lib/server/clash-gap/worker-client.ts`
-- Runs detect with INSIGHT prompt
+- Runs detect with INSIGHT prompt (OpenAI)
 
 ### 2. Clash/Gap worker (`services/clash-gap-worker/`)
 
-- `POST /chunk` — render PDF pages, upload JPEGs
-- `POST /ocr` — Document AI → `ocr_text` → merge `raw_text`
-- `GET /health` — confirms Document AI configuration
+- `POST /chunk-stage` — render PDF pages, upload JPEGs
+- `POST /ocr` — Vision OCR → `ocr_text` → merge `raw_text`
+- `GET /health` — confirms worker is running
 
 ### 3. Supabase Pro
 
@@ -56,25 +55,17 @@ Image uploads (non-PDF) are sent to Document AI one image at a time.
 
 ```bash
 # 1. Enable API
-gcloud services enable documentai.googleapis.com
+gcloud services enable vision.googleapis.com
 
-# 2. Create processor
-gcloud documentai processors create \
-  --location=us \
-  --display-name="BuildSwift Construction OCR" \
-  --type=DOCUMENT_OCR_PROCESSOR
-
-# Note the processor ID from output (last path segment)
-
-# 3. Service account + role
+# 2. Service account + role
 gcloud iam service-accounts create buildswift-worker \
   --display-name="BuildSwift Clash/Gap Worker"
 
 gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
   --member="serviceAccount:buildswift-worker@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
-  --role="roles/documentai.apiUser"
+  --role="roles/vision.apiUser"
 
-# 4. Key for local dev only
+# 3. Key for local dev only
 gcloud iam service-accounts keys create ~/buildswift-worker-key.json \
   --iam-account=buildswift-worker@YOUR_PROJECT_ID.iam.gserviceaccount.com
 ```
@@ -85,13 +76,11 @@ gcloud iam service-accounts keys create ~/buildswift-worker-key.json \
 
 ```bash
 SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJ...   # service_role key
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
 WORKER_SECRET=dev-secret-123
 CLASH_GAP_BUCKET=document-attachments
 
-DOCUMENT_AI_PROJECT_ID=your-gcp-project-id
-DOCUMENT_AI_LOCATION=us
-DOCUMENT_AI_PROCESSOR_ID=your-processor-id
+GOOGLE_CLOUD_PROJECT=your-gcp-project-id
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/buildswift-worker-key.json
 
 npm run dev:worker
@@ -101,23 +90,19 @@ npm run dev:worker
 
 ```bash
 CLASH_GAP_WORKER_URL=http://localhost:8080
-CLASH_GAP_WORKER_SECRET=dev-secret-123   # must match WORKER_SECRET
+CLASH_GAP_WORKER_SECRET=dev-secret-123
 ```
 
 **Verify:**
 
 ```bash
 curl http://localhost:8080/health
-# → { "status": "ok", "ocr": "document-ai", "document_ai": { "configured": true, ... } }
+# → { "status": "ok", "ocr": "google-vision", ... }
 ```
 
 **Run pipeline:** Upload PDF → Run chunking → Run OCR → Run detect.
 
-> **Note:** Document AI is a cloud API. “Local” means the worker runs on your machine but still calls Google Cloud — you need network access and valid GCP credentials.
-
 ### Production (Cloud Run)
-
-Deploy worker with the service account attached (no `GOOGLE_APPLICATION_CREDENTIALS` file):
 
 ```bash
 gcloud run deploy clash-gap-worker \
@@ -127,7 +112,7 @@ gcloud run deploy clash-gap-worker \
   --cpu 2 \
   --timeout 3600 \
   --service-account=buildswift-worker@YOUR_PROJECT_ID.iam.gserviceaccount.com \
-  --set-env-vars SUPABASE_URL=...,SUPABASE_SERVICE_ROLE_KEY=...,WORKER_SECRET=...,DOCUMENT_AI_PROJECT_ID=...,DOCUMENT_AI_PROCESSOR_ID=...,DOCUMENT_AI_LOCATION=us
+  --set-env-vars SUPABASE_URL=...,SUPABASE_SERVICE_ROLE_KEY=...,WORKER_SECRET=...,GOOGLE_CLOUD_PROJECT=...
 ```
 
 Set on the Next.js app:
@@ -146,9 +131,8 @@ CLASH_GAP_WORKER_SECRET=<same as WORKER_SECRET>
 | Variable | Purpose |
 |----------|---------|
 | `CLASH_GAP_WORKER_URL` | Worker URL (local or Cloud Run) |
-| `CLASH_GAP_WORKER_SECRET` | Shared secret for `/chunk` and `/ocr` |
-| `CLASH_GAP_BUCKET` | Supabase storage bucket |
-| `OPENAI_API_KEY` | Detect stage (step 3) |
+| `CLASH_GAP_WORKER_SECRET` | Shared secret for worker endpoints |
+| `OPENAI_API_KEY` | Detect stage (step 3) only |
 
 ### Worker
 
@@ -157,12 +141,12 @@ CLASH_GAP_WORKER_SECRET=<same as WORKER_SECRET>
 | `SUPABASE_URL` | Yes | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Service role key |
 | `WORKER_SECRET` | Yes | Auth header `X-Worker-Secret` |
-| `DOCUMENT_AI_PROJECT_ID` | Yes | GCP project ID |
-| `DOCUMENT_AI_PROCESSOR_ID` | Yes | Processor ID from gcloud create |
-| `DOCUMENT_AI_LOCATION` | Yes | e.g. `us` or `eu` |
+| `GOOGLE_CLOUD_PROJECT` | Local dev | GCP project ID |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Local only | Path to service account JSON |
-| `OCR_WORKERS` | No | Parallel files (default 4) |
-| `OCR_EMBEDDED_MIN_LEN` | No | Skip Document AI when embedded text ≥ this (default 120) |
+| `CHUNK_DPI` | No | Preview DPI (default 180) |
+| `OCR_SPEC_DPI` | No | Vision DPI for specs (default 250) |
+| `OCR_PLAN_DPI` | No | Vision DPI for plans (default 400) |
+| `OCR_PAGE_WORKERS` | No | Parallel pages (default 8) |
 
 ---
 
@@ -170,8 +154,7 @@ CLASH_GAP_WORKER_SECRET=<same as WORKER_SECRET>
 
 Existing analyses keep old `ocr_text`. To refresh:
 
-1. Clear `ocr_text` on sheets (or start a new analysis)
-2. Run the OCR stage again from the UI
+1. Re-run the OCR stage from the UI (clears and re-processes pages)
 
 ---
 

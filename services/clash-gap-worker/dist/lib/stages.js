@@ -52,9 +52,14 @@ export async function setStage(analysisId, stage, status, error) {
             status,
             ...(status === 'running'
                 ? {
-                    startedAt: current.startedAt ?? new Date().toISOString(),
+                    startedAt: current.status === 'completed' || current.status === 'failed'
+                        ? new Date().toISOString()
+                        : (current.startedAt ?? new Date().toISOString()),
                     completedAt: null,
                     error: null,
+                    ...(current.status === 'completed' || current.status === 'failed'
+                        ? { processed: 0, total: undefined, detail: null }
+                        : {}),
                 }
                 : {}),
             ...(status === 'completed'

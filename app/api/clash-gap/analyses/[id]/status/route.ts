@@ -7,7 +7,6 @@ import { createSupabaseServerClient } from '@/lib/server/supabase-server'
 
 type Params = { params: Promise<{ id: string }> }
 
-/** Lightweight poll endpoint — stages + status only (no files/issues). */
 export async function GET(_req: Request, { params }: Params) {
   const auth = await getAuthContext(_req)
   if (!auth) return unauthorized()

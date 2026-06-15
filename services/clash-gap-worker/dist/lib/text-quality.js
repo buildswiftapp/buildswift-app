@@ -49,7 +49,7 @@ export function isUsableEmbeddedText(text) {
         return false;
     return true;
 }
-function textQualityScore(text) {
+export function textQualityScore(text) {
     const trimmed = text.trim();
     if (!trimmed)
         return 0;
@@ -62,22 +62,92 @@ function textQualityScore(text) {
     return Math.max(0, score);
 }
 export function pickBestPageText(embedded, imageOcr) {
+    return pickBestPageTexts(embedded, '', imageOcr);
+}
+export function pickBestPageTexts(embedded, docAi, imageOcr) {
     const emb = embedded.trim();
+    const doc = docAi.trim();
     const img = imageOcr.trim();
-    if (!img)
-        return isUsableEmbeddedText(emb) ? emb : '';
-    if (!emb)
-        return img;
-    const embUsable = isUsableEmbeddedText(emb);
-    const embScore = embUsable ? textQualityScore(emb) : 0;
-    const imgScore = textQualityScore(img);
-    if (embScore <= 0)
-        return img;
-    if (imgScore <= 0 && embUsable)
-        return emb;
-    if (imgScore >= embScore * 1.05)
-        return img;
-    if (embScore >= imgScore * 1.2 && embUsable)
-        return emb;
-    return img.length >= emb.length ? img : emb;
+    const candidates = [];
+    if (emb) {
+        const score = isUsableEmbeddedText(emb) ? textQualityScore(emb) : textQualityScore(emb) * 0.35;
+        if (score > 0)
+            candidates.push({ text: emb, score });
+    }
+    if (doc)
+        candidates.push({ text: doc, score: textQualityScore(doc) });
+    if (img)
+        candidates.push({ text: img, score: textQualityScore(img) });
+    if (!candidates.length)
+        return '';
+    candidates.sort((a, b) => b.score - a.score || b.text.length - a.text.length);
+    const best = candidates[0];
+    if (best.score >= 0.2)
+        return best.text;
+    const longest = [emb, doc, img].sort((a, b) => b.length - a.length)[0];
+    return longest ?? best.text;
+}
+export function needsHighDpiImageOcr(docAiText, embeddedText) {
+    const doc = docAiText.trim();
+    const emb = embeddedText.trim();
+    const docScore = textQualityScore(doc);
+    if (!doc || doc.length < 25)
+        return true;
+    if (docScore < 0.22)
+        return true;
+    if (!isUsableEmbeddedText(emb) && docScore < 0.42)
+        return true;
+    if (looksLikeGarbledCadText(doc))
+        return true;
+    return false;
+}
+function tokenize(text) {
+    const tokens = new Set();
+    const re = /[a-z0-9][a-z0-9\-./]{2,}/gi;
+    let match;
+    while ((match = re.exec(text.toLowerCase())) !== null) {
+        tokens.add(match[0]);
+    }
+    return tokens;
+}
+function jaccardSimilarity(a, b) {
+    if (a.size === 0 && b.size === 0)
+        return 1;
+    if (a.size === 0 || b.size === 0)
+        return 0;
+    let intersection = 0;
+    for (const token of a) {
+        if (b.has(token))
+            intersection++;
+    }
+    const union = a.size + b.size - intersection;
+    return union > 0 ? intersection / union : 0;
+}
+function mergeTwoTexts(left, right) {
+    const a = left.trim();
+    const b = right.trim();
+    if (!a)
+        return b;
+    if (!b)
+        return a;
+    const similarity = jaccardSimilarity(tokenize(a), tokenize(b));
+    if (similarity > 0.85)
+        return a.length >= b.length ? a : b;
+    if (similarity > 0.55)
+        return `${a}\n\n${b}`;
+    return `${a}\n\n---\n\n${b}`;
+}
+export function mergePageTexts(...sources) {
+    const parts = sources.map((s) => s.trim()).filter(Boolean);
+    if (!parts.length)
+        return '';
+    return parts.reduce(mergeTwoTexts);
+}
+export function ocrQualityPasses(text, minLength) {
+    const t = text.trim();
+    if (!t || t.length < minLength)
+        return false;
+    if (textQualityScore(t) < 0.18)
+        return false;
+    return true;
 }

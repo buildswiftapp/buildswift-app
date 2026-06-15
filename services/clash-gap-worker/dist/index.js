@@ -1,30 +1,47 @@
 import Fastify from 'fastify';
+import pLimit from 'p-limit';
 import { assertConfig, config } from './config.js';
 import { runChunkJob } from './jobs/chunk.js';
+import { runChunkStageForAnalysis } from './jobs/chunk-stage.js';
 import { runOcrJob } from './jobs/ocr.js';
-import { documentAiStatus } from './lib/document-ai.js';
+import { visionOcrStatus } from './lib/vision-ocr.js';
 const app = Fastify({ logger: true });
-const chunkQueues = new Map();
+const chunkFileLimits = new Map();
+const chunkStageQueues = new Map();
+const ocrQueues = new Map();
+function chunkLimitForAnalysis(analysisId) {
+    let limit = chunkFileLimits.get(analysisId);
+    if (!limit) {
+        limit = pLimit(config.chunkFileWorkers);
+        chunkFileLimits.set(analysisId, limit);
+    }
+    return limit;
+}
 function enqueueChunkJob(input, log) {
-    const key = input.analysisId;
-    const tail = chunkQueues.get(key) ?? Promise.resolve();
-    const job = tail
-        .then(() => runChunkJob(input))
-        .catch((e) => {
+    void chunkLimitForAnalysis(input.analysisId)(() => runChunkJob(input).catch((e) => {
         log.error({ err: e, analysisId: input.analysisId, fileId: input.fileId }, 'chunk job failed');
+    }));
+}
+function enqueueChunkStage(params, log) {
+    const key = params.analysisId;
+    const tail = chunkStageQueues.get(key) ?? Promise.resolve();
+    const job = tail
+        .then(() => runChunkStageForAnalysis(params))
+        .catch((e) => {
+        log.error({ err: e, analysisId: params.analysisId }, 'chunk stage failed');
     });
-    chunkQueues.set(key, job);
+    chunkStageQueues.set(key, job);
     void job.finally(() => {
-        if (chunkQueues.get(key) === job)
-            chunkQueues.delete(key);
+        if (chunkStageQueues.get(key) === job)
+            chunkStageQueues.delete(key);
     });
 }
 async function healthPayload() {
     return {
         status: 'ok',
         service: 'clash-gap-worker',
-        ocr: 'document-ai',
-        document_ai: documentAiStatus(),
+        ocr: 'google-vision',
+        vision: visionOcrStatus(),
     };
 }
 app.get('/health', async () => healthPayload());
@@ -54,16 +71,37 @@ async function handleChunk(req, reply) {
 }
 app.post('/chunk', handleChunk);
 app.post('/api/chunk', handleChunk);
+async function handleChunkStage(req, reply) {
+    const body = req.body;
+    const analysis_id = body?.analysis_id;
+    const account_id = body?.account_id;
+    if (!analysis_id || !account_id) {
+        return reply.code(400).send({ error: 'analysis_id and account_id required' });
+    }
+    setImmediate(() => enqueueChunkStage({ analysisId: analysis_id, accountId: account_id }, app.log));
+    return reply.code(202).send({ status: 'accepted', analysis_id });
+}
+app.post('/chunk-stage', handleChunkStage);
+app.post('/api/chunk-stage', handleChunkStage);
+function enqueueOcrJob(analysisId, log) {
+    const tail = ocrQueues.get(analysisId) ?? Promise.resolve();
+    const job = tail
+        .then(() => runOcrJob(analysisId))
+        .catch((e) => {
+        log.error({ err: e, analysisId }, 'ocr job failed');
+    });
+    ocrQueues.set(analysisId, job);
+    void job.finally(() => {
+        if (ocrQueues.get(analysisId) === job)
+            ocrQueues.delete(analysisId);
+    });
+}
 async function handleOcr(req, reply) {
     const body = req.body;
     const analysis_id = body?.analysis_id;
     if (!analysis_id)
         return reply.code(400).send({ error: 'analysis_id required' });
-    setImmediate(() => {
-        runOcrJob(analysis_id).catch((e) => {
-            app.log.error({ err: e, analysisId: analysis_id }, 'ocr job failed');
-        });
-    });
+    setImmediate(() => enqueueOcrJob(analysis_id, app.log));
     return reply.code(202).send({ status: 'accepted', analysis_id });
 }
 app.post('/ocr', handleOcr);

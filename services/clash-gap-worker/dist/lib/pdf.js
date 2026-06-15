@@ -17,7 +17,7 @@ export async function openPdfDocument(buffer) {
 function viewportForPage(page, dpi, maxWidth = config.chunkMaxImageWidth) {
     let scale = dpi / 72;
     let viewport = page.getViewport({ scale });
-    if (viewport.width > maxWidth) {
+    if (maxWidth > 0 && viewport.width > maxWidth) {
         scale *= maxWidth / viewport.width;
         viewport = page.getViewport({ scale });
     }

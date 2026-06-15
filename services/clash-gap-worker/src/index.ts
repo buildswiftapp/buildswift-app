@@ -4,7 +4,7 @@ import { assertConfig, config } from './config.js'
 import { runChunkJob, type ChunkJobInput } from './jobs/chunk.js'
 import { runChunkStageForAnalysis } from './jobs/chunk-stage.js'
 import { runOcrJob } from './jobs/ocr.js'
-import { documentAiStatus } from './lib/document-ai.js'
+import { visionOcrStatus } from './lib/vision-ocr.js'
 
 const app = Fastify({ logger: true })
 
@@ -47,8 +47,8 @@ async function healthPayload() {
   return {
     status: 'ok',
     service: 'clash-gap-worker',
-    ocr: 'document-ai',
-    document_ai: documentAiStatus(),
+    ocr: 'google-vision',
+    vision: visionOcrStatus(),
   }
 }
 

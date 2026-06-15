@@ -1179,7 +1179,7 @@ export function ClashGapDetectionPage() {
       ocr: {
         title: 'OCR — read text from each image',
         description:
-          'Each page is transcribed with Google Document AI on the page image (240–300 DPI). Readable embedded PDF text is kept when valid; garbled CAD exports are re-OCR’d from the image.',
+          'Each page is routed by document type: specs use embedded PDF text when available, plans use Google Cloud Vision OCR at higher DPI. Tiled OCR runs automatically when quality is low.',
         runLabel: 'OCR',
         gateHint: 'Run the Chunk stage first.',
       },

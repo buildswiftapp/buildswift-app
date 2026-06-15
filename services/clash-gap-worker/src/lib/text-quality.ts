@@ -66,7 +66,6 @@ export function pickBestPageText(embedded: string, imageOcr: string): string {
   return pickBestPageTexts(embedded, '', imageOcr)
 }
 
-/** Pick the best text from embedded PDF layer, batch Document AI, and high-DPI image OCR. */
 export function pickBestPageTexts(embedded: string, docAi: string, imageOcr: string): string {
   const emb = embedded.trim()
   const doc = docAi.trim()
@@ -90,7 +89,6 @@ export function pickBestPageTexts(embedded: string, docAi: string, imageOcr: str
   return longest ?? best.text
 }
 
-/** True when batch/page OCR is too weak and we should render a high-DPI image for Document AI. */
 export function needsHighDpiImageOcr(docAiText: string, embeddedText: string): boolean {
   const doc = docAiText.trim()
   const emb = embeddedText.trim()
@@ -101,4 +99,50 @@ export function needsHighDpiImageOcr(docAiText: string, embeddedText: string): b
   if (!isUsableEmbeddedText(emb) && docScore < 0.42) return true
   if (looksLikeGarbledCadText(doc)) return true
   return false
+}
+
+function tokenize(text: string): Set<string> {
+  const tokens = new Set<string>()
+  const re = /[a-z0-9][a-z0-9\-./]{2,}/gi
+  let match: RegExpExecArray | null
+  while ((match = re.exec(text.toLowerCase())) !== null) {
+    tokens.add(match[0])
+  }
+  return tokens
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1
+  if (a.size === 0 || b.size === 0) return 0
+  let intersection = 0
+  for (const token of a) {
+    if (b.has(token)) intersection++
+  }
+  const union = a.size + b.size - intersection
+  return union > 0 ? intersection / union : 0
+}
+
+function mergeTwoTexts(left: string, right: string): string {
+  const a = left.trim()
+  const b = right.trim()
+  if (!a) return b
+  if (!b) return a
+
+  const similarity = jaccardSimilarity(tokenize(a), tokenize(b))
+  if (similarity > 0.85) return a.length >= b.length ? a : b
+  if (similarity > 0.55) return `${a}\n\n${b}`
+  return `${a}\n\n---\n\n${b}`
+}
+
+export function mergePageTexts(...sources: string[]): string {
+  const parts = sources.map((s) => s.trim()).filter(Boolean)
+  if (!parts.length) return ''
+  return parts.reduce(mergeTwoTexts)
+}
+
+export function ocrQualityPasses(text: string, minLength: number): boolean {
+  const t = text.trim()
+  if (!t || t.length < minLength) return false
+  if (textQualityScore(t) < 0.18) return false
+  return true
 }
