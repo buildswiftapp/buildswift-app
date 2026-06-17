@@ -156,6 +156,8 @@ export type InsightDocumentSheet = {
   discipline: string
   pageIndex: number
   text: string
+  structured?: Record<string, unknown> | null
+  imagePath?: string | null
 }
 
 export type InsightProjectHistory = {
@@ -207,7 +209,7 @@ export function insightUserPrompt(params: {
         ? { trades: params.selectedTrades }
         : { trades: 'entire_project' },
       instructions:
-        'Review ALL contract documents together with project_history. Apply Q1→Q2→Q3 before each finding. Link to match_existing_issue_id when substantially similar to an existing project issue. Reconcile across drawings, specs, schedules, notes, legends, and addenda.',
+        'Review ALL contract documents together with project_history. Apply Q1→Q2→Q3 before each finding. Link to match_existing_issue_id when substantially similar to an existing project issue. Reconcile across drawings, specs, schedules, notes, legends, and addenda. When structured OCR data is present (title_block, legend_notes, plan_areas, regions), prefer it for drawing sheet metadata and legends. When structured.vision_enrichment is present on a drawing, treat it as supplemental vision-read data that fills OCR gaps — prefer it over sparse OCR text for title blocks, legends, notes, room/door tags, and callouts. When drawing sheet images are attached to this message, use them together with OCR text to resolve ambiguities and verify references.',
       contract_documents: {
         drawings: byRole.plans.map((s) => ({
           file: s.fileName,
@@ -215,6 +217,7 @@ export function insightUserPrompt(params: {
           discipline: s.discipline,
           page: s.pageIndex + 1,
           content: trim(s.text, 8000),
+          structured: s.structured ?? null,
         })),
         specifications_and_addenda: byRole.specs.map((s) => ({
           file: s.fileName,
@@ -222,6 +225,7 @@ export function insightUserPrompt(params: {
           sheet_id: s.sheetId,
           page: s.pageIndex + 1,
           content: trim(s.text, 8000),
+          structured: s.structured ?? null,
         })),
         other: byRole.other.map((s) => ({
           file: s.fileName,

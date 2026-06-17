@@ -1130,7 +1130,7 @@ export function ClashGapDetectionPage() {
       {
         id: 'detection',
         title: 'Detection',
-        description: 'Find gaps, clashes & mismatches.',
+        description: 'Parallel classify, vision enrich, then INSIGHT (with plan images when helpful).',
         status: stepDisplayStatus('detection'),
       },
       {
@@ -1179,7 +1179,7 @@ export function ClashGapDetectionPage() {
       ocr: {
         title: 'OCR — read text from each image',
         description:
-          'Each page is routed by document type: specs use embedded PDF text when available, plans use Google Cloud Vision OCR at higher DPI. Tiled OCR runs automatically when quality is low.',
+          'Plans use region OCR (title block, legend/notes, 2×2 plan grid) at 500 DPI PNG. Results are cached by file hash for fast re-runs. Specs use embedded text when available.',
         runLabel: 'OCR',
         gateHint: 'Run the Chunk stage first.',
       },
@@ -1360,7 +1360,7 @@ export function ClashGapDetectionPage() {
         {activeStep === 'detection' ? (
           <StagePanel
             title="Detection — gaps, clashes & mismatches"
-            description="Drawings are reviewed against the specifications. Each finding traces back to a specific requirement."
+            description="Sheets are classified in parallel, weak plan OCR is vision-enriched, then INSIGHT compares drawings to specs — attaching plan images for small batches when OCR is thin."
             status={runningStage === 'detect' ? 'running' : stageStatus(stages, 'detect')}
             detail={stages.detect?.detail}
             error={stages.detect?.error}

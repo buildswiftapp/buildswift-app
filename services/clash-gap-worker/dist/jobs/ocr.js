@@ -1,30 +1,26 @@
+import { createHash } from 'crypto';
 import pLimit from 'p-limit';
 import { config } from '../config.js';
 import { extractEmbeddedTextFromPage } from '../lib/embedded-text.js';
+import { ocrImageWithVisionRegions } from '../lib/image-regions.js';
 import { ocrImageWithVisionTiles } from '../lib/image-tiles.js';
-import { minTextLengthForKind, normalizeFileRole, ocrDpiForKind, resolvePageKind, shouldRunTiledEscalation, } from '../lib/page-router.js';
-import { renderPageToJpeg } from '../lib/pdf.js';
+import { lookupOcrCache, storeOcrCache } from '../lib/ocr-cache.js';
+import { minTextLengthForKind, normalizeFileRole, ocrDpiForKind, resolvePageKind, shouldRunTiledEscalation, shouldUseRegionOcr, } from '../lib/page-router.js';
+import { renderPageToPng } from '../lib/pdf.js';
 import { PdfCache } from '../lib/pdf-cache.js';
+import { buildStructuredFromBlocks, buildStructuredFromRegions, structuredForEmbeddedText, } from '../lib/sheet-structure.js';
 import { mergePageTexts, ocrQualityPasses, isUsableEmbeddedText } from '../lib/text-quality.js';
-import { ocrImageWithVision } from '../lib/vision-ocr.js';
+import { normalizeEmbeddedText, normalizeOcrText } from '../lib/text-normalize.js';
+import { ocrImageWithVisionDetailed } from '../lib/vision-ocr.js';
 import { markStageCompleted, setProgress, setStage, updateAnalysisStep } from '../lib/stages.js';
 import { fetchAllRows } from '../lib/storage.js';
 import { sb } from '../supabase.js';
-function normalizeWhitespace(text) {
-    return text.replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+function sha256Buffer(buffer) {
+    return createHash('sha256').update(buffer).digest('hex');
 }
 function isPdfFile(file) {
     const mime = (file.mime_type || '').toLowerCase();
     return mime.includes('pdf') || file.file_name.toLowerCase().endsWith('.pdf');
-}
-function imageMimeType(fileName, buffer) {
-    if (buffer[0] === 0xff && buffer[1] === 0xd8)
-        return 'image/jpeg';
-    if (buffer[0] === 0x89 && buffer[1] === 0x50)
-        return 'image/png';
-    if (/\.jpe?g$/i.test(fileName))
-        return 'image/jpeg';
-    return 'image/png';
 }
 function groupByFile(todo) {
     const groups = new Map();
@@ -38,7 +34,7 @@ function groupByFile(todo) {
 async function loadFiles(analysisId) {
     const { data, error } = await sb()
         .from('clash_gap_analysis_files')
-        .select('id, storage_path, file_name, mime_type, file_role')
+        .select('id, storage_path, file_name, mime_type, file_role, sha256')
         .eq('analysis_id', analysisId)
         .order('created_at', { ascending: true });
     if (error)
@@ -85,7 +81,7 @@ async function mergeSheets(analysisId) {
         return;
     const sheets = await fetchAllRows(async (from, to) => sb()
         .from('clash_gap_extracted_sheets')
-        .select('id, analysis_file_id, page_index, ocr_text')
+        .select('id, analysis_file_id, page_index, ocr_text, structured')
         .in('analysis_file_id', fileIds)
         .order('analysis_file_id', { ascending: true })
         .order('page_index', { ascending: true })
@@ -93,13 +89,18 @@ async function mergeSheets(analysisId) {
     const fileOrdinal = new Map(fileIds.map((id, index) => [id, index + 1]));
     const multipleFiles = fileIds.length > 1;
     for (const sheet of sheets) {
-        const rawText = normalizeWhitespace(sheet.ocr_text || '');
+        const rawText = normalizeOcrText(sheet.ocr_text || '');
+        const structured = sheet.structured;
+        const hint = structured?.sheet_id_hint?.trim();
         const pageLabel = multipleFiles
             ? `Doc${fileOrdinal.get(sheet.analysis_file_id) ?? '?'}-Page-${sheet.page_index + 1}`
             : `Page-${sheet.page_index + 1}`;
         const { error } = await sb()
             .from('clash_gap_extracted_sheets')
-            .update({ raw_text: rawText, sheet_id: pageLabel })
+            .update({
+            raw_text: rawText,
+            sheet_id: hint || pageLabel,
+        })
             .eq('id', sheet.id);
         if (error)
             throw new Error(error.message);
@@ -115,9 +116,8 @@ async function loadPageImage(sheet, file, pdfCache, dpi) {
     if (pdfCache && file && isPdfFile(file)) {
         try {
             const { doc } = await pdfCache.get(file.id, file.storage_path);
-            return await renderPageToJpeg(doc, sheet.page_index, dpi, {
+            return await renderPageToPng(doc, sheet.page_index, dpi, {
                 maxWidth: config.ocrMaxImageWidth,
-                jpegQuality: 98,
             });
         }
         catch (e) {
@@ -126,48 +126,98 @@ async function loadPageImage(sheet, file, pdfCache, dpi) {
     }
     return downloadFromStorage(sheet.image_path);
 }
-async function runVisionOnPage(sheet, file, pdfCache, kind) {
-    const dpi = ocrDpiForKind(kind);
-    const buffer = await loadPageImage(sheet, file, pdfCache, dpi);
-    return normalizeWhitespace(await ocrImageWithVision(buffer));
-}
 async function ocrPage(params) {
-    const { sheet, file, pdfCache, embeddedText } = params;
+    const { sheet, file, pdfCache, embeddedText, fileSha256, onCacheHit } = params;
     const fileRole = normalizeFileRole(file.file_role);
     const kind = resolvePageKind(fileRole, embeddedText);
     const minLen = minTextLengthForKind(kind);
-    if (kind === 'TEXT') {
-        return normalizeWhitespace(embeddedText);
+    const embedded = normalizeEmbeddedText(embeddedText);
+    const dpi = ocrDpiForKind(kind);
+    const sha256 = fileSha256 ?? file.sha256 ?? null;
+    if (sha256) {
+        const cached = await lookupOcrCache({
+            sha256,
+            pageIndex: sheet.page_index,
+            fileRole,
+            pageKind: kind,
+            dpi,
+        });
+        if (cached) {
+            onCacheHit?.();
+            return { text: cached.ocr_text, structured: cached.structured };
+        }
     }
-    let merged = normalizeWhitespace(embeddedText);
+    if (kind === 'TEXT') {
+        const result = {
+            text: embedded,
+            structured: embedded ? structuredForEmbeddedText(embedded) : null,
+        };
+        if (sha256) {
+            await storeOcrCache({ sha256, pageIndex: sheet.page_index, fileRole, pageKind: kind, dpi }, { ocr_text: result.text, structured: result.structured });
+        }
+        return result;
+    }
+    let merged = embedded;
+    let structured = null;
     try {
-        const visionText = await runVisionOnPage(sheet, file, pdfCache, kind);
-        merged = normalizeWhitespace(mergePageTexts(merged, visionText));
+        const buffer = await loadPageImage(sheet, file, pdfCache, dpi);
+        if (shouldUseRegionOcr(fileRole, kind)) {
+            const regionResult = await ocrImageWithVisionRegions(buffer, config.ocrRegionWorkers);
+            merged = normalizeOcrText(mergePageTexts(merged, regionResult.text));
+            structured = buildStructuredFromRegions({
+                regions: regionResult.regions,
+                fullText: merged,
+            });
+        }
+        else {
+            const detailed = await ocrImageWithVisionDetailed(buffer);
+            merged = normalizeOcrText(mergePageTexts(merged, detailed.text));
+            structured = buildStructuredFromBlocks({
+                blocks: detailed.blocks,
+                fullText: merged,
+            });
+        }
     }
     catch (e) {
         console.warn('[clash-gap ocr] Vision OCR failed', sheet.id, kind, e);
     }
     if (!ocrQualityPasses(merged, minLen) && shouldRunTiledEscalation(kind)) {
         try {
-            const dpi = ocrDpiForKind(kind);
             const buffer = await loadPageImage(sheet, file, pdfCache, dpi);
-            const tiled = normalizeWhitespace(await ocrImageWithVisionTiles(buffer, config.ocrTileWorkers));
-            if (tiled)
-                merged = normalizeWhitespace(mergePageTexts(merged, tiled));
+            const tiled = normalizeOcrText(await ocrImageWithVisionTiles(buffer, config.ocrTileWorkers));
+            if (tiled) {
+                merged = normalizeOcrText(mergePageTexts(merged, tiled));
+                if (structured) {
+                    structured = {
+                        ...structured,
+                        blocks: [...structured.blocks, { label: 'tiled_fallback', text: tiled }],
+                    };
+                }
+            }
         }
         catch (e) {
             console.warn('[clash-gap ocr] tiled Vision OCR failed', sheet.id, e);
         }
     }
-    if (merged)
-        return merged;
-    if (isUsableEmbeddedText(embeddedText))
-        return normalizeWhitespace(embeddedText);
-    return '';
+    let result;
+    if (merged) {
+        result = { text: merged, structured };
+    }
+    else if (isUsableEmbeddedText(embedded)) {
+        result = { text: embedded, structured: structuredForEmbeddedText(embedded) };
+    }
+    else {
+        result = { text: '', structured: null };
+    }
+    if (sha256) {
+        await storeOcrCache({ sha256, pageIndex: sheet.page_index, fileRole, pageKind: kind, dpi }, { ocr_text: result.text, structured: result.structured });
+    }
+    return result;
 }
-async function ocrPdfFile(file, sheets, pdfCache) {
+async function ocrPdfFile(file, sheets, pdfCache, onCacheHit) {
     const results = new Map();
     const { doc } = await pdfCache.get(file.id, file.storage_path);
+    const fileSha256 = file.sha256;
     const pageLimit = pLimit(config.ocrPageWorkers);
     await Promise.all(sheets.map((sheet) => pageLimit(async () => {
         const embedded = await extractEmbeddedTextFromPage(doc, sheet.page_index);
@@ -176,12 +226,28 @@ async function ocrPdfFile(file, sheets, pdfCache) {
             file,
             pdfCache,
             embeddedText: embedded.fullText.trim(),
+            fileSha256,
+            onCacheHit,
         }));
     })));
     return results;
 }
-async function ocrImageSheets(sheets, file, pdfCache) {
+async function ocrImageSheets(sheets, file, pdfCache, onCacheHit) {
     const results = new Map();
+    let fileSha256 = file.sha256;
+    if (!fileSha256) {
+        try {
+            const buffer = await downloadFromStorage(file.storage_path);
+            fileSha256 = sha256Buffer(buffer);
+            await sb()
+                .from('clash_gap_analysis_files')
+                .update({ sha256: fileSha256 })
+                .eq('id', file.id);
+        }
+        catch {
+            fileSha256 = null;
+        }
+    }
     const pageLimit = pLimit(config.ocrPageWorkers);
     await Promise.all(sheets.map((sheet) => pageLimit(async () => {
         results.set(sheet.id, await ocrPage({
@@ -189,9 +255,23 @@ async function ocrImageSheets(sheets, file, pdfCache) {
             file,
             pdfCache,
             embeddedText: '',
+            fileSha256,
+            onCacheHit,
         }));
     })));
     return results;
+}
+async function saveSheetOcr(sheetId, result) {
+    const update = {
+        ocr_text: result.text,
+        structured: result.structured,
+    };
+    const { error } = await sb()
+        .from('clash_gap_extracted_sheets')
+        .update(update)
+        .eq('id', sheetId);
+    if (error)
+        throw new Error(error.message);
 }
 export async function runOcrJob(analysisId) {
     const pdfCache = new PdfCache();
@@ -206,7 +286,7 @@ export async function runOcrJob(analysisId) {
         if (analysisFileIds.length) {
             const { error: resetError } = await sb()
                 .from('clash_gap_extracted_sheets')
-                .update({ ocr_text: null, raw_text: null })
+                .update({ ocr_text: null, raw_text: null, structured: null })
                 .in('analysis_file_id', analysisFileIds);
             if (resetError)
                 throw new Error(resetError.message);
@@ -217,6 +297,7 @@ export async function runOcrJob(analysisId) {
             throw new Error('No page images found — run the chunk stage first');
         let processed = totalWithImages - todo.length;
         let failedPages = 0;
+        let cacheHits = 0;
         await setProgress(analysisId, 'ocr', processed, totalWithImages, `page ${processed}/${totalWithImages}`);
         const limit = pLimit(config.ocrWorkers);
         let sinceProgress = 0;
@@ -227,16 +308,14 @@ export async function runOcrJob(analysisId) {
                 return;
             }
             try {
-                const texts = isPdfFile(file)
-                    ? await ocrPdfFile(file, sheets, pdfCache)
-                    : await ocrImageSheets(sheets, file, pdfCache);
+                const onCacheHit = () => {
+                    cacheHits += 1;
+                };
+                const results = isPdfFile(file)
+                    ? await ocrPdfFile(file, sheets, pdfCache, onCacheHit)
+                    : await ocrImageSheets(sheets, file, pdfCache, onCacheHit);
                 for (const sheet of sheets) {
-                    const { error } = await sb()
-                        .from('clash_gap_extracted_sheets')
-                        .update({ ocr_text: texts.get(sheet.id) ?? '' })
-                        .eq('id', sheet.id);
-                    if (error)
-                        throw new Error(error.message);
+                    await saveSheetOcr(sheet.id, results.get(sheet.id) ?? { text: '', structured: null });
                 }
             }
             catch (e) {
@@ -250,11 +329,12 @@ export async function runOcrJob(analysisId) {
                         for (const sheet of sheets) {
                             const embedded = await extractEmbeddedTextFromPage(doc, sheet.page_index);
                             const fallback = isUsableEmbeddedText(embedded.fullText)
-                                ? normalizeWhitespace(embedded.fullText)
+                                ? normalizeEmbeddedText(embedded.fullText)
                                 : '';
+                            const structured = fallback ? structuredForEmbeddedText(fallback) : null;
                             await sb()
                                 .from('clash_gap_extracted_sheets')
-                                .update({ ocr_text: fallback })
+                                .update({ ocr_text: fallback, structured })
                                 .eq('id', sheet.id);
                         }
                         recovered = true;
@@ -266,7 +346,7 @@ export async function runOcrJob(analysisId) {
                     for (const sheet of sheets) {
                         await sb()
                             .from('clash_gap_extracted_sheets')
-                            .update({ ocr_text: '' })
+                            .update({ ocr_text: '', structured: null })
                             .eq('id', sheet.id);
                     }
                 }
@@ -281,8 +361,10 @@ export async function runOcrJob(analysisId) {
         await setProgress(analysisId, 'ocr', totalWithImages, totalWithImages, 'Merging text per document…');
         await mergeSheets(analysisId);
         const detail = failedPages > 0
-            ? `${totalWithImages} page(s) read via Google Vision OCR (${failedPages} with errors).`
-            : `${totalWithImages} page(s) read via Google Vision OCR.`;
+            ? `${totalWithImages} page(s) read via Google Vision OCR (${failedPages} with errors${cacheHits ? `, ${cacheHits} from cache` : ''}).`
+            : cacheHits > 0
+                ? `${totalWithImages} page(s) read via Google Vision OCR (${cacheHits} from cache).`
+                : `${totalWithImages} page(s) read via Google Vision OCR.`;
         await markStageCompleted(analysisId, 'ocr', {
             processed: totalWithImages,
             total: totalWithImages,

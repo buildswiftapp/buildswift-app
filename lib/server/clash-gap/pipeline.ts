@@ -27,6 +27,19 @@ import {
 } from '@/lib/server/clash-gap/prompts/insight-review-engine'
 import { loadProjectHistoryContext } from '@/lib/server/clash-gap/project-history'
 import { persistInsightFindings } from '@/lib/server/clash-gap/persist-insight-findings'
+import {
+  enrichPlanSheetWithVision,
+  mergeVisionEnrichment,
+  needsVisionEnrichment,
+  visionEnrichmentSummary,
+  type PlanSheetForVision,
+} from '@/lib/server/clash-gap/detect-vision-enrich'
+import {
+  buildInsightImageCaption,
+  insightImageDetail,
+  loadInsightPlanImages,
+  shouldUseInsightImages,
+} from '@/lib/server/clash-gap/insight-multimodal'
 
 type SheetRow = {
   id: string
@@ -36,6 +49,7 @@ type SheetRow = {
   page_index: number
   raw_text: string | null
   structured: Record<string, unknown> | null
+  image_path: string | null
   file_name?: string
   file_role?: string
 }
@@ -100,12 +114,36 @@ async function mapWithConcurrency<T, R>(
   return results
 }
 
-async function callJsonLlm(system: string, user: string, model: string) {
+function classifyConcurrency(): number {
+  const n = Number(process.env.CLASH_GAP_CLASSIFY_CONCURRENCY || process.env.CLASH_GAP_LLM_CONCURRENCY || 3)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 3
+}
+
+async function callJsonLlm(
+  system: string,
+  user: string,
+  model: string,
+  images?: Array<{ dataUrl: string; sheetId: string }>,
+) {
   const openai = getOpenAIClient()
   if (!openai) return { findings: [] }
 
   const maxAttempts = 3
   let lastError: unknown
+
+  const userContent =
+    images?.length
+      ? [
+          { type: 'text' as const, text: user },
+          ...images.flatMap((img) => [
+            { type: 'text' as const, text: `[Drawing image: ${img.sheetId}]` },
+            {
+              type: 'image_url' as const,
+              image_url: { url: img.dataUrl, detail: insightImageDetail() },
+            },
+          ]),
+        ]
+      : user
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const controller = new AbortController()
@@ -119,7 +157,7 @@ async function callJsonLlm(system: string, user: string, model: string) {
           stream: true,
           messages: [
             { role: 'system', content: system },
-            { role: 'user', content: user },
+            { role: 'user', content: userContent },
           ],
         },
         { signal: controller.signal, maxRetries: 0 },
@@ -149,6 +187,56 @@ async function callJsonLlm(system: string, user: string, model: string) {
   }
 
   throw new Error(formatClashGapError(lastError))
+}
+
+function visionEnrichConcurrency(): number {
+  const n = Number(process.env.CLASH_GAP_VISION_CONCURRENCY || 2)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 2
+}
+
+function visionEnrichMaxSheets(): number {
+  const n = Number(process.env.CLASH_GAP_DETECT_VISION_MAX_SHEETS || 12)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 12
+}
+
+async function enrichPlanSheetsWithVision(
+  supabase: StageParams['supabase'],
+  sheets: SheetRow[],
+  onProgress: (detail: string) => Promise<void>,
+): Promise<void> {
+  const candidates = sheets
+    .filter((s) => s.file_role === 'plans')
+    .filter((s) => needsVisionEnrichment(s as PlanSheetForVision))
+    .slice(0, visionEnrichMaxSheets())
+
+  if (!candidates.length) return
+
+  let done = 0
+  await onProgress(`Vision enrich 0/${candidates.length} plan sheet(s)…`)
+
+  await mapWithConcurrency(candidates, visionEnrichConcurrency(), async (sheet) => {
+    const enrichment = await enrichPlanSheetWithVision(sheet as PlanSheetForVision)
+    if (enrichment) {
+      const merged = mergeVisionEnrichment(sheet.structured, enrichment)
+      const supplement = visionEnrichmentSummary(enrichment)
+      const rawText = supplement
+        ? `${(sheet.raw_text || '').trim()}\n\n--- VISION ENRICHMENT ---\n${supplement}`.trim()
+        : sheet.raw_text
+
+      await supabase
+        .from('clash_gap_extracted_sheets')
+        .update({
+          structured: merged,
+          ...(rawText ? { raw_text: rawText } : {}),
+        })
+        .eq('id', sheet.id)
+
+      sheet.structured = merged
+      if (rawText) sheet.raw_text = rawText
+    }
+    done += 1
+    await onProgress(`Vision enrich ${done}/${candidates.length} plan sheet(s)…`)
+  })
 }
 
 function classifyBatchSize(): number {
@@ -196,7 +284,11 @@ async function classifySheetsBatch(batch: SheetRow[]) {
       schedules: Array.isArray(objRow.schedules) ? objRow.schedules : [],
       detail_references: Array.isArray(objRow.detail_references) ? objRow.detail_references : [],
     }
-    return { sheet, discipline, sheetId, structured }
+    const mergedStructured = {
+      ...(sheet.structured ?? {}),
+      classify: structured,
+    }
+    return { sheet, discipline, sheetId, structured: mergedStructured }
   })
 }
 
@@ -219,6 +311,8 @@ function toInsightSheets(sheets: SheetRow[]): InsightDocumentSheet[] {
     discipline: s.discipline || 'other',
     pageIndex: s.page_index,
     text: s.raw_text || '',
+    structured: s.structured ?? null,
+    imagePath: s.image_path ?? null,
   }))
 }
 
@@ -297,6 +391,7 @@ export async function runDetectStage(params: StageParams) {
         page_index: row.page_index,
         raw_text: row.raw_text,
         structured: row.structured,
+        image_path: row.image_path ?? null,
         file_name: file?.file_name,
         file_role: file?.file_role,
       }
@@ -324,22 +419,32 @@ export async function runDetectStage(params: StageParams) {
 
     const unclassified = sheets.filter((s) => !s.discipline)
     const batchSize = classifyBatchSize()
+    const classifyBatches: SheetRow[][] = []
     for (let i = 0; i < unclassified.length; i += batchSize) {
-      const batch = unclassified.slice(i, i + batchSize)
-      const results = await classifySheetsBatch(batch)
-      for (const { sheet, discipline, sheetId, structured } of results) {
-        await params.supabase
-          .from('clash_gap_extracted_sheets')
-          .update({ discipline, sheet_id: sheetId, structured })
-          .eq('id', sheet.id)
-        sheet.discipline = discipline
-        sheet.sheet_id = sheetId
-        sheet.structured = structured
-      }
-      llmDone += batch.length
-      await bumpDetect(`Indexing… ${llmDone}/${llmTotal}`)
+      classifyBatches.push(unclassified.slice(i, i + batchSize))
+    }
+
+    let classifyDone = 0
+    if (classifyBatches.length) {
+      await bumpDetect(`Indexing 0/${unclassified.length} sheet(s)…`)
+      await mapWithConcurrency(classifyBatches, classifyConcurrency(), async (batch) => {
+        const results = await classifySheetsBatch(batch)
+        for (const { sheet, discipline, sheetId, structured } of results) {
+          await params.supabase
+            .from('clash_gap_extracted_sheets')
+            .update({ discipline, sheet_id: sheetId, structured })
+            .eq('id', sheet.id)
+          sheet.discipline = discipline
+          sheet.sheet_id = sheetId
+          sheet.structured = structured
+        }
+        classifyDone += batch.length
+        await bumpDetect(`Indexing… ${classifyDone}/${unclassified.length}`)
+      })
     }
     llmDone = llmTotal
+
+    await enrichPlanSheetsWithVision(params.supabase, sheets, bumpDetect)
 
     const trades =
       settings.scope === 'selected_trades' && settings.selectedTrades?.length
@@ -357,21 +462,32 @@ export async function runDetectStage(params: StageParams) {
       `Project ${analysis.project_id.slice(0, 8)}`
 
     for (let i = 0; i < batches.length; i++) {
+      const batchSheets = batches[i]!
+      const useImages = shouldUseInsightImages(batchSheets)
+      const planImages = useImages ? await loadInsightPlanImages(batchSheets) : []
       await bumpDetect(
         batches.length > 1
-          ? `INSIGHT review batch ${i + 1}/${batches.length}…`
-          : 'INSIGHT AI review…',
+          ? planImages.length
+            ? `INSIGHT review batch ${i + 1}/${batches.length} (${planImages.length} image(s))…`
+            : `INSIGHT review batch ${i + 1}/${batches.length}…`
+          : planImages.length
+            ? `INSIGHT AI review (${planImages.length} drawing image(s))…`
+            : 'INSIGHT AI review…',
       )
+      const promptText = insightUserPrompt({
+        projectLabel,
+        analysisId: params.analysisId,
+        projectHistory,
+        sheets: batchSheets,
+        selectedTrades: trades,
+      })
+      const imageCaption = planImages.length ? buildInsightImageCaption(planImages) : ''
+      const userPrompt = imageCaption ? `${promptText}\n\n${imageCaption}` : promptText
       const payload = await callJsonLlm(
         INSIGHT_SYSTEM_PROMPT,
-        insightUserPrompt({
-          projectLabel,
-          analysisId: params.analysisId,
-          projectHistory,
-          sheets: batches[i]!,
-          selectedTrades: trades,
-        }),
+        userPrompt,
         model,
+        planImages.map((img) => ({ dataUrl: img.dataUrl, sheetId: img.sheetId })),
       )
       allFindings.push(...parseInsightFindingsPayload(payload))
     }

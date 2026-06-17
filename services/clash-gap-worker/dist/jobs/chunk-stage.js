@@ -1,8 +1,12 @@
+import { createHash } from 'crypto';
 import pLimit from 'p-limit';
 import { config } from '../config.js';
 import { runChunkJob, tryCompleteChunkStage } from './chunk.js';
 import { setStage, updateAnalysisStep } from '../lib/stages.js';
 import { sb } from '../supabase.js';
+function sha256Buffer(buffer) {
+    return createHash('sha256').update(buffer).digest('hex');
+}
 function isPdfFile(file) {
     const mime = (file.mime_type || '').toLowerCase();
     return mime.includes('pdf') || file.file_name.toLowerCase().endsWith('.pdf');
@@ -38,7 +42,21 @@ async function registerImageUploads(files) {
             registered++;
             continue;
         }
-        await sb().from('clash_gap_analysis_files').update({ page_count: 1 }).eq('id', file.id);
+        let sha256 = null;
+        try {
+            const { data: blob, error: dlError } = await sb()
+                .storage.from(config.storageBucket)
+                .download(file.storage_path);
+            if (!dlError && blob) {
+                sha256 = sha256Buffer(Buffer.from(await blob.arrayBuffer()));
+            }
+        }
+        catch {
+        }
+        await sb()
+            .from('clash_gap_analysis_files')
+            .update({ page_count: 1, ...(sha256 ? { sha256 } : {}) })
+            .eq('id', file.id);
         if (existingRows?.id) {
             await sb()
                 .from('clash_gap_extracted_sheets')

@@ -27,7 +27,7 @@ function canvasToJpeg(canvas, qualityPercent = config.chunkJpegQuality) {
     const quality = Math.min(1, Math.max(0.5, qualityPercent / 100));
     return canvas.toBuffer('image/jpeg', quality);
 }
-export async function renderPageToJpeg(doc, pageIndex, dpi, options) {
+async function renderPage(doc, pageIndex, dpi, options) {
     const page = await doc.getPage(pageIndex + 1);
     try {
         const viewport = viewportForPage(page, dpi, options?.maxWidth);
@@ -38,9 +38,17 @@ export async function renderPageToJpeg(doc, pageIndex, dpi, options) {
             canvasContext: ctx,
             viewport,
         }).promise;
-        return canvasToJpeg(canvas, options?.jpegQuality);
+        return canvas;
     }
     finally {
         await page.cleanup();
     }
+}
+export async function renderPageToJpeg(doc, pageIndex, dpi, options) {
+    const canvas = await renderPage(doc, pageIndex, dpi, options);
+    return canvasToJpeg(canvas, options?.jpegQuality);
+}
+export async function renderPageToPng(doc, pageIndex, dpi, options) {
+    const canvas = await renderPage(doc, pageIndex, dpi, options);
+    return canvas.toBuffer('image/png');
 }

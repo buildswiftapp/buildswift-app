@@ -24,14 +24,16 @@ export const config = {
     ocrWorkers: intEnv('OCR_WORKERS', 4, 1),
     ocrPageWorkers: intEnv('OCR_PAGE_WORKERS', 8, 1),
     ocrSpecDpi: intEnv('OCR_SPEC_DPI', 250, 72),
-    ocrPlanDpi: intEnv('OCR_PLAN_DPI', 400, 72),
+    ocrPlanDpi: intEnv('OCR_PLAN_DPI', 500, 72),
     ocrMaxImageWidth: intEnv('OCR_MAX_IMAGE_WIDTH', 8000, 512),
     ocrEmbeddedMinLen: intEnv('OCR_EMBEDDED_MIN_LEN', 120, 0),
     ocrSpecMinLen: intEnv('OCR_SPEC_MIN_LEN', 120, 0),
     ocrPlanMinLen: intEnv('OCR_PLAN_MIN_LEN', 400, 0),
     ocrPlanEmbeddedMinLen: intEnv('OCR_PLAN_EMBEDDED_MIN_LEN', 400, 0),
     ocrTileWorkers: intEnv('OCR_TILE_WORKERS', 3, 1),
+    ocrRegionWorkers: intEnv('OCR_REGION_WORKERS', 6, 1),
     ocrProgressEvery: intEnv('OCR_PROGRESS_EVERY', 5, 1),
+    ocrEngineVersion: process.env.OCR_ENGINE_VERSION?.trim() || 'vision-v3-region',
     googleCloudProject: process.env.GOOGLE_CLOUD_PROJECT?.trim() ||
         process.env.GCLOUD_PROJECT?.trim() ||
         '',
@@ -39,7 +41,8 @@ export const config = {
 export function isVisionOcrConfigured() {
     return Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim() ||
         config.googleCloudProject ||
-        process.env.K_SERVICE?.trim());
+        process.env.K_SERVICE?.trim() ||
+        process.env.GOOGLE_GCE_PROJECT?.trim());
 }
 export function assertConfig() {
     if (!config.supabaseUrl)

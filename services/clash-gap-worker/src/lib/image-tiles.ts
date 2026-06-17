@@ -22,7 +22,7 @@ async function cropTile(imageBuffer: Buffer, region: TileRegion): Promise<Buffer
   const canvas = createCanvas(region.w, region.h)
   const ctx = canvas.getContext('2d')
   ctx.drawImage(img, region.x, region.y, region.w, region.h, 0, 0, region.w, region.h)
-  return canvas.toBuffer('image/jpeg', 95)
+  return canvas.toBuffer('image/png')
 }
 
 export async function ocrImageWithVisionTiles(

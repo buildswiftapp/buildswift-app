@@ -50,3 +50,7 @@ export function ocrDpiForKind(kind: PageKind): number {
 export function shouldRunTiledEscalation(kind: PageKind): boolean {
   return kind === 'DRAWING' || kind === 'MIXED'
 }
+
+export function shouldUseRegionOcr(fileRole: FileRole, kind: PageKind): boolean {
+  return fileRole === 'plans' && (kind === 'DRAWING' || kind === 'MIXED')
+}

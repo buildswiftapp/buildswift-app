@@ -43,3 +43,6 @@ export function ocrDpiForKind(kind) {
 export function shouldRunTiledEscalation(kind) {
     return kind === 'DRAWING' || kind === 'MIXED';
 }
+export function shouldUseRegionOcr(fileRole, kind) {
+    return fileRole === 'plans' && (kind === 'DRAWING' || kind === 'MIXED');
+}

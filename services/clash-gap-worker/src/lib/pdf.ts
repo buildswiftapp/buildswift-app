@@ -43,12 +43,12 @@ function canvasToJpeg(canvas: Canvas, qualityPercent = config.chunkJpegQuality):
   return canvas.toBuffer('image/jpeg', quality)
 }
 
-export async function renderPageToJpeg(
+async function renderPage(
   doc: PDFDocumentProxy,
   pageIndex: number,
   dpi: number,
-  options?: { maxWidth?: number; jpegQuality?: number },
-): Promise<Buffer> {
+  options?: { maxWidth?: number },
+): Promise<Canvas> {
   const page = await doc.getPage(pageIndex + 1)
   try {
     const viewport = viewportForPage(page, dpi, options?.maxWidth)
@@ -59,8 +59,28 @@ export async function renderPageToJpeg(
       canvasContext: ctx as never,
       viewport,
     }).promise
-    return canvasToJpeg(canvas, options?.jpegQuality)
+    return canvas
   } finally {
     await page.cleanup()
   }
+}
+
+export async function renderPageToJpeg(
+  doc: PDFDocumentProxy,
+  pageIndex: number,
+  dpi: number,
+  options?: { maxWidth?: number; jpegQuality?: number },
+): Promise<Buffer> {
+  const canvas = await renderPage(doc, pageIndex, dpi, options)
+  return canvasToJpeg(canvas, options?.jpegQuality)
+}
+
+export async function renderPageToPng(
+  doc: PDFDocumentProxy,
+  pageIndex: number,
+  dpi: number,
+  options?: { maxWidth?: number },
+): Promise<Buffer> {
+  const canvas = await renderPage(doc, pageIndex, dpi, options)
+  return canvas.toBuffer('image/png')
 }
