@@ -2,8 +2,10 @@ export const SUPABASE_PAGE_SIZE = 1000
 
 type PageResult<T> = { data: T[] | null; error: { message: string } | null }
 
+type PageFetcher<T> = (from: number, to: number) => PromiseLike<PageResult<T>>
+
 export async function fetchAllRows<T>(
-  fetchPage: (from: number, to: number) => Promise<PageResult<T>>,
+  fetchPage: PageFetcher<T>,
   pageSize = SUPABASE_PAGE_SIZE,
 ): Promise<T[]> {
   const out: T[] = []

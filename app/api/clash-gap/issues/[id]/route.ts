@@ -25,6 +25,13 @@ export async function PATCH(req: Request, { params }: Params) {
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (parsed.data.status) updates.status = parsed.data.status
+  if (parsed.data.workflow_status) updates.workflow_status = parsed.data.workflow_status
+  if (parsed.data.user_disposition !== undefined) {
+    updates.user_disposition = parsed.data.user_disposition
+  }
+  if (parsed.data.priority !== undefined) updates.priority = parsed.data.priority
+  if (parsed.data.assigned_to !== undefined) updates.assigned_to = parsed.data.assigned_to
+  if (parsed.data.due_date !== undefined) updates.due_date = parsed.data.due_date
   if (typeof parsed.data.resolved_document_id !== 'undefined') {
     updates.resolved_document_id = parsed.data.resolved_document_id
   }
@@ -37,6 +44,26 @@ export async function PATCH(req: Request, { params }: Params) {
     .single()
 
   if (error) return serverError(error.message)
+
+  if (data.project_issue_id && (parsed.data.user_disposition !== undefined || parsed.data.workflow_status)) {
+    const projectPatch: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (parsed.data.user_disposition !== undefined) {
+      projectPatch.user_disposition = parsed.data.user_disposition
+    }
+    if (parsed.data.workflow_status) {
+      projectPatch.workflow_status = parsed.data.workflow_status
+    }
+    if (parsed.data.priority !== undefined) projectPatch.priority = parsed.data.priority
+    if (parsed.data.assigned_to !== undefined) projectPatch.assigned_to = parsed.data.assigned_to
+    if (parsed.data.due_date !== undefined) projectPatch.due_date = parsed.data.due_date
+    try {
+      await supabase
+        .from('project_issues')
+        .update(projectPatch)
+        .eq('id', data.project_issue_id)
+    } catch {
+    }
+  }
 
   const action =
     parsed.data.status === 'dismissed'

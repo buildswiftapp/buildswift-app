@@ -3,16 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { apiFetch } from '@/lib/api'
-import { downloadAndSaveBlob, uploadClashGapFile, countPdfPagesClientSide } from '@/lib/api-upload'
-import {
-  clientChunkMaxPages,
-  clientChunkSkipDetail,
-  shouldClientRasterize,
-} from '@/lib/clash-gap-chunk-policy'
-import { rasterizePdfPages } from '@/lib/clash-gap-rasterize'
+import { downloadAndSaveBlob, uploadClashGapFile } from '@/lib/api-upload'
 import {
   mapApiIssueToClashGapIssue,
   type ApiClashGapAnalysisDetail,
+  type ApiClashGapAnalysisStatus,
   type ClashGapSessionMeta,
 } from '@/lib/clash-gap-api'
 
@@ -285,11 +280,16 @@ export function ClashGapDetectionPage() {
   const creatingAnalysisRef = useRef<Promise<string> | null>(null)
   const pollingRef = useRef(false)
   const savedAnalysisRef = useRef(false)
-  const fileBlobsRef = useRef<Map<string, File>>(new Map())
 
   useEffect(() => {
     analysisIdRef.current = analysisId
   }, [analysisId])
+
+  const applyStagePoll = useCallback((data: ApiClashGapAnalysisStatus) => {
+    const nextStages = parseStages(data.analysis.stages)
+    setStages(nextStages)
+    return nextStages
+  }, [])
 
   const applyAnalysis = useCallback((data: ApiClashGapAnalysisDetail) => {
     const nextStages = parseStages(data.analysis.stages)
@@ -319,21 +319,36 @@ export function ClashGapDetectionPage() {
   )
 
   const pollStage = useCallback(
-    async (id: string, stage: ClashGapStage) => {
+    async (id: string, stage: ClashGapStage, opts?: { requireRunningFirst?: boolean }) => {
       pollingRef.current = true
       const started = Date.now()
       const maxMs = 6 * 60 * 60 * 1000
-      const stallMs = 165 * 1000
-      const maxResumes = 80
+      const stallMs = stage === 'chunk' || stage === 'ocr' ? 8 * 60 * 1000 : 165 * 1000
+      const maxResumes = stage === 'chunk' || stage === 'ocr' ? 12 : 80
       let resumes = 0
       let lastProgress = -1
       let lastProgressAt = Date.now()
+      let sawRunning = !opts?.requireRunningFirst
       try {
         for (;;) {
-          const data = await apiFetch<ApiClashGapAnalysisDetail>(`/api/clash-gap/analyses/${id}`)
-          const nextStages = applyAnalysis(data)
+          const data = await apiFetch<ApiClashGapAnalysisStatus>(
+            `/api/clash-gap/analyses/${id}/status`,
+          )
+          const nextStages = applyStagePoll(data)
           const status = stageStatus(nextStages, stage)
-          if (status === 'completed') return
+          if (status === 'running') sawRunning = true
+          if (status === 'completed') {
+            if (!sawRunning) {
+              if (Date.now() - started > 30_000) {
+                await loadAnalysis(id)
+                return
+              }
+              await new Promise((r) => setTimeout(r, 1000))
+              continue
+            }
+            await loadAnalysis(id)
+            return
+          }
           if (status === 'failed') {
             throw new Error(nextStages[stage]?.error || `${STAGE_RUN_LABEL[stage]} failed`)
           }
@@ -343,22 +358,28 @@ export function ClashGapDetectionPage() {
             lastProgressAt = Date.now()
           } else if (Date.now() - lastProgressAt > stallMs) {
             if (resumes >= maxResumes || Date.now() - started > maxMs) {
-              throw new Error('Processing stalled. Click Run again to resume from where it left off.')
+              throw new Error(
+                stage === 'chunk' || stage === 'ocr'
+                  ? 'Processing is taking longer than expected. Ensure `npm run dev:worker` is running, then click Run again to resume.'
+                  : 'Processing stalled. Click Run again to resume from where it left off.',
+              )
             }
-            resumes++
-            try {
-              await apiFetch(`/api/clash-gap/analyses/${id}/stages/${stage}/run`, { method: 'POST' })
-            } catch {
+            if (stage !== 'chunk' && stage !== 'ocr') {
+              resumes++
+              try {
+                await apiFetch(`/api/clash-gap/analyses/${id}/stages/${stage}/run`, { method: 'POST' })
+              } catch {
+              }
             }
             lastProgressAt = Date.now()
           }
-          await new Promise((r) => setTimeout(r, 2500))
+          await new Promise((r) => setTimeout(r, 3000))
         }
       } finally {
         pollingRef.current = false
       }
     },
-    [applyAnalysis],
+    [applyStagePoll, loadAnalysis],
   )
 
   useEffect(() => {
@@ -430,7 +451,7 @@ export function ClashGapDetectionPage() {
           local.phase !== 'results' &&
           stageStatus(local.stages ?? {}, 'chunk') !== 'completed' &&
           ((local.rows?.length ?? 0) > 0 || !!local.analysisId)
-        if (inProgressDraft) {
+        if (inProgressDraft && local) {
           if (local.analysisId) {
             router.replace(`${CLASH_GAP_SESSION_PATH}?analysis=${local.analysisId}`)
             return
@@ -617,7 +638,6 @@ export function ClashGapDetectionPage() {
               prev.map((r) => (r.id === row.id ? { ...r, pages: displayPageCount(count) } : r)),
             ),
         })
-        fileBlobsRef.current.set(uploaded.id, row.file)
         const updated: DocumentUploadRow = {
           ...row,
           serverFileId: uploaded.id,
@@ -733,91 +753,6 @@ export function ClashGapDetectionPage() {
     return step === 'upload' || step === 'result' ? null : STEP_TO_STAGE[step]
   }, [])
 
-  const rasterizeChunkPages = useCallback(async (id: string) => {
-    setStages((prev) => ({
-      ...prev,
-      chunk: {
-        ...(prev.chunk ?? { status: 'running' }),
-        status: 'running',
-        processed: 0,
-        total: 0,
-        detail: 'Identifying pages…',
-      },
-    }))
-    const detail = await apiFetch<ApiClashGapAnalysisDetail>(`/api/clash-gap/analyses/${id}`)
-    const pdfFiles = (detail.files ?? []).filter(
-      (f) => /\.pdf$/i.test(f.file_name) || (f.mime_type ?? '').toLowerCase().includes('pdf'),
-    )
-
-    const grandTotal = pdfFiles.reduce((sum, f) => sum + (f.page_count ?? 0), 0)
-    let baseProcessed = 0
-    const serverOnly: string[] = []
-
-    for (const f of pdfFiles) {
-      const blob = fileBlobsRef.current.get(f.id)
-      let pageCount = f.page_count ?? null
-      if (pageCount == null && blob) {
-        pageCount = await countPdfPagesClientSide(blob)
-        if (pageCount != null) {
-          void apiFetch(`/api/clash-gap/analyses/${id}/files/${f.id}`, {
-            method: 'PATCH',
-            json: { page_count: pageCount },
-          }).catch(() => {})
-        }
-      }
-      if (
-        !shouldClientRasterize({
-          pageCount,
-          hasLocalFile: Boolean(blob),
-        })
-      ) {
-        const reason =
-          pageCount != null && pageCount > clientChunkMaxPages() ? 'large_pdf' : 'no_local_file'
-        serverOnly.push(clientChunkSkipDetail({ fileName: f.file_name, reason, pageCount }))
-        continue
-      }
-
-      const result = await rasterizePdfPages({
-        analysisId: id,
-        fileId: f.id,
-        file: blob!,
-        fileLabel: f.file_name,
-        onProgress: (p) =>
-          setStages((prev) => ({
-            ...prev,
-            chunk: {
-              ...(prev.chunk ?? { status: 'running' }),
-              status: 'running',
-              processed: baseProcessed + p.processed,
-              total: Math.max(grandTotal, baseProcessed + p.total),
-              detail: p.pageLabel,
-            },
-          })),
-      })
-      baseProcessed += result.pages
-    }
-
-    if (serverOnly.length) {
-      const detailText = serverOnly.join(' · ')
-      setStages((prev) => ({
-        ...prev,
-        chunk: {
-          ...(prev.chunk ?? { status: 'running' }),
-          status: 'running',
-          processed: baseProcessed,
-          total: Math.max(grandTotal, baseProcessed) || undefined,
-          detail: detailText,
-        },
-      }))
-      if (serverOnly.length === pdfFiles.length) {
-        toast.info(
-          `Large or remote PDFs are processed on the server (resumable). Browser limit: ${clientChunkMaxPages()} pages per file.`,
-          { duration: 6000 },
-        )
-      }
-    }
-  }, [])
-
   const runStage = useCallback(
     async (stage: ClashGapStage) => {
       if (runningStage) return
@@ -827,7 +762,6 @@ export function ClashGapDetectionPage() {
 
         if (stage === 'chunk') {
           await ensureUploadsReady(id)
-          await rasterizeChunkPages(id)
         }
         if (stage === 'detect') {
           await apiFetch(`/api/clash-gap/analyses/${id}`, {
@@ -843,7 +777,9 @@ export function ClashGapDetectionPage() {
         }
 
         await apiFetch(`/api/clash-gap/analyses/${id}/stages/${stage}/run`, { method: 'POST' })
-        await pollStage(id, stage)
+        await pollStage(id, stage, {
+          requireRunningFirst: stageStatus(stages, stage) === 'completed',
+        })
         toast.success(`${STAGE_RUN_LABEL[stage][0]!.toUpperCase()}${STAGE_RUN_LABEL[stage].slice(1)} complete.`)
         
         if (stage === 'chunk') setActiveStep('ocr')
@@ -860,11 +796,11 @@ export function ClashGapDetectionPage() {
       runningStage,
       ensureAnalysis,
       ensureUploadsReady,
-      rasterizeChunkPages,
       pollStage,
       settings,
       selectedTrades,
       rows,
+      stages,
     ],
   )
 
@@ -1194,7 +1130,7 @@ export function ClashGapDetectionPage() {
       {
         id: 'detection',
         title: 'Detection',
-        description: 'Find gaps, clashes & mismatches.',
+        description: 'Parallel classify, vision enrich, then INSIGHT (with plan images when helpful).',
         status: stepDisplayStatus('detection'),
       },
       {
@@ -1235,13 +1171,15 @@ export function ClashGapDetectionPage() {
     const meta: Record<typeof step, { title: string; description: string; runLabel: string; gateHint: string }> = {
       chunk: {
         title: 'Chunk — split PDFs into page images',
-        description: `Every PDF page becomes a single image (a 5-page PDF → 5 images). Uploaded images count as one page each. PDFs over ${clientChunkMaxPages()} pages are processed on the server so you can refresh or close the tab without losing progress.`,
+        description:
+          'PDFs are split into one JPEG per page on the clash-gap worker (local or Cloud Run). Uploaded images count as one page each. You can refresh or close the tab — processing continues on the worker.',
         runLabel: 'chunking',
         gateHint: 'Upload at least one document on the Upload step first.',
       },
       ocr: {
         title: 'OCR — read text from each image',
-        description: 'Each page image is transcribed with OpenAI vision OCR, then merged into one text stream per document.',
+        description:
+          'Plans use region OCR (title block, legend/notes, 2×2 plan grid) at 500 DPI PNG. Results are cached by file hash for fast re-runs. Specs use embedded text when available.',
         runLabel: 'OCR',
         gateHint: 'Run the Chunk stage first.',
       },
@@ -1422,7 +1360,7 @@ export function ClashGapDetectionPage() {
         {activeStep === 'detection' ? (
           <StagePanel
             title="Detection — gaps, clashes & mismatches"
-            description="Drawings are reviewed against the specifications. Each finding traces back to a specific requirement."
+            description="Sheets are classified in parallel, weak plan OCR is vision-enriched, then INSIGHT compares drawings to specs — attaching plan images for small batches when OCR is thin."
             status={runningStage === 'detect' ? 'running' : stageStatus(stages, 'detect')}
             detail={stages.detect?.detail}
             error={stages.detect?.error}

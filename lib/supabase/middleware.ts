@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { resilientFetch } from '@/lib/server/resilient-fetch'
 import { getSupabaseEnv } from './shared'
 
 export async function updateSession(request: NextRequest) {
@@ -9,11 +10,12 @@ export async function updateSession(request: NextRequest) {
 
   const env = getSupabaseEnv()
   if (!env) {
-    return { response, session: null, enabled: false as const }
+    return { response, user: null, enabled: false as const }
   }
   const { supabaseUrl, supabaseAnonKey } = env
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    global: { fetch: resilientFetch },
     cookies: {
       getAll() {
         return request.cookies.getAll()
@@ -27,9 +29,12 @@ export async function updateSession(request: NextRequest) {
     },
   })
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-
-  return { response, session, enabled: true as const }
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    return { response, user, enabled: true as const }
+  } catch {
+    return { response, user: null, enabled: false as const }
+  }
 }

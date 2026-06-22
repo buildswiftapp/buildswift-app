@@ -1,4 +1,3 @@
-import { after } from 'next/server'
 import { badRequest, forbidden, notFound, ok, serverError, unauthorized } from '@/lib/server/api-response'
 import { getAuthContext } from '@/lib/server/auth'
 import { assertCanRunClashGapReport, assertCanUseAiAssist } from '@/lib/server/billing'
@@ -51,17 +50,13 @@ export async function POST(req: Request, { params }: Params) {
     userEmail: auth.user.email ?? null,
   }
 
-  after(async () => {
-    try {
-      await runClashGapPipeline(job)
-    } catch (e) {
-      const message = formatClashGapError(e)
-      await updateAnalysisStep(job.supabase, job.analysisId, {
-        status: 'failed',
-        processing_step: 'done',
-        error_message: message,
-      })
-    }
+  void runClashGapPipeline(job).catch(async (e) => {
+    const message = formatClashGapError(e)
+    await updateAnalysisStep(job.supabase, job.analysisId, {
+      status: 'failed',
+      processing_step: 'done',
+      error_message: message,
+    })
   })
 
   return ok({ analysisId: id, status: 'processing' })

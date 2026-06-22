@@ -1,0 +1,26 @@
+{
+  "name": "buildswift-clash-gap-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node --env-file=.env dist/index.js"
+  },
+  "dependencies": {
+    "@google-cloud/vision": "^5.3.4",
+    "@napi-rs/canvas": "0.1.80",
+    "@supabase/supabase-js": "^2.103.0",
+    "fastify": "^5.2.1",
+    "p-limit": "^6.2.0",
+    "pdfjs-dist": "5.4.296",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

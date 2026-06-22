@@ -3,7 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node scripts/build-pdf-worker.mjs && next dev",
+    "dev": "node scripts/build-pdf-worker.mjs && node scripts/ensure-dev-env.mjs && node scripts/ensure-dev-cache.mjs && next dev -H 0.0.0.0",
+    "dev:clean": "rm -rf .next && node scripts/build-pdf-worker.mjs && node scripts/ensure-dev-env.mjs && next dev",
+    "dev:worker": "node scripts/ensure-dev-env.mjs && npm run dev --prefix services/clash-gap-worker",
+    "warm:dev": "node scripts/warm-dev-routes.mjs",
+    "setup:env": "node scripts/ensure-dev-env.mjs",
+    "dev:webpack": "node scripts/build-pdf-worker.mjs && node scripts/ensure-dev-cache.mjs && next dev --webpack",
     "build": "node scripts/build-pdf-worker.mjs && next build",
     "start": "next start",
     "lint": "eslint .",

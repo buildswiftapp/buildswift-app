@@ -3,7 +3,7 @@ import { writeAuditLog } from '@/lib/server/audit'
 import { getAuthContext } from '@/lib/server/auth'
 import { createSupabaseAdminClient } from '@/lib/server/supabase-admin'
 import { createSupabaseServerClient } from '@/lib/server/supabase-server'
-import { getStripeClient } from '@/lib/server/stripe'
+import { getStripeClient, readSubscriptionPeriod } from '@/lib/server/stripe'
 
 export async function POST(req: Request) {
   const auth = await getAuthContext(req)
@@ -57,9 +57,7 @@ export async function POST(req: Request) {
       cancel_at_period_end: true,
     })
       const cancelAt = updated.cancel_at ? new Date(updated.cancel_at * 1000).toISOString() : null
-      const currentPeriodEnd = updated.current_period_end
-        ? new Date(updated.current_period_end * 1000).toISOString()
-        : null
+      const { currentPeriodEnd } = readSubscriptionPeriod(updated)
       const { error: updateErr } = await (supabase.from('accounts' as any) as any)
         .update({
           cancel_at: cancelAt,

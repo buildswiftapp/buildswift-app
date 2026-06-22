@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { apiFetch } from '@/lib/api'
 import { createSupabaseBrowserClient } from '@/lib/supabase/client'
 
 export default function LoginPage() {
@@ -25,10 +26,10 @@ export default function LoginPage() {
       if (!supabase) return
 
       const {
-        data: { session },
-      } = await supabase.auth.getSession()
+        data: { user },
+      } = await supabase.auth.getUser()
 
-      if (session) {
+      if (user) {
         router.replace('/dashboard')
       }
     }
@@ -53,18 +54,21 @@ export default function LoginPage() {
       return
     }
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: formData.email,
-      password: formData.password,
-    })
-
-    if (signInError) {
-      setError(signInError.message)
+    try {
+      await apiFetch('/api/auth/login', {
+        method: 'POST',
+        json: {
+          email: formData.email.trim(),
+          password: formData.password,
+        },
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not sign in. Check your email and password.')
       setIsLoading(false)
       return
     }
 
-    router.replace('/dashboard')
+    window.location.assign('/dashboard')
   }
 
   return (

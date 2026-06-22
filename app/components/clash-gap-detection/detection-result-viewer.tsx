@@ -298,7 +298,8 @@ export function DetectionResultViewer(props: {
                     Transcribed text
                   </h4>
                   <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-3 text-[11px] leading-relaxed text-[#334155]">
-                    {current.ocrText.trim() || '(no text recognized on this page)'}
+                    {(current.rawText.trim() || current.ocrText.trim()) ||
+                      '(no text recognized on this page)'}
                   </pre>
                 </div>
               </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, type ElementType } from 'react'
+import { useEffect, useMemo, useState, Suspense, type ElementType } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { BrickWall, Check, FileDown, FolderKanban, HardDrive, Shield, Sparkles, Sprout, Star } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
@@ -41,13 +41,12 @@ const TIER_ICONS: Record<'trial' | 'starter' | 'professional' | 'business', Elem
   business: Shield,
 }
 
-export default function BillingPage() {
+function BillingPageContent() {
   const searchParams = useSearchParams()
   const [summary, setSummary] = useState<BillingSummary | null>(null)
   const [loadingSummary, setLoadingSummary] = useState(true)
   const [fetchingSummaryCount, setFetchingSummaryCount] = useState(0)
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null)
-  const [schedulingDowngrade, setSchedulingDowngrade] = useState(false)
   const [cancelingDowngrade, setCancelingDowngrade] = useState(false)
   const [checkoutNotice, setCheckoutNotice] = useState<{
     tone: 'success' | 'error' | 'info'
@@ -84,6 +83,16 @@ export default function BillingPage() {
     return diff
   }, [summary?.trial_end_date])
 
+  const scheduledDowngradeTargetLabel = useMemo(() => {
+    if (!summary?.cancel_at) return 'Free Trial'
+    if (summary.tier === 'business') return 'Professional'
+    if (summary.tier === 'professional') return 'Starter'
+    return 'Free Trial'
+  }, [summary?.cancel_at, summary?.tier])
+
+  const isPaidTier = (tier: AppBillingTier | undefined) =>
+    tier === 'starter' || tier === 'professional' || tier === 'business'
+
   const warn = (used: number, limit: number | null) => {
     if (limit === null) return false
     if (!Number.isFinite(limit) || limit <= 0) return false
@@ -113,7 +122,7 @@ export default function BillingPage() {
         try {
           const data = await apiFetch<BillingSummary>('/api/billing/summary')
           setSummary(data)
-          if (data.tier !== 'free' || data.billing_status === 'active') return data
+          if (data.billing_status === 'active' && isPaidTier(data.tier)) return data
         } catch {
         }
         if (i < attempts - 1) {
@@ -224,6 +233,21 @@ export default function BillingPage() {
     }
   }
 
+  const handleCancelScheduledDowngrade = async () => {
+    try {
+      setCancelingDowngrade(true)
+      const result = await apiFetch<{ canceled: boolean; message: string }>('/api/billing/cancel-downgrade', {
+        method: 'POST',
+      })
+      await loadBillingSummary()
+      toast.success(result.message)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to cancel scheduled downgrade')
+    } finally {
+      setCancelingDowngrade(false)
+    }
+  }
+
   const tierForPlan = (plan: AppBillingPlan): AppBillingTier => {
     if (plan.planId === 'plan-business') return 'business'
     if (plan.planId === 'plan-professional') return 'professional'
@@ -297,7 +321,7 @@ export default function BillingPage() {
             {checkoutNotice.message}
           </div>
         ) : null}
-        {summary?.tier !== 'free' && cancelAtLabel ? (
+        {isPaidTier(summary?.tier) && cancelAtLabel ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             <p>
               {`Plan: ${bannerPlanName} (changes on ${cancelAtLabel}). You keep full ${bannerPlanName} access until this date, then your account switches to ${scheduledDowngradeTargetLabel} automatically.`}
@@ -314,7 +338,7 @@ export default function BillingPage() {
             </div>
           </div>
         ) : null}
-        {summary?.tier !== 'free' && !cancelAtLabel && currentPeriodEndLabel ? (
+        {isPaidTier(summary?.tier) && !cancelAtLabel && currentPeriodEndLabel ? (
           <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
             <p>
               {`Plan: ${bannerPlanName} renews on ${currentPeriodEndLabel}. This is your current billing period expiration date.`}
@@ -559,5 +583,13 @@ export default function BillingPage() {
 
       </div>
     </div>
+  )
+}
+
+export default function BillingPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-muted-foreground">Loading billing…</div>}>
+      <BillingPageContent />
+    </Suspense>
   )
 }
