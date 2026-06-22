@@ -146,8 +146,8 @@ export function AppSidebarWithProjects({ collapsed, onToggleSidebar }: AppSideba
           >
             <Building2 className="h-7 w-7 shrink-0 text-white" strokeWidth={1.7} aria-hidden />
             <span className="truncate text-[22px] font-bold leading-tight tracking-tight">
-              <span className="text-[#4f6cff]">Build</span>
-              <span className="text-[#f97316]">Swift</span>
+              <span className="text-[#4f6cff]">In</span>
+              <span className="text-[#f97316]">sight</span>
             </span>
           </Link>
           <Button
